@@ -7,4 +7,5 @@ dist
 *.db
 *.db-journal
 lancedb
+logs
 .DS_Store

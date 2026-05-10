@@ -9,6 +9,7 @@ import { getVectorCollection } from '../db/vector.js';
 import { generateArticleSummary, getOpenCodeGoEmbeddingModel } from '../services/ai.js';
 import { fetchHatenaBookmarks } from '../services/hatena.js';
 import { getSiteArticles, type ScrapedArticle } from '../services/scraper.js';
+import { logger } from '../utils/logger.js';
 import { sleep } from '../utils/sleep.js';
 
 const minimumArticleDelayMs = 1_000;
@@ -34,6 +35,7 @@ function buildEmbeddingTexts(article: ScrapedArticle, summary: string): string[]
 }
 
 export async function syncSite(siteUrl: string): Promise<void> {
+  logger.info('サイト同期を開始します。', { siteUrl });
   const siteArticles = await getSiteArticles(siteUrl);
   const embeddingModel = getOpenCodeGoEmbeddingModel();
   const vectorCollection = await getVectorCollection();
@@ -92,6 +94,8 @@ export async function syncSite(siteUrl: string): Promise<void> {
       ]);
     }
   }
+
+  logger.info('サイト同期が完了しました。', { siteUrl, articles: siteArticles.length });
 }
 
 export async function syncAllSubscriptions(): Promise<void> {
@@ -102,12 +106,12 @@ export async function syncAllSubscriptions(): Promise<void> {
     .from(subscriptions);
 
   if (subscribedSites.length === 0) {
-    console.log('購読サイトがありません。');
+    logger.info('購読サイトがありません。');
     return;
   }
 
   for (const [index, subscription] of subscribedSites.entries()) {
-    console.log(`同期中: ${subscription.siteUrl}`);
+    logger.info('購読サイトを同期します。', { siteUrl: subscription.siteUrl });
     await syncSite(subscription.siteUrl);
 
     if (index < subscribedSites.length - 1) {
