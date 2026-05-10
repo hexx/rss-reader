@@ -1,13 +1,15 @@
 import express from 'express';
-import { count, desc, eq, inArray } from 'drizzle-orm';
+import { and, count, desc, eq, inArray } from 'drizzle-orm';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { db } from '../db/index.js';
 import { articles, hatenaBookmarks, subscriptions } from '../db/schema.js';
+import { generateRagAnswer } from '../services/ai.js';
 import { searchArticles } from '../services/search.js';
 import { syncAllSubscriptions } from '../workflows/sync.js';
 import { logger } from '../utils/logger.js';
+import type { SearchArticleResult } from '../services/search.js';
 
 type ArticleResponse = {
   bookmarks: Array<{
@@ -91,7 +93,19 @@ function createArticleResponse(
   };
 }
 
-async function fetchArticles(sourceUrl?: string): Promise<ArticleRow[]> {
+function buildRagContexts(results: SearchArticleResult[]): string[] {
+  return results.map((result) =>
+    [
+      `タイトル: ${result.title}`,
+      result.summary.trim().length > 0 ? `記事要約: ${result.summary}` : null,
+      result.hatenaSummary.trim().length > 0 ? `はてブ要約: ${result.hatenaSummary}` : null,
+    ]
+      .filter((line): line is string => line !== null)
+      .join('\n'),
+  );
+}
+
+async function fetchArticles(sourceUrl?: string, unreadOnly = false): Promise<ArticleRow[]> {
   const query = db
     .select({
       content: articles.content,
@@ -106,9 +120,18 @@ async function fetchArticles(sourceUrl?: string): Promise<ArticleRow[]> {
     })
     .from(articles);
 
-  return sourceUrl
-    ? await query.where(eq(articles.siteUrl, sourceUrl)).orderBy(desc(articles.createdAt))
-    : await query.orderBy(desc(articles.createdAt));
+  const filters = [];
+  if (sourceUrl) {
+    filters.push(eq(articles.siteUrl, sourceUrl));
+  }
+
+  if (unreadOnly) {
+    filters.push(eq(articles.isRead, false));
+  }
+
+  const filteredQuery = filters.length > 0 ? query.where(and(...filters)) : query;
+
+  return await filteredQuery.orderBy(desc(articles.createdAt));
 }
 
 async function fetchBookmarksByArticleIds(articleIds: string[]): Promise<BookmarkRow[]> {
@@ -140,8 +163,9 @@ export function createApp() {
         typeof request.query.source === 'string' && request.query.source.trim().length > 0
           ? request.query.source.trim()
           : undefined;
+      const unreadOnly = request.query.unread_only === 'true';
 
-      const articleRows = await fetchArticles(sourceUrl);
+      const articleRows = await fetchArticles(sourceUrl, unreadOnly);
       const bookmarkRows = await fetchBookmarksByArticleIds(articleRows.map((article) => article.id));
 
       const bookmarksByArticleId = new Map<string, BookmarkRow[]>();
@@ -189,6 +213,11 @@ export function createApp() {
   app.get('/api/search', async (request, response, next) => {
     try {
       const query = typeof request.query.q === 'string' ? request.query.q : '';
+      if (query.trim().length === 0) {
+        response.json({ results: [], aiAnswer: '' });
+        return;
+      }
+
       if (
         query.trim().length > 0 &&
         (process.env.OPENCODE_GO_BASE_URL === undefined || process.env.OPENCODE_GO_API_KEY === undefined)
@@ -200,7 +229,8 @@ export function createApp() {
       }
 
       const results = await searchArticles(query);
-      response.json({ results });
+      const aiAnswer = await generateRagAnswer(query, buildRagContexts(results));
+      response.json({ results, aiAnswer });
     } catch (error) {
       next(error);
     }

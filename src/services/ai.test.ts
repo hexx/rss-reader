@@ -20,6 +20,7 @@ import {
   generateEmbedding,
   generateEmbeddings,
   generateHatenaSummary,
+  generateRagAnswer,
 } from './ai.js';
 
 const generateTextMock = vi.mocked(generateText);
@@ -107,5 +108,19 @@ describe('generateArticleSummary', () => {
       model: 'embedding-model',
       values: ['first', 'second'],
     });
+  });
+
+  it('generates a RAG answer from contexts', async () => {
+    generateTextMock.mockResolvedValue({ text: 'RAGの回答' } as never);
+
+    await expect(generateRagAnswer('質問ですか？', ['コンテキスト1', 'コンテキスト2'])).resolves.toBe('RAGの回答');
+
+    const callArgs = generateTextMock.mock.calls[0]?.[0];
+    expect(callArgs).toBeDefined();
+    expect(callArgs?.system).toContain('提供されたコンテキストのみを使って回答してください');
+    expect(callArgs?.system).toContain('情報が足りない場合は、推測せずにわからないと答えてください');
+    expect(callArgs?.prompt).toContain('質問: 質問ですか？');
+    expect(callArgs?.prompt).toContain('コンテキスト1');
+    expect(callArgs?.prompt).toContain('コンテキスト2');
   });
 });

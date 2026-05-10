@@ -29,16 +29,27 @@
 
         <main class="layout">
           <section class="panel">
-            <form id="search-form" class="search-form">
-              <input
-                id="search-input"
-                name="query"
-                type="search"
-                placeholder="記事を自然言語で検索"
-                autocomplete="off"
-              />
-              <button type="submit">Search</button>
-            </form>
+            <div class="search-toolbar">
+              <form id="search-form" class="search-form">
+                <input
+                  id="search-input"
+                  name="query"
+                  type="search"
+                  placeholder="記事を自然言語で検索"
+                  autocomplete="off"
+                />
+                <button type="submit">Search</button>
+              </form>
+              <label class="search-filter">
+                <input id="unread-only-toggle" type="checkbox" />
+                未読のみ表示
+              </label>
+            </div>
+
+            <section id="ai-answer-section" class="ai-answer" aria-live="polite" hidden>
+              <h2>AIの回答</h2>
+              <p id="ai-answer" class="ai-answer__text"></p>
+            </section>
 
             <p id="status" class="status">読み込み中...</p>
 
@@ -68,6 +79,7 @@
           <h3>はてブの反応</h3>
           <p class="card__hatena-summary"></p>
         </section>
+        <a class="card__article-link" target="_blank" rel="noreferrer">記事を読む</a>
         <div class="card__comments-heading">個別コメント</div>
         <ul class="comments"></ul>
       </article>

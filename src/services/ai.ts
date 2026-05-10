@@ -39,6 +39,20 @@ function buildHatenaSummaryPrompt(comments: HatenaBookmarkComment[]): string {
   ].join('\n');
 }
 
+function buildRagPrompt(query: string, contexts: string[]): string {
+  const contextBlock = contexts.length > 0 ? contexts.map((context) => `- ${context}`).join('\n') : '（なし）';
+
+  return [
+    '提供されたコンテキストに基づいて質問に答えてください。',
+    'わからない場合は、推測せずにわからないと答えてください。',
+    '',
+    `質問: ${query}`,
+    '',
+    'コンテキスト:',
+    contextBlock,
+  ].join('\n');
+}
+
 function createOpenCodeGoProvider() {
   const baseURL = requireEnv('OPENCODE_GO_BASE_URL');
   const apiKey = requireEnv('OPENCODE_GO_API_KEY');
@@ -82,6 +96,17 @@ export async function generateHatenaSummary(comments: HatenaBookmarkComment[]): 
     model: getOpenCodeGoChatModel(),
     system: 'あなたは日本語の要約アシスタントです。はてなブックマークのコメントの雰囲気を簡潔に要約してください。',
     prompt: buildHatenaSummaryPrompt(comments),
+  });
+
+  return result.text.trim();
+}
+
+export async function generateRagAnswer(query: string, contexts: string[]): Promise<string> {
+  const result = await generateText({
+    model: getOpenCodeGoChatModel(),
+    system:
+      'あなたは日本語のRAGアシスタントです。提供されたコンテキストのみを使って回答してください。情報が足りない場合は、推測せずにわからないと答えてください。',
+    prompt: buildRagPrompt(query, contexts),
   });
 
   return result.text.trim();
