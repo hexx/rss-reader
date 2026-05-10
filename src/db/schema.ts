@@ -27,5 +27,14 @@ export const hatenaBookmarks = sqliteTable('hatena_bookmarks', {
     .default(createdAtDefault),
 });
 
+export const subscriptions = sqliteTable('subscriptions', {
+  id: text('id').primaryKey(),
+  siteUrl: text('site_url').notNull().unique(),
+  addedAt: integer('added_at', { mode: 'timestamp_ms' })
+    .notNull()
+    .default(createdAtDefault),
+});
+
 export type Article = InferSelectModel<typeof articles>;
 export type HatenaBookmark = InferSelectModel<typeof hatenaBookmarks>;
+export type Subscription = InferSelectModel<typeof subscriptions>;
