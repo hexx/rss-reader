@@ -34,8 +34,8 @@ async function subscribeSite(siteUrl: string): Promise<void> {
   console.log(`購読を追加しました: ${normalizedSiteUrl}`);
 }
 
-async function syncSubscriptions(): Promise<void> {
-  await syncAllSubscriptions();
+async function syncSubscriptions(debug = false): Promise<void> {
+  await syncAllSubscriptions(debug);
   console.log('同期が完了しました。');
 }
 
@@ -60,7 +60,8 @@ const program = new Command();
 program
   .name('rss-reader')
   .description('理想のRSSリーダー CLI')
-  .version('1.0.0');
+  .version('1.0.0')
+  .option('-d, --debug', 'デバッグモードで実行する');
 
 program
   .command('subscribe')
@@ -74,7 +75,7 @@ program
   .command('sync')
   .description('登録済みのサイトを同期する')
   .action(async () => {
-    await syncSubscriptions();
+    await syncSubscriptions(Boolean(program.opts().debug));
   });
 
 program

@@ -182,6 +182,29 @@ describe('syncSite', () => {
     );
   });
 
+  it('fails fast in debug mode when an article sync fails', async () => {
+    const db = await setupDatabase();
+    const vectorAddMock = vi.fn().mockResolvedValue(1);
+    const { syncSite } = await import('./sync.js');
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+    fetchRssOrFallbackMock.mockResolvedValue([article]);
+    fetchArticleContentMock.mockRejectedValue(new Error('scrape failed'));
+    getVectorCollectionMock.mockResolvedValue({ add: vectorAddMock } as never);
+
+    await expect(syncSite(siteUrl, true)).rejects.toThrow('scrape failed');
+
+    expect(fetchHatenaBookmarksMock).not.toHaveBeenCalled();
+    expect(generateArticleSummaryMock).not.toHaveBeenCalled();
+    expect(generateEmbeddingMock).not.toHaveBeenCalled();
+    expect(vectorAddMock).not.toHaveBeenCalled();
+    expect(loggerMock.warn).not.toHaveBeenCalled();
+    expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining('scrape failed'));
+
+    consoleErrorSpy.mockRestore();
+    expect(await db.select().from(articles)).toHaveLength(0);
+  });
+
   it('skips articles that already exist in SQLite', async () => {
     const db = await setupDatabase();
     const vectorAddMock = vi.fn().mockResolvedValue(1);

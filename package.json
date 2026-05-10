@@ -10,6 +10,7 @@
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "cli": "tsx src/cli.ts",
+    "cli:debug": "tsx src/cli.ts --debug",
     "serve": "tsx src/server/index.ts",
     "cron": "tsx src/cron.ts",
     "start:all": "concurrently -n server,cron -c cyan,magenta --kill-others-on-fail \"npm run serve\" \"npm run cron\"",
