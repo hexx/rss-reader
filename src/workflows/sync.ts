@@ -1,12 +1,11 @@
 import { randomUUID } from 'node:crypto';
 
-import { embed } from 'ai';
 import { eq } from 'drizzle-orm';
 
 import { db } from '../db/index.js';
 import { articles, hatenaBookmarks, subscriptions } from '../db/schema.js';
 import { getVectorCollection } from '../db/vector.js';
-import { generateArticleSummary, getOpenCodeGoEmbeddingModel } from '../services/ai.js';
+import { generateArticleSummary, generateEmbedding } from '../services/ai.js';
 import { fetchHatenaBookmarks } from '../services/hatena.js';
 import { getSiteArticles, type ScrapedArticle } from '../services/scraper.js';
 import { logger } from '../utils/logger.js';
@@ -37,7 +36,6 @@ function buildEmbeddingTexts(article: ScrapedArticle, summary: string): string[]
 export async function syncSite(siteUrl: string): Promise<void> {
   logger.info('サイト同期を開始します。', { siteUrl });
   const siteArticles = await getSiteArticles(siteUrl);
-  const embeddingModel = getOpenCodeGoEmbeddingModel();
   const vectorCollection = await getVectorCollection();
 
   for (const article of siteArticles) {
@@ -80,10 +78,7 @@ export async function syncSite(siteUrl: string): Promise<void> {
 
     const embeddingTexts = buildEmbeddingTexts(article, summary);
     for (const text of embeddingTexts) {
-      const { embedding } = await embed({
-        model: embeddingModel,
-        value: text,
-      });
+      const embedding = await generateEmbedding(text);
 
       await vectorCollection.add([
         {

@@ -1,10 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-vi.mock('ai', () => ({
-  embed: vi.fn(),
-  generateText: vi.fn(),
-}));
-
 vi.mock('../services/scraper.js', () => ({
   getSiteArticles: vi.fn(),
 }));
@@ -22,22 +17,21 @@ vi.mock('../services/ai.js', async () => {
   return {
     ...actual,
     generateArticleSummary: vi.fn(),
+    generateEmbedding: vi.fn(),
   };
 });
 
-import { embed } from 'ai';
-
 import { articles, hatenaBookmarks } from '../db/schema.js';
 import { fetchHatenaBookmarks } from '../services/hatena.js';
-import { generateArticleSummary } from '../services/ai.js';
+import { generateArticleSummary, generateEmbedding } from '../services/ai.js';
 import { getSiteArticles } from '../services/scraper.js';
 import { getVectorCollection } from '../db/vector.js';
 
 const getSiteArticlesMock = vi.mocked(getSiteArticles);
 const fetchHatenaBookmarksMock = vi.mocked(fetchHatenaBookmarks);
 const generateArticleSummaryMock = vi.mocked(generateArticleSummary);
+const generateEmbeddingMock = vi.mocked(generateEmbedding);
 const getVectorCollectionMock = vi.mocked(getVectorCollection);
-const embedMock = vi.mocked(embed);
 
 const siteUrl = 'https://example.com/';
 const article = {
@@ -60,13 +54,12 @@ describe('syncSite', () => {
     vi.stubEnv('OPENCODE_GO_BASE_URL', 'https://opencode.example/v1');
     vi.stubEnv('OPENCODE_GO_API_KEY', 'test-api-key');
     vi.stubEnv('OPENCODE_GO_MODEL', 'test-model');
-    vi.stubEnv('OPENCODE_GO_EMBEDDING_MODEL', 'test-embedding-model');
 
     getSiteArticlesMock.mockReset();
     fetchHatenaBookmarksMock.mockReset();
     generateArticleSummaryMock.mockReset();
+    generateEmbeddingMock.mockReset();
     getVectorCollectionMock.mockReset();
-    embedMock.mockReset();
   });
 
   afterEach(() => {
@@ -106,8 +99,8 @@ describe('syncSite', () => {
     getSiteArticlesMock.mockResolvedValue([article]);
     fetchHatenaBookmarksMock.mockResolvedValue(bookmarks);
     generateArticleSummaryMock.mockResolvedValue('要約文');
+    generateEmbeddingMock.mockResolvedValue([0.1, 0.2]);
     getVectorCollectionMock.mockResolvedValue({ add: vectorAddMock } as never);
-    embedMock.mockResolvedValue({ embedding: [0.1, 0.2] } as never);
 
     await syncSite(siteUrl);
 
@@ -129,6 +122,7 @@ describe('syncSite', () => {
     expect(vectorAddMock).toHaveBeenCalledTimes(2);
     expect(fetchHatenaBookmarksMock).toHaveBeenCalledWith(article.url);
     expect(generateArticleSummaryMock).toHaveBeenCalledWith(article.title, article.content, bookmarks);
+    expect(generateEmbeddingMock).toHaveBeenCalledTimes(2);
   });
 
   it('skips articles that already exist in SQLite', async () => {
@@ -147,13 +141,14 @@ describe('syncSite', () => {
     getSiteArticlesMock.mockResolvedValue([article]);
     fetchHatenaBookmarksMock.mockResolvedValue(bookmarks);
     generateArticleSummaryMock.mockResolvedValue('要約文');
+    generateEmbeddingMock.mockResolvedValue([0.1, 0.2]);
     getVectorCollectionMock.mockResolvedValue({ add: vectorAddMock } as never);
-    embedMock.mockResolvedValue({ embedding: [0.1, 0.2] } as never);
 
     await syncSite(siteUrl);
 
     expect(fetchHatenaBookmarksMock).not.toHaveBeenCalled();
     expect(generateArticleSummaryMock).not.toHaveBeenCalled();
+    expect(generateEmbeddingMock).not.toHaveBeenCalled();
     expect(vectorAddMock).not.toHaveBeenCalled();
     expect(await db.select().from(articles)).toHaveLength(1);
   });

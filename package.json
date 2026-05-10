@@ -31,6 +31,7 @@
   },
   "homepage": "https://github.com/hexx/rss-reader#readme",
   "dependencies": {
+    "@ai-sdk/openai": "^3.0.63",
     "@ai-sdk/openai-compatible": "^2.0.47",
     "@lancedb/lancedb": "^0.27.2",
     "ai": "^6.0.177",

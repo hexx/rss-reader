@@ -1,10 +1,10 @@
+import { openai } from '@ai-sdk/openai';
+import { embed, generateText } from 'ai';
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
-import { generateText } from 'ai';
 
 import type { HatenaBookmarkComment } from './hatena.js';
 
 const defaultModelId = 'opencode-go';
-const defaultEmbeddingModelId = 'opencode-go-embedding';
 
 function requireEnv(name: string): string {
   const value = process.env[name];
@@ -49,11 +49,6 @@ export function getOpenCodeGoChatModel() {
   return createOpenCodeGoProvider().chatModel(modelId);
 }
 
-export function getOpenCodeGoEmbeddingModel() {
-  const modelId = process.env.OPENCODE_GO_EMBEDDING_MODEL?.trim() || defaultEmbeddingModelId;
-  return createOpenCodeGoProvider().embeddingModel(modelId);
-}
-
 export async function generateArticleSummary(
   title: string,
   content: string,
@@ -66,4 +61,13 @@ export async function generateArticleSummary(
   });
 
   return result.text.trim();
+}
+
+export async function generateEmbedding(text: string): Promise<number[]> {
+  const result = await embed({
+    model: openai.embedding('text-embedding-3-small'),
+    value: text,
+  });
+
+  return result.embedding;
 }

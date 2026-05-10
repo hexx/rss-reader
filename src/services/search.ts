@@ -1,10 +1,9 @@
-import { embed } from 'ai';
 import { inArray } from 'drizzle-orm';
 
 import { db } from '../db/index.js';
 import { articles } from '../db/schema.js';
 import { getVectorCollection } from '../db/vector.js';
-import { getOpenCodeGoEmbeddingModel } from './ai.js';
+import { generateEmbedding } from './ai.js';
 
 export interface SearchArticleResult {
   id: string;
@@ -29,11 +28,7 @@ export async function searchArticles(query: string): Promise<SearchArticleResult
     return [];
   }
 
-  const vectorModel = getOpenCodeGoEmbeddingModel();
-  const { embedding } = await embed({
-    model: vectorModel,
-    value: normalizedQuery,
-  });
+  const embedding = await generateEmbedding(normalizedQuery);
 
   const collection = await getVectorCollection();
   const chunkResults = (await collection.search(embedding).limit(maxSearchHits).toArray()) as SearchChunkResult[];
