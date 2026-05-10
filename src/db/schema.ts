@@ -1,0 +1,40 @@
+import { sql } from 'drizzle-orm';
+import { integer, sqliteTable, text } from 'drizzle-orm/sqlite-core';
+import type { InferSelectModel } from 'drizzle-orm';
+
+const createdAtDefault = sql<number>`(cast((julianday('now') - 2440587.5) * 86400000 as integer))`;
+
+export const articles = sqliteTable('articles', {
+  id: text('id').primaryKey(),
+  url: text('url').notNull().unique(),
+  title: text('title').notNull(),
+  content: text('content'),
+  summary: text('summary'),
+  createdAt: integer('created_at', { mode: 'timestamp_ms' })
+    .notNull()
+    .default(createdAtDefault),
+});
+
+export const hatenaBookmarks = sqliteTable('hatena_bookmarks', {
+  id: text('id').primaryKey(),
+  articleId: text('article_id')
+    .notNull()
+    .references(() => articles.id, { onDelete: 'cascade' }),
+  user: text('user').notNull(),
+  comment: text('comment'),
+  createdAt: integer('created_at', { mode: 'timestamp_ms' })
+    .notNull()
+    .default(createdAtDefault),
+});
+
+export const subscriptions = sqliteTable('subscriptions', {
+  id: text('id').primaryKey(),
+  siteUrl: text('site_url').notNull().unique(),
+  addedAt: integer('added_at', { mode: 'timestamp_ms' })
+    .notNull()
+    .default(createdAtDefault),
+});
+
+export type Article = InferSelectModel<typeof articles>;
+export type HatenaBookmark = InferSelectModel<typeof hatenaBookmarks>;
+export type Subscription = InferSelectModel<typeof subscriptions>;
