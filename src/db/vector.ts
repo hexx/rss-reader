@@ -1,6 +1,5 @@
 import 'dotenv/config';
 
-import { Field, FixedSizeList, Float32, Schema, Utf8 } from 'apache-arrow';
 import * as lancedb from 'vectordb';
 import type { Table } from 'vectordb';
 
@@ -25,18 +24,14 @@ function getVectorDimension(): number {
   return dimension;
 }
 
-function createVectorSchema(): Schema {
+function createPlaceholderRow(): Record<string, unknown> {
   const vectorDimension = getVectorDimension();
 
-  return new Schema([
-    new Field('article_id', new Utf8(), false),
-    new Field('text', new Utf8(), false),
-    new Field(
-      'vector',
-      new FixedSizeList(vectorDimension, new Field('item', new Float32(), true)),
-      false,
-    ),
-  ]);
+  return {
+    article_id: '__placeholder__',
+    text: '',
+    vector: Array.from({ length: vectorDimension }, () => 0),
+  };
 }
 
 export function getVectorCollection(): Promise<Table> {
@@ -48,10 +43,14 @@ export function getVectorCollection(): Promise<Table> {
       return database.openTable(vectorCollectionName);
     }
 
-    return database.createTable({
+    const table = await database.createTable({
       name: vectorCollectionName,
-      schema: createVectorSchema(),
+      data: [createPlaceholderRow()],
     });
+
+    await table.delete("article_id = '__placeholder__'");
+
+    return table;
   })();
 
   return vectorCollectionPromise;

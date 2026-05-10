@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>RSS Reader Dashboard</title>
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div>
+        <h1>RSS Reader</h1>
+        <p>記事、要約、はてブコメントをひとまとめに閲覧します。</p>
+      </div>
+      <button id="sync-button" type="button">Sync</button>
+    </header>
+
+    <main class="layout">
+      <section class="panel">
+        <form id="search-form" class="search-form">
+          <input
+            id="search-input"
+            name="query"
+            type="search"
+            placeholder="記事を自然言語で検索"
+            autocomplete="off"
+          />
+          <button type="submit">Search</button>
+        </form>
+
+        <p id="status" class="status">読み込み中...</p>
+
+        <div class="columns">
+          <section>
+            <h2>最新記事</h2>
+            <div id="articles" class="cards"></div>
+          </section>
+
+          <section>
+            <h2>検索結果</h2>
+            <div id="search-results" class="cards"></div>
+          </section>
+        </div>
+      </section>
+    </main>
+
+    <template id="article-card-template">
+      <article class="card">
+        <a class="card__title" target="_blank" rel="noreferrer"></a>
+        <p class="card__summary"></p>
+        <div class="card__meta">
+          <span>Hatena</span>
+        </div>
+        <ul class="comments"></ul>
+      </article>
+    </template>
+
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>
