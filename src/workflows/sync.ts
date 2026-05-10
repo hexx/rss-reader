@@ -5,12 +5,14 @@ import { eq } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { articles, hatenaBookmarks, subscriptions } from '../db/schema.js';
 import { getVectorCollection } from '../db/vector.js';
-import { generateArticleSummary, generateEmbedding, generateHatenaSummary } from '../services/ai.js';
+import { generateArticleSummary, generateEmbeddings, generateHatenaSummary } from '../services/ai.js';
 import { fetchHatenaBookmarks } from '../services/hatena.js';
 import { fetchArticleContent, fetchRssOrFallback } from '../services/scraper.js';
 import { logger } from '../utils/logger.js';
+import { chunkText } from '../utils/chunking.js';
 import { sleep } from '../utils/sleep.js';
 
+const articleChunkSize = 1_500;
 const minimumArticleDelayMs = 1_000;
 const maximumArticleDelayMs = 3_000;
 const minimumSubscriptionDelayMs = 1_000;
@@ -26,22 +28,39 @@ function randomSubscriptionDelayMs(): number {
   ) + minimumSubscriptionDelayMs;
 }
 
-function buildEmbeddingTexts(
-  title: string,
-  content: string,
-  summary: string,
-  hatenaSummary: string | null,
-): string[] {
-  const texts = [
-    `タイトル: ${title}\n要約: ${summary}`,
-    `タイトル: ${title}\n本文: ${content}`,
-  ];
+function buildArticleChunkSource(title: string, content: string): string {
+  const parts = [`タイトル: ${title}`];
+  const body = content.trim();
+  parts.push(body.length > 0 ? `本文: ${body}` : '本文:');
 
-  if (hatenaSummary && hatenaSummary.trim().length > 0) {
-    texts.push(`タイトル: ${title}\nはてブの反応: ${hatenaSummary}`);
+  return parts.join('\n\n');
+}
+
+function buildChunkRows(
+  articleId: string,
+  chunks: string[],
+  embeddings: number[][],
+): Array<{
+  article_id: string;
+  text: string;
+  vector: number[];
+}> {
+  if (chunks.length !== embeddings.length) {
+    throw new Error('Chunk and embedding counts do not match');
   }
 
-  return texts;
+  return chunks.map((chunk, index) => ({
+    article_id: articleId,
+    text: chunk,
+    vector: embeddings[index]!,
+  }));
+}
+
+function buildArticleChunks(
+  title: string,
+  content: string,
+): string[] {
+  return chunkText(buildArticleChunkSource(title, content), articleChunkSize);
 }
 
 export async function syncSite(siteUrl: string, debug = false): Promise<void> {
@@ -93,17 +112,10 @@ export async function syncSite(siteUrl: string, debug = false): Promise<void> {
         }
       });
 
-      const embeddingTexts = buildEmbeddingTexts(article.title, content, summary, hatenaSummary);
-      for (const text of embeddingTexts) {
-        const embedding = await generateEmbedding(text);
-
-        await vectorCollection.add([
-          {
-            article_id: articleId,
-            text,
-            vector: embedding,
-          },
-        ]);
+      const chunks = buildArticleChunks(article.title, content);
+      if (chunks.length > 0) {
+        const embeddings = await generateEmbeddings(chunks);
+        await vectorCollection.add(buildChunkRows(articleId, chunks, embeddings));
       }
     } catch (error) {
       if (debug) {
