@@ -4,6 +4,7 @@ import { generateText } from 'ai';
 import type { HatenaBookmarkComment } from './hatena.js';
 
 const defaultModelId = 'opencode-go';
+const defaultEmbeddingModelId = 'opencode-go-embedding';
 
 function requireEnv(name: string): string {
   const value = process.env[name];
@@ -32,16 +33,25 @@ function buildSummaryPrompt(title: string, content: string, comments: HatenaBook
   ].join('\n');
 }
 
-function getOpenCodeGoModel() {
+function createOpenCodeGoProvider() {
   const baseURL = requireEnv('OPENCODE_GO_BASE_URL');
   const apiKey = requireEnv('OPENCODE_GO_API_KEY');
-  const modelId = process.env.OPENCODE_GO_MODEL?.trim() || defaultModelId;
 
   return createOpenAICompatible({
     baseURL,
     name: 'opencode-go',
     apiKey,
-  }).chatModel(modelId);
+  });
+}
+
+export function getOpenCodeGoChatModel() {
+  const modelId = process.env.OPENCODE_GO_MODEL?.trim() || defaultModelId;
+  return createOpenCodeGoProvider().chatModel(modelId);
+}
+
+export function getOpenCodeGoEmbeddingModel() {
+  const modelId = process.env.OPENCODE_GO_EMBEDDING_MODEL?.trim() || defaultEmbeddingModelId;
+  return createOpenCodeGoProvider().embeddingModel(modelId);
 }
 
 export async function generateArticleSummary(
@@ -50,7 +60,7 @@ export async function generateArticleSummary(
   comments: HatenaBookmarkComment[],
 ): Promise<string> {
   const result = await generateText({
-    model: getOpenCodeGoModel(),
+    model: getOpenCodeGoChatModel(),
     system: 'あなたは日本語の要約アシスタントです。与えられた記事を簡潔に要約してください。',
     prompt: buildSummaryPrompt(title, content, comments),
   });
