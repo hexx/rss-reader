@@ -7,11 +7,20 @@ vi.mock('../services/search.js', () => ({
   searchArticles: vi.fn(),
 }));
 
+vi.mock('../services/ai.js', () => ({
+  generateRagAnswer: vi.fn(),
+}));
+
 vi.mock('../workflows/sync.js', () => ({
   syncAllSubscriptions: vi.fn(),
 }));
 
 import { articles, hatenaBookmarks, subscriptions } from '../db/schema.js';
+import { generateRagAnswer } from '../services/ai.js';
+import { searchArticles } from '../services/search.js';
+
+const generateRagAnswerMock = vi.mocked(generateRagAnswer);
+const searchArticlesMock = vi.mocked(searchArticles);
 
 let server: Server | null = null;
 
@@ -80,6 +89,8 @@ describe('server api', () => {
     vi.stubEnv('DATABASE_URL', ':memory:');
     vi.stubEnv('OPENCODE_GO_BASE_URL', 'https://opencode.example/v1');
     vi.stubEnv('OPENCODE_GO_API_KEY', 'test-api-key');
+    generateRagAnswerMock.mockReset();
+    searchArticlesMock.mockReset();
     await setupDatabase();
   });
 
@@ -169,8 +180,18 @@ describe('server api', () => {
       hatenaSummary: '反応要約',
       isRead: false,
       siteUrl: 'https://example.com/',
+        title: '最初の記事',
+        url: 'https://example.com/articles/1',
+      });
+
+    const unreadResponse = await fetch(`${baseUrl}/api/articles?unread_only=true`);
+    const unreadPayload = await unreadResponse.json();
+    expect(unreadResponse.ok).toBe(true);
+    expect(unreadPayload.articles).toHaveLength(1);
+    expect(unreadPayload.articles[0]).toMatchObject({
+      id: 'article-1',
+      isRead: false,
       title: '最初の記事',
-      url: 'https://example.com/articles/1',
     });
 
     const sourceResponse = await fetch(`${baseUrl}/api/articles?source=${encodeURIComponent('https://example.com/')}`);
@@ -181,6 +202,48 @@ describe('server api', () => {
       siteUrl: 'https://example.com/',
       title: '最初の記事',
     });
+  });
+
+  it('returns AI answers for search results', async () => {
+    searchArticlesMock.mockResolvedValue([
+      {
+        bookmarks: [],
+        createdAt: '1970-01-01T00:00:00.000Z',
+        id: 'article-1',
+        hatenaSummary: 'はてブ要約',
+        isRead: false,
+        siteUrl: 'https://example.com/',
+        summary: '記事の要約',
+        title: '検索対象の記事',
+        url: 'https://example.com/articles/1',
+      },
+    ]);
+    generateRagAnswerMock.mockResolvedValue('AIの回答');
+
+    const baseUrl = await startServer();
+    const response = await fetch(`${baseUrl}/api/search?q=${encodeURIComponent('検索語')}`);
+    const payload = await response.json();
+
+    expect(response.ok).toBe(true);
+    expect(payload).toEqual({
+      results: [
+        {
+          bookmarks: [],
+          createdAt: '1970-01-01T00:00:00.000Z',
+          id: 'article-1',
+          hatenaSummary: 'はてブ要約',
+          isRead: false,
+          siteUrl: 'https://example.com/',
+          summary: '記事の要約',
+          title: '検索対象の記事',
+          url: 'https://example.com/articles/1',
+        },
+      ],
+      aiAnswer: 'AIの回答',
+    });
+    expect(generateRagAnswerMock).toHaveBeenCalledWith('検索語', [
+      'タイトル: 検索対象の記事\n記事要約: 記事の要約\nはてブ要約: はてブ要約',
+    ]);
   });
 
   it('updates read state through the API', async () => {

@@ -2,13 +2,17 @@ const articlesElement = document.querySelector('#articles');
 const statusElement = document.querySelector('#status');
 const searchForm = document.querySelector('#search-form');
 const searchInput = document.querySelector('#search-input');
+const unreadOnlyToggle = document.querySelector('#unread-only-toggle');
 const syncButton = document.querySelector('#sync-button');
 const sourcesList = document.querySelector('#sources-list');
 const template = document.querySelector('#article-card-template');
+const aiAnswerSection = document.querySelector('#ai-answer-section');
+const aiAnswerElement = document.querySelector('#ai-answer');
 
 const state = {
   query: '',
   sourceUrl: null,
+  unreadOnly: false,
 };
 
 let latestSources = [];
@@ -27,6 +31,18 @@ function formatDate(value) {
     dateStyle: 'medium',
     timeStyle: 'short',
   }).format(date);
+}
+
+function setAiAnswer(answer) {
+  const text = answer.trim();
+  if (text.length === 0) {
+    aiAnswerElement.textContent = '';
+    aiAnswerSection.hidden = true;
+    return;
+  }
+
+  aiAnswerElement.textContent = text;
+  aiAnswerSection.hidden = false;
 }
 
 function sourceLabel(siteUrl) {
@@ -97,6 +113,7 @@ function createCard(article) {
   const readToggle = fragment.querySelector('.card__read-toggle');
   const articleSummary = fragment.querySelector('.card__article-summary');
   const hatenaSummary = fragment.querySelector('.card__hatena-summary');
+  const articleLink = fragment.querySelector('.card__article-link');
   const comments = fragment.querySelector('.comments');
   const commentHeading = fragment.querySelector('.card__comments-heading');
 
@@ -112,6 +129,8 @@ function createCard(article) {
 
   articleSummary.textContent = article.summary || '記事の要約はまだありません。';
   hatenaSummary.textContent = article.hatenaSummary || 'はてブの反応要約はまだありません。';
+  articleLink.href = article.url;
+  articleLink.textContent = '記事を読む';
   commentHeading.textContent = '個別コメント';
 
   const bookmarkList = Array.isArray(article.bookmarks) ? article.bookmarks : [];
@@ -150,6 +169,20 @@ function renderArticles(list) {
   }
 }
 
+function buildArticlesUrl(sourceUrl = state.sourceUrl) {
+  const params = new URLSearchParams();
+  if (sourceUrl) {
+    params.set('source', sourceUrl);
+  }
+
+  if (state.unreadOnly) {
+    params.set('unread_only', 'true');
+  }
+
+  const query = params.toString();
+  return query.length > 0 ? `/api/articles?${query}` : '/api/articles';
+}
+
 async function loadSources() {
   const response = await fetch('/api/sources');
   if (!response.ok) {
@@ -162,8 +195,9 @@ async function loadSources() {
 }
 
 async function loadArticles(sourceUrl = state.sourceUrl) {
-  const url = sourceUrl ? `/api/articles?source=${encodeURIComponent(sourceUrl)}` : '/api/articles';
-  setStatus(sourceUrl ? '記事を読み込み中...' : '最新記事を読み込み中...');
+  const url = buildArticlesUrl(sourceUrl);
+  setAiAnswer('');
+  setStatus(state.unreadOnly ? '未読記事を読み込み中...' : sourceUrl ? '記事を読み込み中...' : '最新記事を読み込み中...');
 
   const response = await fetch(url);
   if (!response.ok) {
@@ -173,7 +207,13 @@ async function loadArticles(sourceUrl = state.sourceUrl) {
   const data = await response.json();
   renderArticles(data.articles ?? []);
   updateSourceListActiveState();
-  setStatus(sourceUrl ? 'ソースで絞り込んだ記事を表示しています。' : '最新記事を表示しています。');
+  setStatus(
+    state.unreadOnly
+      ? '未読記事を表示しています。'
+      : sourceUrl
+        ? 'ソースで絞り込んだ記事を表示しています。'
+        : '最新記事を表示しています。',
+  );
 }
 
 async function runSearch(query) {
@@ -190,6 +230,7 @@ async function runSearch(query) {
   updateSourceListActiveState();
 
   try {
+    setAiAnswer('');
     setStatus('検索中...');
     const response = await fetch(`/api/search?q=${encodeURIComponent(normalizedQuery)}`);
     const data = await response.json();
@@ -198,6 +239,7 @@ async function runSearch(query) {
     }
 
     renderArticles(data.results ?? []);
+    setAiAnswer(typeof data.aiAnswer === 'string' ? data.aiAnswer : '');
     setStatus('検索結果を表示しています。');
   } catch (error) {
     setStatus(error instanceof Error ? error.message : '検索に失敗しました。');
@@ -255,6 +297,16 @@ async function triggerSync() {
     syncButton.textContent = 'Sync';
   }
 }
+
+unreadOnlyToggle.addEventListener('change', () => {
+  state.unreadOnly = unreadOnlyToggle.checked;
+  if (state.query.trim().length > 0) {
+    void runSearch(state.query);
+    return;
+  }
+
+  void loadArticles(state.sourceUrl);
+});
 
 searchForm.addEventListener('submit', (event) => {
   event.preventDefault();

@@ -252,7 +252,7 @@ describe('syncSite', () => {
     expect(await db.select().from(articles)).toHaveLength(0);
   });
 
-  it('skips articles that already exist in SQLite', async () => {
+  it('refreshes Hatena data for existing articles', async () => {
     const db = await setupDatabase();
     const vectorAddMock = vi.fn().mockResolvedValue(1);
     const { syncSite } = await import('./sync.js');
@@ -264,23 +264,45 @@ describe('syncSite', () => {
       title: article.title,
       content: '本文',
       summary: '既存要約',
+      hatenaSummary: '古いはてブ要約',
+    });
+
+    await db.insert(hatenaBookmarks).values({
+      id: 'old-bookmark',
+      articleId: 'existing-article',
+      user: 'old',
+      comment: '古いコメント',
     });
 
     fetchRssOrFallbackMock.mockResolvedValue([article]);
-    fetchArticleContentMock.mockResolvedValue('本文の内容です。');
     fetchHatenaBookmarksMock.mockResolvedValue(bookmarks);
-    generateArticleSummaryMock.mockResolvedValue('要約文');
-    chunkTextMock.mockReturnValue(['chunk-1']);
-    generateEmbeddingsMock.mockResolvedValue([[0.1, 0.2]]);
+    generateHatenaSummaryMock.mockResolvedValue('更新後の要約');
     getVectorCollectionMock.mockResolvedValue({ add: vectorAddMock } as never);
 
     await syncSite(siteUrl);
 
     expect(fetchArticleContentMock).not.toHaveBeenCalled();
-    expect(fetchHatenaBookmarksMock).not.toHaveBeenCalled();
+    expect(fetchHatenaBookmarksMock).toHaveBeenCalledWith(article.url);
     expect(generateArticleSummaryMock).not.toHaveBeenCalled();
     expect(generateEmbeddingsMock).not.toHaveBeenCalled();
     expect(vectorAddMock).not.toHaveBeenCalled();
-    expect(await db.select().from(articles)).toHaveLength(1);
+    expect(generateHatenaSummaryMock).toHaveBeenCalledWith(bookmarks);
+
+    const savedArticles = await db.select().from(articles);
+    const savedBookmarks = await db.select().from(hatenaBookmarks);
+
+    expect(savedArticles).toHaveLength(1);
+    expect(savedArticles[0]).toMatchObject({
+      hatenaSummary: '更新後の要約',
+      id: 'existing-article',
+      title: article.title,
+      url: article.url,
+    });
+    expect(savedBookmarks).toHaveLength(1);
+    expect(savedBookmarks[0]).toMatchObject({
+      articleId: 'existing-article',
+      comment: '参考になる',
+      user: 'alice',
+    });
   });
 });
