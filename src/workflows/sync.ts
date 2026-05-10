@@ -33,7 +33,7 @@ function buildEmbeddingTexts(title: string, content: string, summary: string): s
   ];
 }
 
-export async function syncSite(siteUrl: string): Promise<void> {
+export async function syncSite(siteUrl: string, debug = false): Promise<void> {
   logger.info('サイト同期を開始します。', { siteUrl });
   const siteArticles = await fetchRssOrFallback(siteUrl);
   const vectorCollection = await getVectorCollection();
@@ -91,6 +91,11 @@ export async function syncSite(siteUrl: string): Promise<void> {
         ]);
       }
     } catch (error) {
+      if (debug) {
+        console.error(error instanceof Error ? error.stack || error : error);
+        throw error;
+      }
+
       const message = error instanceof Error ? error.message : String(error);
       logger.warn('記事の同期に失敗しました。', {
         articleUrl: article.url,
@@ -104,7 +109,7 @@ export async function syncSite(siteUrl: string): Promise<void> {
   logger.info('サイト同期が完了しました。', { siteUrl, articles: siteArticles.length });
 }
 
-export async function syncAllSubscriptions(): Promise<void> {
+export async function syncAllSubscriptions(debug = false): Promise<void> {
   const subscribedSites = await db
     .select({
       siteUrl: subscriptions.siteUrl,
@@ -118,7 +123,7 @@ export async function syncAllSubscriptions(): Promise<void> {
 
   for (const [index, subscription] of subscribedSites.entries()) {
     logger.info('購読サイトを同期します。', { siteUrl: subscription.siteUrl });
-    await syncSite(subscription.siteUrl);
+    await syncSite(subscription.siteUrl, debug);
 
     if (index < subscribedSites.length - 1) {
       await sleep(randomSubscriptionDelayMs());
