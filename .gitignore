@@ -6,5 +6,5 @@ dist
 *.sqlite3
 *.db
 *.db-journal
+lancedb
 .DS_Store
-

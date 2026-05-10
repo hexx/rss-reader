@@ -24,6 +24,7 @@
   "dependencies": {
     "@ai-sdk/openai-compatible": "^2.0.47",
     "ai": "^6.0.177",
+    "apache-arrow": "^21.1.0",
     "better-sqlite3": "^12.9.0",
     "cheerio": "^1.2.0",
     "dotenv": "^17.4.2",
