@@ -1,0 +1,41 @@
+{
+  "name": "rss-reader",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Ideal RSS reader scaffold",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/index.js",
+    "db:generate": "drizzle-kit generate",
+    "db:push": "drizzle-kit push",
+    "db:studio": "drizzle-kit studio"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hexx/rss-reader.git"
+  },
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/hexx/rss-reader/issues"
+  },
+  "homepage": "https://github.com/hexx/rss-reader#readme",
+  "dependencies": {
+    "@ai-sdk/openai-compatible": "^2.0.47",
+    "ai": "^6.0.177",
+    "better-sqlite3": "^12.9.0",
+    "cheerio": "^1.2.0",
+    "dotenv": "^17.4.2",
+    "drizzle-orm": "^0.45.2",
+    "rss-parser": "^3.13.0",
+    "vectordb": "^0.21.2"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^25.6.2",
+    "drizzle-kit": "^0.31.10",
+    "tsx": "^4.21.0",
+    "typescript": "^6.0.3"
+  }
+}
