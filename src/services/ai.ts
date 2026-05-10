@@ -56,7 +56,8 @@ export async function generateArticleSummary(
 ): Promise<string> {
   const result = await generateText({
     model: getOpenCodeGoChatModel(),
-    system: 'あなたは日本語の要約アシスタントです。与えられた記事を簡潔に要約してください。',
+    system:
+      'あなたは日本語の要約アシスタントです。与えられた記事を簡潔に要約してください。記事本文が空で提供される場合もあります。その場合は、タイトルとはてなブックマークのコメントの内容から推測できる範囲で要約を作成してください。',
     prompt: buildSummaryPrompt(title, content, comments),
   });
 

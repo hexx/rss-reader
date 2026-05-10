@@ -7,7 +7,7 @@ import { articles, hatenaBookmarks, subscriptions } from '../db/schema.js';
 import { getVectorCollection } from '../db/vector.js';
 import { generateArticleSummary, generateEmbedding } from '../services/ai.js';
 import { fetchHatenaBookmarks } from '../services/hatena.js';
-import { getSiteArticles, type ScrapedArticle } from '../services/scraper.js';
+import { fetchArticleContent, fetchRssOrFallback } from '../services/scraper.js';
 import { logger } from '../utils/logger.js';
 import { sleep } from '../utils/sleep.js';
 
@@ -26,67 +26,78 @@ function randomSubscriptionDelayMs(): number {
   ) + minimumSubscriptionDelayMs;
 }
 
-function buildEmbeddingTexts(article: ScrapedArticle, summary: string): string[] {
+function buildEmbeddingTexts(title: string, content: string, summary: string): string[] {
   return [
-    `タイトル: ${article.title}\n要約: ${summary}`,
-    `タイトル: ${article.title}\n本文: ${article.content}`,
+    `タイトル: ${title}\n要約: ${summary}`,
+    `タイトル: ${title}\n本文: ${content}`,
   ];
 }
 
 export async function syncSite(siteUrl: string): Promise<void> {
   logger.info('サイト同期を開始します。', { siteUrl });
-  const siteArticles = await getSiteArticles(siteUrl);
+  const siteArticles = await fetchRssOrFallback(siteUrl);
   const vectorCollection = await getVectorCollection();
 
   for (const article of siteArticles) {
     await sleep(randomArticleDelayMs());
 
-    const existingArticle = await db
-      .select({ id: articles.id })
-      .from(articles)
-      .where(eq(articles.url, article.url))
-      .limit(1);
+    try {
+      const existingArticle = await db
+        .select({ id: articles.id })
+        .from(articles)
+        .where(eq(articles.url, article.url))
+        .limit(1);
 
-    if (existingArticle.length > 0) {
-      continue;
-    }
-
-    const bookmarks = await fetchHatenaBookmarks(article.url);
-    const summary = await generateArticleSummary(article.title, article.content, bookmarks);
-    const articleId = randomUUID();
-
-    db.transaction((transaction) => {
-      transaction.insert(articles).values({
-        id: articleId,
-        url: article.url,
-        title: article.title,
-        content: article.content,
-        summary,
-      }).run();
-
-      if (bookmarks.length > 0) {
-        transaction.insert(hatenaBookmarks).values(
-          bookmarks.map((bookmark) => ({
-            id: randomUUID(),
-            articleId,
-            user: bookmark.user,
-            comment: bookmark.comment,
-          })),
-        ).run();
+      if (existingArticle.length > 0) {
+        continue;
       }
-    });
 
-    const embeddingTexts = buildEmbeddingTexts(article, summary);
-    for (const text of embeddingTexts) {
-      const embedding = await generateEmbedding(text);
+      const content = await fetchArticleContent(article.url);
+      const bookmarks = await fetchHatenaBookmarks(article.url);
+      const summary = await generateArticleSummary(article.title, content, bookmarks);
+      const articleId = randomUUID();
 
-      await vectorCollection.add([
-        {
-          article_id: articleId,
-          text,
-          vector: embedding,
-        },
-      ]);
+      db.transaction((transaction) => {
+        transaction.insert(articles).values({
+          id: articleId,
+          url: article.url,
+          title: article.title,
+          content,
+          summary,
+        }).run();
+
+        if (bookmarks.length > 0) {
+          transaction.insert(hatenaBookmarks).values(
+            bookmarks.map((bookmark) => ({
+              id: randomUUID(),
+              articleId,
+              user: bookmark.user,
+              comment: bookmark.comment,
+            })),
+          ).run();
+        }
+      });
+
+      const embeddingTexts = buildEmbeddingTexts(article.title, content, summary);
+      for (const text of embeddingTexts) {
+        const embedding = await generateEmbedding(text);
+
+        await vectorCollection.add([
+          {
+            article_id: articleId,
+            text,
+            vector: embedding,
+          },
+        ]);
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      logger.warn('記事の同期に失敗しました。', {
+        articleUrl: article.url,
+        siteUrl,
+        title: article.title,
+        error: message,
+      });
     }
   }
 

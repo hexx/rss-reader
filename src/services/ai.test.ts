@@ -45,6 +45,7 @@ describe('generateArticleSummary', () => {
     const callArgs = generateTextMock.mock.calls[0]?.[0];
     expect(callArgs).toBeDefined();
     expect(callArgs?.system).toContain('日本語の要約アシスタント');
+    expect(callArgs?.system).toContain('記事本文が空で提供される場合もあります');
     expect(callArgs?.prompt).toContain('記事タイトル');
     expect(callArgs?.prompt).toContain('本文の内容です。');
     expect(callArgs?.prompt).toContain('alice: 参考になる');

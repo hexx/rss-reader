@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('../services/scraper.js', () => ({
-  getSiteArticles: vi.fn(),
+  fetchArticleContent: vi.fn(),
+  fetchRssOrFallback: vi.fn(),
 }));
 
 vi.mock('../services/hatena.js', () => ({
@@ -10,6 +11,13 @@ vi.mock('../services/hatena.js', () => ({
 
 vi.mock('../db/vector.js', () => ({
   getVectorCollection: vi.fn(),
+}));
+
+vi.mock('../utils/logger.js', () => ({
+  logger: {
+    info: vi.fn(),
+    warn: vi.fn(),
+  },
 }));
 
 vi.mock('../services/ai.js', async () => {
@@ -24,20 +32,27 @@ vi.mock('../services/ai.js', async () => {
 import { articles, hatenaBookmarks } from '../db/schema.js';
 import { fetchHatenaBookmarks } from '../services/hatena.js';
 import { generateArticleSummary, generateEmbedding } from '../services/ai.js';
-import { getSiteArticles } from '../services/scraper.js';
+import { fetchArticleContent, fetchRssOrFallback } from '../services/scraper.js';
 import { getVectorCollection } from '../db/vector.js';
+import { logger } from '../utils/logger.js';
 
-const getSiteArticlesMock = vi.mocked(getSiteArticles);
 const fetchHatenaBookmarksMock = vi.mocked(fetchHatenaBookmarks);
 const generateArticleSummaryMock = vi.mocked(generateArticleSummary);
 const generateEmbeddingMock = vi.mocked(generateEmbedding);
+const fetchArticleContentMock = vi.mocked(fetchArticleContent);
+const fetchRssOrFallbackMock = vi.mocked(fetchRssOrFallback);
 const getVectorCollectionMock = vi.mocked(getVectorCollection);
+const loggerMock = vi.mocked(logger);
 
 const siteUrl = 'https://example.com/';
 const article = {
-  content: '本文の内容です。',
   title: '記事タイトル',
   url: 'https://example.com/articles/1',
+};
+
+const nextArticle = {
+  title: '次の記事',
+  url: 'https://example.com/articles/2',
 };
 
 const bookmarks = [
@@ -55,11 +70,14 @@ describe('syncSite', () => {
     vi.stubEnv('OPENCODE_GO_API_KEY', 'test-api-key');
     vi.stubEnv('OPENCODE_GO_MODEL', 'test-model');
 
-    getSiteArticlesMock.mockReset();
     fetchHatenaBookmarksMock.mockReset();
     generateArticleSummaryMock.mockReset();
     generateEmbeddingMock.mockReset();
+    fetchArticleContentMock.mockReset();
+    fetchRssOrFallbackMock.mockReset();
     getVectorCollectionMock.mockReset();
+    loggerMock.info.mockReset();
+    loggerMock.warn.mockReset();
   });
 
   afterEach(() => {
@@ -91,12 +109,13 @@ describe('syncSite', () => {
     return db;
   }
 
-  it('stores new articles, comments, summaries, and embeddings', async () => {
+  it('stores new articles, comments, summaries, and embeddings even when content is empty', async () => {
     const db = await setupDatabase();
     const vectorAddMock = vi.fn().mockResolvedValue(1);
     const { syncSite } = await import('./sync.js');
 
-    getSiteArticlesMock.mockResolvedValue([article]);
+    fetchRssOrFallbackMock.mockResolvedValue([article]);
+    fetchArticleContentMock.mockResolvedValue('');
     fetchHatenaBookmarksMock.mockResolvedValue(bookmarks);
     generateArticleSummaryMock.mockResolvedValue('要約文');
     generateEmbeddingMock.mockResolvedValue([0.1, 0.2]);
@@ -109,7 +128,7 @@ describe('syncSite', () => {
 
     expect(savedArticles).toHaveLength(1);
     expect(savedArticles[0]).toMatchObject({
-      content: article.content,
+      content: '',
       summary: '要約文',
       title: article.title,
       url: article.url,
@@ -120,9 +139,47 @@ describe('syncSite', () => {
       user: 'alice',
     });
     expect(vectorAddMock).toHaveBeenCalledTimes(2);
+    expect(fetchArticleContentMock).toHaveBeenCalledWith(article.url);
     expect(fetchHatenaBookmarksMock).toHaveBeenCalledWith(article.url);
-    expect(generateArticleSummaryMock).toHaveBeenCalledWith(article.title, article.content, bookmarks);
+    expect(generateArticleSummaryMock).toHaveBeenCalledWith(article.title, '', bookmarks);
     expect(generateEmbeddingMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('continues processing later articles when one article fails', async () => {
+    const db = await setupDatabase();
+    const vectorAddMock = vi.fn().mockResolvedValue(1);
+    const { syncSite } = await import('./sync.js');
+
+    fetchRssOrFallbackMock.mockResolvedValue([article, nextArticle]);
+    fetchArticleContentMock.mockRejectedValueOnce(new Error('scrape failed'));
+    fetchArticleContentMock.mockResolvedValueOnce('次の記事本文');
+    fetchHatenaBookmarksMock.mockResolvedValue([{ user: 'bob', comment: '面白い' }]);
+    generateArticleSummaryMock.mockResolvedValue('次の記事の要約');
+    generateEmbeddingMock.mockResolvedValue([0.1, 0.2]);
+    getVectorCollectionMock.mockResolvedValue({ add: vectorAddMock } as never);
+
+    await syncSite(siteUrl);
+
+    const savedArticles = await db.select().from(articles);
+    expect(savedArticles).toHaveLength(1);
+    expect(savedArticles[0]).toMatchObject({
+      content: '次の記事本文',
+      summary: '次の記事の要約',
+      title: nextArticle.title,
+      url: nextArticle.url,
+    });
+    expect(fetchHatenaBookmarksMock).toHaveBeenCalledTimes(1);
+    expect(generateArticleSummaryMock).toHaveBeenCalledTimes(1);
+    expect(generateEmbeddingMock).toHaveBeenCalledTimes(2);
+    expect(loggerMock.warn).toHaveBeenCalledWith(
+      '記事の同期に失敗しました。',
+      expect.objectContaining({
+        articleUrl: article.url,
+        siteUrl,
+        title: article.title,
+        error: 'scrape failed',
+      }),
+    );
   });
 
   it('skips articles that already exist in SQLite', async () => {
@@ -134,11 +191,12 @@ describe('syncSite', () => {
       id: 'existing-article',
       url: article.url,
       title: article.title,
-      content: article.content,
+      content: '本文',
       summary: '既存要約',
     });
 
-    getSiteArticlesMock.mockResolvedValue([article]);
+    fetchRssOrFallbackMock.mockResolvedValue([article]);
+    fetchArticleContentMock.mockResolvedValue('本文の内容です。');
     fetchHatenaBookmarksMock.mockResolvedValue(bookmarks);
     generateArticleSummaryMock.mockResolvedValue('要約文');
     generateEmbeddingMock.mockResolvedValue([0.1, 0.2]);
@@ -146,6 +204,7 @@ describe('syncSite', () => {
 
     await syncSite(siteUrl);
 
+    expect(fetchArticleContentMock).not.toHaveBeenCalled();
     expect(fetchHatenaBookmarksMock).not.toHaveBeenCalled();
     expect(generateArticleSummaryMock).not.toHaveBeenCalled();
     expect(generateEmbeddingMock).not.toHaveBeenCalled();
