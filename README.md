@@ -12,9 +12,21 @@ AI 要約、はてなブックマーク連携、RAG 検索、Web ダッシュボ
 
 ## 前提条件
 
-- Node.js 22 以上
+- Node.js 24 / 25 系
 - SQLite 3
 - OpenCode Go 互換 API のベース URL と API キー
+
+Node.js 26 で `better-sqlite3` のビルドに失敗する場合は、次のどちらかで 25 系に切り替えます。
+
+```bash
+nvm install 25
+nvm use 25
+```
+
+```bash
+volta install node@25
+volta pin node@25
+```
 
 ## セットアップ
 

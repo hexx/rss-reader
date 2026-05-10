@@ -36,7 +36,7 @@ export async function searchArticles(query: string): Promise<SearchArticleResult
   });
 
   const collection = await getVectorCollection();
-  const chunkResults = (await collection.search(embedding).limit(maxSearchHits).execute()) as SearchChunkResult[];
+  const chunkResults = (await collection.search(embedding).limit(maxSearchHits).toArray()) as SearchChunkResult[];
   const articleIds = uniqueArticleIds(
     chunkResults
       .map((result) => result.article_id)

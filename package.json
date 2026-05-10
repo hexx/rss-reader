@@ -4,6 +4,9 @@
   "private": true,
   "description": "Ideal RSS reader scaffold",
   "type": "module",
+  "engines": {
+    "node": ">=24 <26"
+  },
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "cli": "tsx src/cli.ts",
@@ -29,8 +32,9 @@
   "homepage": "https://github.com/hexx/rss-reader#readme",
   "dependencies": {
     "@ai-sdk/openai-compatible": "^2.0.47",
+    "@lancedb/lancedb": "^0.27.2",
     "ai": "^6.0.177",
-    "apache-arrow": "^14.0.2",
+    "apache-arrow": "^18.1.0",
     "better-sqlite3": "^12.9.0",
     "cheerio": "^1.2.0",
     "commander": "^14.0.3",
@@ -40,7 +44,6 @@
     "express": "^5.2.1",
     "node-cron": "^4.2.1",
     "rss-parser": "^3.13.0",
-    "vectordb": "^0.21.2",
     "winston": "^3.19.0"
   },
   "devDependencies": {
