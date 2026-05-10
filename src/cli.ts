@@ -6,18 +6,10 @@ import { eq } from 'drizzle-orm';
 import { db } from './db/index.js';
 import { subscriptions } from './db/schema.js';
 import { searchArticles } from './services/search.js';
-import { syncSite } from './workflows/sync.js';
-import { sleep } from './utils/sleep.js';
-
-const minimumSiteDelayMs = 3_000;
-const maximumSiteDelayMs = 5_000;
+import { syncAllSubscriptions } from './workflows/sync.js';
 
 function normalizeSiteUrl(siteUrl: string): string {
   return new URL(siteUrl).toString();
-}
-
-function randomSiteDelayMs(): number {
-  return Math.floor(Math.random() * (maximumSiteDelayMs - minimumSiteDelayMs + 1)) + minimumSiteDelayMs;
 }
 
 async function subscribeSite(siteUrl: string): Promise<void> {
@@ -43,24 +35,7 @@ async function subscribeSite(siteUrl: string): Promise<void> {
 }
 
 async function syncSubscriptions(): Promise<void> {
-  const entries = await db
-    .select({ siteUrl: subscriptions.siteUrl })
-    .from(subscriptions);
-
-  if (entries.length === 0) {
-    console.log('購読サイトがありません。');
-    return;
-  }
-
-  for (const [index, entry] of entries.entries()) {
-    console.log(`同期中: ${entry.siteUrl}`);
-    await syncSite(entry.siteUrl);
-
-    if (index < entries.length - 1) {
-      await sleep(randomSiteDelayMs());
-    }
-  }
-
+  await syncAllSubscriptions();
   console.log('同期が完了しました。');
 }
 

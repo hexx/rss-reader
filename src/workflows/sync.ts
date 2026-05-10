@@ -4,18 +4,26 @@ import { embed } from 'ai';
 import { eq } from 'drizzle-orm';
 
 import { db } from '../db/index.js';
-import { articles, hatenaBookmarks } from '../db/schema.js';
+import { articles, hatenaBookmarks, subscriptions } from '../db/schema.js';
 import { getVectorCollection } from '../db/vector.js';
 import { generateArticleSummary, getOpenCodeGoEmbeddingModel } from '../services/ai.js';
 import { fetchHatenaBookmarks } from '../services/hatena.js';
 import { getSiteArticles, type ScrapedArticle } from '../services/scraper.js';
 import { sleep } from '../utils/sleep.js';
 
-const minimumLoopDelayMs = 1_000;
-const maximumLoopDelayMs = 3_000;
+const minimumArticleDelayMs = 1_000;
+const maximumArticleDelayMs = 3_000;
+const minimumSubscriptionDelayMs = 1_000;
+const maximumSubscriptionDelayMs = 3_000;
 
-function randomLoopDelayMs(): number {
-  return Math.floor(Math.random() * (maximumLoopDelayMs - minimumLoopDelayMs + 1)) + minimumLoopDelayMs;
+function randomArticleDelayMs(): number {
+  return Math.floor(Math.random() * (maximumArticleDelayMs - minimumArticleDelayMs + 1)) + minimumArticleDelayMs;
+}
+
+function randomSubscriptionDelayMs(): number {
+  return Math.floor(
+    Math.random() * (maximumSubscriptionDelayMs - minimumSubscriptionDelayMs + 1),
+  ) + minimumSubscriptionDelayMs;
 }
 
 function buildEmbeddingTexts(article: ScrapedArticle, summary: string): string[] {
@@ -31,7 +39,7 @@ export async function syncSite(siteUrl: string): Promise<void> {
   const vectorCollection = await getVectorCollection();
 
   for (const article of siteArticles) {
-    await sleep(randomLoopDelayMs());
+    await sleep(randomArticleDelayMs());
 
     const existingArticle = await db
       .select({ id: articles.id })
@@ -82,6 +90,28 @@ export async function syncSite(siteUrl: string): Promise<void> {
           vector: embedding,
         },
       ]);
+    }
+  }
+}
+
+export async function syncAllSubscriptions(): Promise<void> {
+  const subscribedSites = await db
+    .select({
+      siteUrl: subscriptions.siteUrl,
+    })
+    .from(subscriptions);
+
+  if (subscribedSites.length === 0) {
+    console.log('購読サイトがありません。');
+    return;
+  }
+
+  for (const [index, subscription] of subscribedSites.entries()) {
+    console.log(`同期中: ${subscription.siteUrl}`);
+    await syncSite(subscription.siteUrl);
+
+    if (index < subscribedSites.length - 1) {
+      await sleep(randomSubscriptionDelayMs());
     }
   }
 }
