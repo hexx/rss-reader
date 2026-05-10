@@ -13,6 +13,10 @@ vi.mock('../db/vector.js', () => ({
   getVectorCollection: vi.fn(),
 }));
 
+vi.mock('../utils/chunking.js', () => ({
+  chunkText: vi.fn(),
+}));
+
 vi.mock('../utils/logger.js', () => ({
   logger: {
     info: vi.fn(),
@@ -25,25 +29,27 @@ vi.mock('../services/ai.js', async () => {
   return {
     ...actual,
     generateArticleSummary: vi.fn(),
-    generateEmbedding: vi.fn(),
+    generateEmbeddings: vi.fn(),
     generateHatenaSummary: vi.fn(),
   };
 });
 
 import { articles, hatenaBookmarks } from '../db/schema.js';
 import { fetchHatenaBookmarks } from '../services/hatena.js';
-import { generateArticleSummary, generateEmbedding, generateHatenaSummary } from '../services/ai.js';
+import { generateArticleSummary, generateEmbeddings, generateHatenaSummary } from '../services/ai.js';
 import { fetchArticleContent, fetchRssOrFallback } from '../services/scraper.js';
 import { getVectorCollection } from '../db/vector.js';
+import { chunkText } from '../utils/chunking.js';
 import { logger } from '../utils/logger.js';
 
 const fetchHatenaBookmarksMock = vi.mocked(fetchHatenaBookmarks);
 const generateArticleSummaryMock = vi.mocked(generateArticleSummary);
-const generateEmbeddingMock = vi.mocked(generateEmbedding);
+const generateEmbeddingsMock = vi.mocked(generateEmbeddings);
 const generateHatenaSummaryMock = vi.mocked(generateHatenaSummary);
 const fetchArticleContentMock = vi.mocked(fetchArticleContent);
 const fetchRssOrFallbackMock = vi.mocked(fetchRssOrFallback);
 const getVectorCollectionMock = vi.mocked(getVectorCollection);
+const chunkTextMock = vi.mocked(chunkText);
 const loggerMock = vi.mocked(logger);
 
 const siteUrl = 'https://example.com/';
@@ -74,11 +80,12 @@ describe('syncSite', () => {
 
     fetchHatenaBookmarksMock.mockReset();
     generateArticleSummaryMock.mockReset();
-    generateEmbeddingMock.mockReset();
+    generateEmbeddingsMock.mockReset();
     generateHatenaSummaryMock.mockReset();
     fetchArticleContentMock.mockReset();
     fetchRssOrFallbackMock.mockReset();
     getVectorCollectionMock.mockReset();
+    chunkTextMock.mockReset();
     loggerMock.info.mockReset();
     loggerMock.warn.mockReset();
   });
@@ -125,7 +132,11 @@ describe('syncSite', () => {
     fetchHatenaBookmarksMock.mockResolvedValue(bookmarks);
     generateArticleSummaryMock.mockResolvedValue('要約文');
     generateHatenaSummaryMock.mockResolvedValue('はてブ要約');
-    generateEmbeddingMock.mockResolvedValue([0.1, 0.2]);
+    chunkTextMock.mockReturnValue(['chunk-1', 'chunk-2']);
+    generateEmbeddingsMock.mockResolvedValue([
+      [0.1, 0.2],
+      [0.3, 0.4],
+    ]);
     getVectorCollectionMock.mockResolvedValue({ add: vectorAddMock } as never);
 
     await syncSite(siteUrl);
@@ -148,12 +159,28 @@ describe('syncSite', () => {
       comment: '参考になる',
       user: 'alice',
     });
-    expect(vectorAddMock).toHaveBeenCalledTimes(3);
+    expect(chunkTextMock).toHaveBeenCalledWith(
+      'タイトル: 記事タイトル\n\n本文:',
+      1500,
+    );
+    expect(generateEmbeddingsMock).toHaveBeenCalledWith(['chunk-1', 'chunk-2']);
+    expect(vectorAddMock).toHaveBeenCalledWith([
+      {
+        article_id: expect.any(String),
+        text: 'chunk-1',
+        vector: [0.1, 0.2],
+      },
+      {
+        article_id: expect.any(String),
+        text: 'chunk-2',
+        vector: [0.3, 0.4],
+      },
+    ]);
     expect(fetchArticleContentMock).toHaveBeenCalledWith(article.url);
     expect(fetchHatenaBookmarksMock).toHaveBeenCalledWith(article.url);
     expect(generateArticleSummaryMock).toHaveBeenCalledWith(article.title, '');
     expect(generateHatenaSummaryMock).toHaveBeenCalledWith(bookmarks);
-    expect(generateEmbeddingMock).toHaveBeenCalledTimes(3);
+    expect(generateEmbeddingsMock).toHaveBeenCalledTimes(1);
   });
 
   it('continues processing later articles when one article fails', async () => {
@@ -167,7 +194,11 @@ describe('syncSite', () => {
     fetchHatenaBookmarksMock.mockResolvedValue([{ user: 'bob', comment: '面白い' }]);
     generateArticleSummaryMock.mockResolvedValue('次の記事の要約');
     generateHatenaSummaryMock.mockResolvedValue('反応の要約');
-    generateEmbeddingMock.mockResolvedValue([0.1, 0.2]);
+    chunkTextMock.mockReturnValue(['chunk-1', 'chunk-2']);
+    generateEmbeddingsMock.mockResolvedValue([
+      [0.1, 0.2],
+      [0.3, 0.4],
+    ]);
     getVectorCollectionMock.mockResolvedValue({ add: vectorAddMock } as never);
 
     await syncSite(siteUrl);
@@ -185,7 +216,7 @@ describe('syncSite', () => {
     expect(fetchHatenaBookmarksMock).toHaveBeenCalledTimes(1);
     expect(generateArticleSummaryMock).toHaveBeenCalledTimes(1);
     expect(generateHatenaSummaryMock).toHaveBeenCalledTimes(1);
-    expect(generateEmbeddingMock).toHaveBeenCalledTimes(3);
+    expect(generateEmbeddingsMock).toHaveBeenCalledTimes(1);
     expect(loggerMock.warn).toHaveBeenCalledWith(
       '記事の同期に失敗しました。',
       expect.objectContaining({
@@ -212,7 +243,7 @@ describe('syncSite', () => {
     expect(fetchHatenaBookmarksMock).not.toHaveBeenCalled();
     expect(generateArticleSummaryMock).not.toHaveBeenCalled();
     expect(generateHatenaSummaryMock).not.toHaveBeenCalled();
-    expect(generateEmbeddingMock).not.toHaveBeenCalled();
+    expect(generateEmbeddingsMock).not.toHaveBeenCalled();
     expect(vectorAddMock).not.toHaveBeenCalled();
     expect(loggerMock.warn).not.toHaveBeenCalled();
     expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining('scrape failed'));
@@ -239,7 +270,8 @@ describe('syncSite', () => {
     fetchArticleContentMock.mockResolvedValue('本文の内容です。');
     fetchHatenaBookmarksMock.mockResolvedValue(bookmarks);
     generateArticleSummaryMock.mockResolvedValue('要約文');
-    generateEmbeddingMock.mockResolvedValue([0.1, 0.2]);
+    chunkTextMock.mockReturnValue(['chunk-1']);
+    generateEmbeddingsMock.mockResolvedValue([[0.1, 0.2]]);
     getVectorCollectionMock.mockResolvedValue({ add: vectorAddMock } as never);
 
     await syncSite(siteUrl);
@@ -247,7 +279,7 @@ describe('syncSite', () => {
     expect(fetchArticleContentMock).not.toHaveBeenCalled();
     expect(fetchHatenaBookmarksMock).not.toHaveBeenCalled();
     expect(generateArticleSummaryMock).not.toHaveBeenCalled();
-    expect(generateEmbeddingMock).not.toHaveBeenCalled();
+    expect(generateEmbeddingsMock).not.toHaveBeenCalled();
     expect(vectorAddMock).not.toHaveBeenCalled();
     expect(await db.select().from(articles)).toHaveLength(1);
   });

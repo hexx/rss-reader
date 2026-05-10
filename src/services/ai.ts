@@ -1,5 +1,5 @@
 import { openai } from '@ai-sdk/openai';
-import { embed, generateText } from 'ai';
+import { embed, embedMany, generateText } from 'ai';
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
 
 import type { HatenaBookmarkComment } from './hatena.js';
@@ -55,6 +55,10 @@ export function getOpenCodeGoChatModel() {
   return createOpenCodeGoProvider().chatModel(modelId);
 }
 
+function getEmbeddingModel() {
+  return openai.embedding('text-embedding-3-small');
+}
+
 export async function generateArticleSummary(
   title: string,
   content: string,
@@ -85,9 +89,22 @@ export async function generateHatenaSummary(comments: HatenaBookmarkComment[]): 
 
 export async function generateEmbedding(text: string): Promise<number[]> {
   const result = await embed({
-    model: openai.embedding('text-embedding-3-small'),
+    model: getEmbeddingModel(),
     value: text,
   });
 
   return result.embedding;
+}
+
+export async function generateEmbeddings(texts: string[]): Promise<number[][]> {
+  if (texts.length === 0) {
+    return [];
+  }
+
+  const result = await embedMany({
+    model: getEmbeddingModel(),
+    values: texts,
+  });
+
+  return result.embeddings;
 }
