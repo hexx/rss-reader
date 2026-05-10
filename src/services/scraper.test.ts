@@ -67,6 +67,17 @@ describe('scraper service', () => {
     await expect(fetchArticleContent(articleOneUrl)).resolves.toBe('First article Article body text.');
   });
 
+  it('returns empty content when no article body can be extracted', async () => {
+    server.use(
+      http.get(
+        articleTwoUrl,
+        () => HttpResponse.text('<!doctype html><html><body><script>ignored</script></body></html>', { headers: { 'Content-Type': 'text/html' } }),
+      ),
+    );
+
+    await expect(fetchArticleContent(articleTwoUrl)).resolves.toBe('');
+  });
+
   it('parses RSS feeds before falling back to HTML link discovery', async () => {
     server.use(
       http.get(feedUrl, () => HttpResponse.text(feedXml, { headers: { 'Content-Type': 'application/rss+xml' } })),

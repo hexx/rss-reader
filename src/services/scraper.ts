@@ -101,7 +101,7 @@ function extractArticleContent(html: string): string {
     return fallback;
   }
 
-  throw new Error('No article content found');
+  return '';
 }
 
 function extractFallbackLinks(html: string, baseUrl: string): ScrapedLink[] {
