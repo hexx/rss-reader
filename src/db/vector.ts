@@ -1,7 +1,7 @@
 import 'dotenv/config';
 
-import * as lancedb from 'vectordb';
-import type { Table } from 'vectordb';
+import * as lancedb from '@lancedb/lancedb';
+import type { Table } from '@lancedb/lancedb';
 
 export const vectorDatabasePath = process.env.VECTOR_DB_PATH ?? './lancedb';
 export const vectorCollectionName = 'article_chunks';
