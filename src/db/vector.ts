@@ -3,7 +3,7 @@ import 'dotenv/config';
 import * as lancedb from 'vectordb';
 import type { Table } from 'vectordb';
 
-export const vectorDatabasePath = './lancedb';
+export const vectorDatabasePath = process.env.VECTOR_DB_PATH ?? './lancedb';
 export const vectorCollectionName = 'article_chunks';
 export const defaultVectorDimension = 1536;
 

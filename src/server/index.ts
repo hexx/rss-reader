@@ -7,6 +7,7 @@ import { db } from '../db/index.js';
 import { articles, hatenaBookmarks } from '../db/schema.js';
 import { searchArticles } from '../services/search.js';
 import { syncAllSubscriptions } from '../workflows/sync.js';
+import { logger } from '../utils/logger.js';
 
 type ArticleResponse = {
   bookmarks: Array<{
@@ -151,7 +152,7 @@ export function createApp() {
 
   app.post('/api/sync', (_request, response) => {
     void syncAllSubscriptions().catch((error: unknown) => {
-      console.error('Sync failed:', error);
+      logger.error('同期APIの実行に失敗しました。', { error });
     });
 
     response.status(202).json({ status: 'accepted' });
@@ -167,7 +168,7 @@ export function createApp() {
   });
 
   app.use((error: unknown, _request: express.Request, response: express.Response, _next: express.NextFunction) => {
-    console.error(error);
+    logger.error('Web サーバーで予期しないエラーが発生しました。', { error });
     response.status(500).json({ error: 'Internal Server Error' });
   });
 
@@ -177,7 +178,7 @@ export function createApp() {
 export function startServer() {
   const app = createApp();
   return app.listen(port, () => {
-    console.log(`Web server listening on http://localhost:${port}`);
+    logger.info(`Web server listening on http://localhost:${port}`);
   });
 }
 
