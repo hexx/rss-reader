@@ -7,50 +7,68 @@
     <link rel="stylesheet" href="/style.css" />
   </head>
   <body>
-    <header class="topbar">
-      <div>
-        <h1>RSS Reader</h1>
-        <p>記事、要約、はてブコメントをひとまとめに閲覧します。</p>
-      </div>
-      <button id="sync-button" type="button">Sync</button>
-    </header>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div class="sidebar__header">
+          <h2>RSS Sources</h2>
+          <p>購読サイトをクリックして絞り込みます。</p>
+        </div>
+        <nav aria-label="RSS sources">
+          <ul id="sources-list" class="sources-list"></ul>
+        </nav>
+      </aside>
 
-    <main class="layout">
-      <section class="panel">
-        <form id="search-form" class="search-form">
-          <input
-            id="search-input"
-            name="query"
-            type="search"
-            placeholder="記事を自然言語で検索"
-            autocomplete="off"
-          />
-          <button type="submit">Search</button>
-        </form>
+      <div class="workspace">
+        <header class="topbar">
+          <div>
+            <h1>RSS Reader</h1>
+            <p>記事、要約、はてブコメントをひとまとめに閲覧します。</p>
+          </div>
+          <button id="sync-button" type="button">Sync</button>
+        </header>
 
-        <p id="status" class="status">読み込み中...</p>
+        <main class="layout">
+          <section class="panel">
+            <form id="search-form" class="search-form">
+              <input
+                id="search-input"
+                name="query"
+                type="search"
+                placeholder="記事を自然言語で検索"
+                autocomplete="off"
+              />
+              <button type="submit">Search</button>
+            </form>
 
-        <div class="columns">
-          <section>
-            <h2>最新記事</h2>
+            <p id="status" class="status">読み込み中...</p>
+
             <div id="articles" class="cards"></div>
           </section>
-
-          <section>
-            <h2>検索結果</h2>
-            <div id="search-results" class="cards"></div>
-          </section>
-        </div>
-      </section>
-    </main>
+        </main>
+      </div>
+    </div>
 
     <template id="article-card-template">
       <article class="card">
-        <a class="card__title" target="_blank" rel="noreferrer"></a>
-        <p class="card__summary"></p>
-        <div class="card__meta">
-          <span>Hatena</span>
-        </div>
+        <header class="card__header">
+          <div class="card__title-group">
+            <a class="card__title" target="_blank" rel="noreferrer"></a>
+            <div class="card__meta">
+              <span class="card__source"></span>
+              <span class="card__date"></span>
+            </div>
+          </div>
+          <button class="card__read-toggle" type="button"></button>
+        </header>
+        <section class="card__summary-section">
+          <h3>記事の要約</h3>
+          <p class="card__article-summary"></p>
+        </section>
+        <section class="card__summary-section card__summary-section--hatena">
+          <h3>はてブの反応</h3>
+          <p class="card__hatena-summary"></p>
+        </section>
+        <div class="card__comments-heading">個別コメント</div>
         <ul class="comments"></ul>
       </article>
     </template>

@@ -5,7 +5,7 @@ import { eq } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { articles, hatenaBookmarks, subscriptions } from '../db/schema.js';
 import { getVectorCollection } from '../db/vector.js';
-import { generateArticleSummary, generateEmbedding } from '../services/ai.js';
+import { generateArticleSummary, generateEmbedding, generateHatenaSummary } from '../services/ai.js';
 import { fetchHatenaBookmarks } from '../services/hatena.js';
 import { fetchArticleContent, fetchRssOrFallback } from '../services/scraper.js';
 import { logger } from '../utils/logger.js';
@@ -26,11 +26,22 @@ function randomSubscriptionDelayMs(): number {
   ) + minimumSubscriptionDelayMs;
 }
 
-function buildEmbeddingTexts(title: string, content: string, summary: string): string[] {
-  return [
+function buildEmbeddingTexts(
+  title: string,
+  content: string,
+  summary: string,
+  hatenaSummary: string | null,
+): string[] {
+  const texts = [
     `タイトル: ${title}\n要約: ${summary}`,
     `タイトル: ${title}\n本文: ${content}`,
   ];
+
+  if (hatenaSummary && hatenaSummary.trim().length > 0) {
+    texts.push(`タイトル: ${title}\nはてブの反応: ${hatenaSummary}`);
+  }
+
+  return texts;
 }
 
 export async function syncSite(siteUrl: string, debug = false): Promise<void> {
@@ -54,16 +65,20 @@ export async function syncSite(siteUrl: string, debug = false): Promise<void> {
 
       const content = await fetchArticleContent(article.url);
       const bookmarks = await fetchHatenaBookmarks(article.url);
-      const summary = await generateArticleSummary(article.title, content, bookmarks);
+      const summary = await generateArticleSummary(article.title, content);
+      const hatenaSummary = bookmarks.length > 0 ? await generateHatenaSummary(bookmarks) : null;
       const articleId = randomUUID();
 
       db.transaction((transaction) => {
         transaction.insert(articles).values({
           id: articleId,
+          siteUrl,
           url: article.url,
           title: article.title,
           content,
           summary,
+          hatenaSummary,
+          isRead: false,
         }).run();
 
         if (bookmarks.length > 0) {
@@ -78,7 +93,7 @@ export async function syncSite(siteUrl: string, debug = false): Promise<void> {
         }
       });
 
-      const embeddingTexts = buildEmbeddingTexts(article.title, content, summary);
+      const embeddingTexts = buildEmbeddingTexts(article.title, content, summary, hatenaSummary);
       for (const text of embeddingTexts) {
         const embedding = await generateEmbedding(text);
 

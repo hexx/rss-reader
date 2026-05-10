@@ -14,7 +14,7 @@ vi.mock('@ai-sdk/openai', () => ({
 import { generateText } from 'ai';
 import { openai } from '@ai-sdk/openai';
 
-import { generateArticleSummary, generateEmbedding } from './ai.js';
+import { generateArticleSummary, generateEmbedding, generateHatenaSummary } from './ai.js';
 
 const generateTextMock = vi.mocked(generateText);
 const openaiEmbeddingMock = vi.mocked(openai.embedding);
@@ -36,10 +36,7 @@ describe('generateArticleSummary', () => {
     generateTextMock.mockResolvedValue({ text: '要約文' } as never);
 
     await expect(
-      generateArticleSummary('記事タイトル', '本文の内容です。', [
-        { user: 'alice', comment: '参考になる' },
-        { user: 'bob', comment: '視点が面白い' },
-      ]),
+      generateArticleSummary('記事タイトル', '本文の内容です。'),
     ).resolves.toBe('要約文');
 
     const callArgs = generateTextMock.mock.calls[0]?.[0];
@@ -48,8 +45,29 @@ describe('generateArticleSummary', () => {
     expect(callArgs?.system).toContain('記事本文が空で提供される場合もあります');
     expect(callArgs?.prompt).toContain('記事タイトル');
     expect(callArgs?.prompt).toContain('本文の内容です。');
-    expect(callArgs?.prompt).toContain('alice: 参考になる');
-    expect(callArgs?.prompt).toContain('bob: 視点が面白い');
+    expect(callArgs?.prompt).not.toContain('参考になる');
+  });
+
+  it('summarizes Hatena reactions from comments only', async () => {
+    generateTextMock.mockResolvedValue({ text: '反応の要約' } as never);
+
+    await expect(
+      generateHatenaSummary([
+        { user: 'alice', comment: '参考になる' },
+        { user: 'bob', comment: '視点が面白い' },
+      ]),
+    ).resolves.toBe('反応の要約');
+
+    const callArgs = generateTextMock.mock.calls[0]?.[0];
+    expect(callArgs).toBeDefined();
+    expect(callArgs?.system).toContain('はてなブックマークのコメントの雰囲気');
+    expect(callArgs?.prompt).toContain('参考になる');
+    expect(callArgs?.prompt).toContain('視点が面白い');
+  });
+
+  it('returns an empty Hatena summary when there are no comments', async () => {
+    await expect(generateHatenaSummary([])).resolves.toBe('');
+    expect(generateTextMock).not.toHaveBeenCalled();
   });
 
   it('returns an OpenAI embedding vector', async () => {
