@@ -15,20 +15,26 @@ function requireEnv(name: string): string {
   return value;
 }
 
-function buildSummaryPrompt(title: string, content: string, comments: HatenaBookmarkComment[]): string {
+function buildArticleSummaryPrompt(title: string, content: string): string {
+  return [
+    '記事のタイトルと本文を踏まえて、全体の要点を日本語で簡潔に要約してください。',
+    '',
+    `タイトル: ${title}`,
+    '',
+    `本文: ${content}`,
+  ].join('\n');
+}
+
+function buildHatenaSummaryPrompt(comments: HatenaBookmarkComment[]): string {
   const commentBlock =
     comments.length > 0
       ? comments.map((comment) => `- ${comment.user}: ${comment.comment}`).join('\n')
       : '（なし）';
 
   return [
-    '記事のタイトル、本文、およびはてなブックマークのコメントを踏まえて、全体の要点を日本語で簡潔に要約してください。',
+    'はてなブックマークのコメントから、世間の反応や意見を日本語で簡潔に要約してください。',
     '',
-    `タイトル: ${title}`,
-    '',
-    `本文: ${content}`,
-    '',
-    `コメント:`,
+    'コメント:',
     commentBlock,
   ].join('\n');
 }
@@ -52,13 +58,26 @@ export function getOpenCodeGoChatModel() {
 export async function generateArticleSummary(
   title: string,
   content: string,
-  comments: HatenaBookmarkComment[],
 ): Promise<string> {
   const result = await generateText({
     model: getOpenCodeGoChatModel(),
     system:
-      'あなたは日本語の要約アシスタントです。与えられた記事を簡潔に要約してください。記事本文が空で提供される場合もあります。その場合は、タイトルとはてなブックマークのコメントの内容から推測できる範囲で要約を作成してください。',
-    prompt: buildSummaryPrompt(title, content, comments),
+      'あなたは日本語の要約アシスタントです。与えられた記事を簡潔に要約してください。記事本文が空で提供される場合もあります。その場合は、タイトルから推測できる範囲で要約を作成してください。',
+    prompt: buildArticleSummaryPrompt(title, content),
+  });
+
+  return result.text.trim();
+}
+
+export async function generateHatenaSummary(comments: HatenaBookmarkComment[]): Promise<string> {
+  if (comments.length === 0) {
+    return '';
+  }
+
+  const result = await generateText({
+    model: getOpenCodeGoChatModel(),
+    system: 'あなたは日本語の要約アシスタントです。はてなブックマークのコメントの雰囲気を簡潔に要約してください。',
+    prompt: buildHatenaSummaryPrompt(comments),
   });
 
   return result.text.trim();

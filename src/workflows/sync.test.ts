@@ -26,12 +26,13 @@ vi.mock('../services/ai.js', async () => {
     ...actual,
     generateArticleSummary: vi.fn(),
     generateEmbedding: vi.fn(),
+    generateHatenaSummary: vi.fn(),
   };
 });
 
 import { articles, hatenaBookmarks } from '../db/schema.js';
 import { fetchHatenaBookmarks } from '../services/hatena.js';
-import { generateArticleSummary, generateEmbedding } from '../services/ai.js';
+import { generateArticleSummary, generateEmbedding, generateHatenaSummary } from '../services/ai.js';
 import { fetchArticleContent, fetchRssOrFallback } from '../services/scraper.js';
 import { getVectorCollection } from '../db/vector.js';
 import { logger } from '../utils/logger.js';
@@ -39,6 +40,7 @@ import { logger } from '../utils/logger.js';
 const fetchHatenaBookmarksMock = vi.mocked(fetchHatenaBookmarks);
 const generateArticleSummaryMock = vi.mocked(generateArticleSummary);
 const generateEmbeddingMock = vi.mocked(generateEmbedding);
+const generateHatenaSummaryMock = vi.mocked(generateHatenaSummary);
 const fetchArticleContentMock = vi.mocked(fetchArticleContent);
 const fetchRssOrFallbackMock = vi.mocked(fetchRssOrFallback);
 const getVectorCollectionMock = vi.mocked(getVectorCollection);
@@ -73,6 +75,7 @@ describe('syncSite', () => {
     fetchHatenaBookmarksMock.mockReset();
     generateArticleSummaryMock.mockReset();
     generateEmbeddingMock.mockReset();
+    generateHatenaSummaryMock.mockReset();
     fetchArticleContentMock.mockReset();
     fetchRssOrFallbackMock.mockReset();
     getVectorCollectionMock.mockReset();
@@ -91,9 +94,12 @@ describe('syncSite', () => {
       CREATE TABLE articles (
         id TEXT PRIMARY KEY,
         url TEXT NOT NULL UNIQUE,
+        site_url TEXT NOT NULL,
         title TEXT NOT NULL,
         content TEXT,
         summary TEXT,
+        hatena_summary TEXT,
+        is_read INTEGER NOT NULL DEFAULT 0,
         created_at INTEGER NOT NULL DEFAULT 0
       );
       CREATE TABLE hatena_bookmarks (
@@ -118,6 +124,7 @@ describe('syncSite', () => {
     fetchArticleContentMock.mockResolvedValue('');
     fetchHatenaBookmarksMock.mockResolvedValue(bookmarks);
     generateArticleSummaryMock.mockResolvedValue('要約文');
+    generateHatenaSummaryMock.mockResolvedValue('はてブ要約');
     generateEmbeddingMock.mockResolvedValue([0.1, 0.2]);
     getVectorCollectionMock.mockResolvedValue({ add: vectorAddMock } as never);
 
@@ -129,7 +136,10 @@ describe('syncSite', () => {
     expect(savedArticles).toHaveLength(1);
     expect(savedArticles[0]).toMatchObject({
       content: '',
+      hatenaSummary: 'はてブ要約',
+      isRead: false,
       summary: '要約文',
+      siteUrl,
       title: article.title,
       url: article.url,
     });
@@ -138,11 +148,12 @@ describe('syncSite', () => {
       comment: '参考になる',
       user: 'alice',
     });
-    expect(vectorAddMock).toHaveBeenCalledTimes(2);
+    expect(vectorAddMock).toHaveBeenCalledTimes(3);
     expect(fetchArticleContentMock).toHaveBeenCalledWith(article.url);
     expect(fetchHatenaBookmarksMock).toHaveBeenCalledWith(article.url);
-    expect(generateArticleSummaryMock).toHaveBeenCalledWith(article.title, '', bookmarks);
-    expect(generateEmbeddingMock).toHaveBeenCalledTimes(2);
+    expect(generateArticleSummaryMock).toHaveBeenCalledWith(article.title, '');
+    expect(generateHatenaSummaryMock).toHaveBeenCalledWith(bookmarks);
+    expect(generateEmbeddingMock).toHaveBeenCalledTimes(3);
   });
 
   it('continues processing later articles when one article fails', async () => {
@@ -155,6 +166,7 @@ describe('syncSite', () => {
     fetchArticleContentMock.mockResolvedValueOnce('次の記事本文');
     fetchHatenaBookmarksMock.mockResolvedValue([{ user: 'bob', comment: '面白い' }]);
     generateArticleSummaryMock.mockResolvedValue('次の記事の要約');
+    generateHatenaSummaryMock.mockResolvedValue('反応の要約');
     generateEmbeddingMock.mockResolvedValue([0.1, 0.2]);
     getVectorCollectionMock.mockResolvedValue({ add: vectorAddMock } as never);
 
@@ -164,13 +176,16 @@ describe('syncSite', () => {
     expect(savedArticles).toHaveLength(1);
     expect(savedArticles[0]).toMatchObject({
       content: '次の記事本文',
+      hatenaSummary: '反応の要約',
       summary: '次の記事の要約',
+      siteUrl,
       title: nextArticle.title,
       url: nextArticle.url,
     });
     expect(fetchHatenaBookmarksMock).toHaveBeenCalledTimes(1);
     expect(generateArticleSummaryMock).toHaveBeenCalledTimes(1);
-    expect(generateEmbeddingMock).toHaveBeenCalledTimes(2);
+    expect(generateHatenaSummaryMock).toHaveBeenCalledTimes(1);
+    expect(generateEmbeddingMock).toHaveBeenCalledTimes(3);
     expect(loggerMock.warn).toHaveBeenCalledWith(
       '記事の同期に失敗しました。',
       expect.objectContaining({
@@ -196,6 +211,7 @@ describe('syncSite', () => {
 
     expect(fetchHatenaBookmarksMock).not.toHaveBeenCalled();
     expect(generateArticleSummaryMock).not.toHaveBeenCalled();
+    expect(generateHatenaSummaryMock).not.toHaveBeenCalled();
     expect(generateEmbeddingMock).not.toHaveBeenCalled();
     expect(vectorAddMock).not.toHaveBeenCalled();
     expect(loggerMock.warn).not.toHaveBeenCalled();
@@ -212,6 +228,7 @@ describe('syncSite', () => {
 
     await db.insert(articles).values({
       id: 'existing-article',
+      siteUrl,
       url: article.url,
       title: article.title,
       content: '本文',

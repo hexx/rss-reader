@@ -12,7 +12,7 @@ vi.mock('../services/ai.js', async () => {
   };
 });
 
-import { articles } from '../db/schema.js';
+import { articles, hatenaBookmarks } from '../db/schema.js';
 import { getVectorCollection } from '../db/vector.js';
 import { generateEmbedding } from '../services/ai.js';
 
@@ -26,9 +26,19 @@ async function setupDatabase() {
     CREATE TABLE articles (
       id TEXT PRIMARY KEY,
       url TEXT NOT NULL UNIQUE,
+      site_url TEXT NOT NULL,
       title TEXT NOT NULL,
       content TEXT,
       summary TEXT,
+      hatena_summary TEXT,
+      is_read INTEGER NOT NULL DEFAULT 0,
+      created_at INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE TABLE hatena_bookmarks (
+      id TEXT PRIMARY KEY,
+      article_id TEXT NOT NULL,
+      user TEXT NOT NULL,
+      comment TEXT,
       created_at INTEGER NOT NULL DEFAULT 0
     );
   `);
@@ -54,10 +64,22 @@ describe('searchArticles', () => {
     const db = await setupDatabase();
     await db.insert(articles).values({
       id: 'article-1',
+      siteUrl: 'https://example.com/',
       url: 'https://example.com/articles/1',
       title: '記事タイトル',
       content: '本文',
       summary: '要約文',
+      hatenaSummary: '反応の要約',
+      isRead: false,
+      createdAt: new Date(0),
+    });
+
+    await db.insert(hatenaBookmarks).values({
+      id: 'bookmark-1',
+      articleId: 'article-1',
+      user: 'alice',
+      comment: '参考になる',
+      createdAt: new Date(0),
     });
 
     generateEmbeddingMock.mockResolvedValue([0.1, 0.2]);
@@ -73,7 +95,19 @@ describe('searchArticles', () => {
 
     await expect(searchArticles('検索語')).resolves.toEqual([
       {
+        bookmarks: [
+          {
+            comment: '参考になる',
+            createdAt: '1970-01-01T00:00:00.000Z',
+            id: 'bookmark-1',
+            user: 'alice',
+          },
+        ],
+        createdAt: '1970-01-01T00:00:00.000Z',
         id: 'article-1',
+        hatenaSummary: '反応の要約',
+        isRead: false,
+        siteUrl: 'https://example.com/',
         summary: '要約文',
         title: '記事タイトル',
         url: 'https://example.com/articles/1',
