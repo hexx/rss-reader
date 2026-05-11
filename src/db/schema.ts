@@ -13,6 +13,7 @@ export const articles = sqliteTable('articles', {
   siteUrl: text('site_url').notNull().default(''),
   title: text('title').notNull(),
   content: text('content'),
+  publishedAt: integer('published_at', { mode: 'timestamp_ms' }),
   summary: text('summary'),
   hatenaSummary: text('hatena_summary'),
   isRead: integer('is_read', { mode: 'boolean' }).notNull().default(false),

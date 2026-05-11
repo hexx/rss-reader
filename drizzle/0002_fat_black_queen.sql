@@ -1,0 +1,1 @@
+ALTER TABLE `articles` ADD `published_at` integer;

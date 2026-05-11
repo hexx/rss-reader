@@ -37,6 +37,7 @@ async function setupDatabase() {
       site_url TEXT NOT NULL,
       title TEXT NOT NULL,
       content TEXT,
+      published_at INTEGER,
       summary TEXT,
       hatena_summary TEXT,
       is_read INTEGER NOT NULL DEFAULT 0,
@@ -139,6 +140,7 @@ describe('server api', () => {
         summary: '本文要約',
         hatenaSummary: '反応要約',
         isRead: false,
+        publishedAt: new Date('2024-01-01T00:00:00.000Z'),
       },
       {
         id: 'article-2',
@@ -149,6 +151,19 @@ describe('server api', () => {
         summary: '別の要約',
         hatenaSummary: null,
         isRead: true,
+        publishedAt: new Date('2024-01-03T00:00:00.000Z'),
+      },
+      {
+        id: 'article-3',
+        siteUrl: 'https://example.com/',
+        url: 'https://example.com/articles/3',
+        title: '三番目の記事',
+        content: '本文3',
+        summary: '三番目の要約',
+        hatenaSummary: null,
+        isRead: true,
+        publishedAt: null,
+        createdAt: new Date('2024-01-02T00:00:00.000Z'),
       },
     ]);
 
@@ -164,28 +179,32 @@ describe('server api', () => {
     const allResponse = await fetch(`${baseUrl}/api/articles`);
     const allPayload = await allResponse.json();
     expect(allResponse.ok).toBe(true);
-    expect(allPayload.articles).toHaveLength(2);
-    expect(allPayload.articles.find((article: { title: string }) => article.title === '別の記事')).toMatchObject({
-      hatenaSummary: '',
-      isRead: true,
-      siteUrl: 'https://another.example/',
-      title: '別の記事',
-      url: 'https://another.example/posts/2',
+    expect(allPayload.articles).toHaveLength(1);
+    expect(allPayload.articles[0]).toMatchObject({
+      bookmarks: [
+        {
+          comment: '参考になる',
+          id: 'bookmark-1',
+          user: 'alice',
+        },
+      ],
+      hatenaSummary: '反応要約',
+      isRead: false,
+      publishedAt: '2024-01-01T00:00:00.000Z',
+      siteUrl: 'https://example.com/',
+      title: '最初の記事',
+      url: 'https://example.com/articles/1',
     });
-      expect(allPayload.articles.find((article: { title: string }) => article.title === '最初の記事')).toMatchObject({
-        bookmarks: [
-          {
-            comment: '参考になる',
-            id: 'bookmark-1',
-            user: 'alice',
-          },
-        ],
-        hatenaSummary: '反応要約',
-        isRead: false,
-        siteUrl: 'https://example.com/',
-        title: '最初の記事',
-        url: 'https://example.com/articles/1',
-      });
+
+    const allArticlesResponse = await fetch(`${baseUrl}/api/articles?unread_only=false`);
+    const allArticlesPayload = await allArticlesResponse.json();
+    expect(allArticlesResponse.ok).toBe(true);
+    expect(allArticlesPayload.articles).toHaveLength(3);
+    expect(allArticlesPayload.articles.map((article: { title: string }) => article.title)).toEqual([
+      '最初の記事',
+      '三番目の記事',
+      '別の記事',
+    ]);
 
     const unreadResponse = await fetch(`${baseUrl}/api/articles?unread_only=true`);
     const unreadPayload = await unreadResponse.json();
@@ -205,6 +224,24 @@ describe('server api', () => {
       siteUrl: 'https://example.com/',
       title: '最初の記事',
     });
+
+    const sourcesResponse = await fetch(`${baseUrl}/api/sources`);
+    const sourcesPayload = await sourcesResponse.json();
+    expect(sourcesResponse.ok).toBe(true);
+    expect(sourcesPayload.sources).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          articleCount: 2,
+          unreadCount: 1,
+          siteUrl: 'https://example.com/',
+        }),
+        expect.objectContaining({
+          articleCount: 1,
+          unreadCount: 0,
+          siteUrl: 'https://another.example/',
+        }),
+      ]),
+    );
   });
 
   it('returns AI answers for search results', async () => {
@@ -352,6 +389,7 @@ describe('server api', () => {
           articleCount: 0,
           displayTitle: 'Another Feed',
           id: 'subscription-2',
+          unreadCount: 0,
           title: 'Another Feed',
           siteUrl: 'https://another.example/',
         },
@@ -359,6 +397,7 @@ describe('server api', () => {
           articleCount: 2,
           displayTitle: 'Example Feed',
           id: 'subscription-1',
+          unreadCount: 2,
           title: 'Example Feed',
           siteUrl: 'https://example.com/',
         },

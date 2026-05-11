@@ -84,31 +84,6 @@ export async function syncSite(siteUrl: string, debug = false): Promise<void> {
         .limit(1);
 
       if (existingArticle.length > 0) {
-        const articleId = existingArticle[0]!.id;
-        const bookmarks = shouldFetchHatenaBookmarks(siteUrl) ? await fetchHatenaBookmarks(article.url) : [];
-        const hatenaSummary = bookmarks.length > 0 ? await generateHatenaSummary(bookmarks) : null;
-
-        db.transaction((transaction) => {
-          transaction.delete(hatenaBookmarks).where(eq(hatenaBookmarks.articleId, articleId)).run();
-
-          if (bookmarks.length > 0) {
-            transaction.insert(hatenaBookmarks).values(
-              bookmarks.map((bookmark) => ({
-                id: randomUUID(),
-                articleId,
-                user: bookmark.user,
-                comment: bookmark.comment,
-              })),
-            ).run();
-          }
-
-          transaction
-            .update(articles)
-            .set({ hatenaSummary })
-            .where(eq(articles.id, articleId))
-            .run();
-        });
-
         continue;
       }
 
@@ -127,6 +102,7 @@ export async function syncSite(siteUrl: string, debug = false): Promise<void> {
           content,
           summary,
           hatenaSummary,
+          publishedAt: article.pubDate,
           isRead: false,
         }).run();
 

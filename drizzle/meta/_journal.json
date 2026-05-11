@@ -15,6 +15,13 @@
       "when": 1778459764209,
       "tag": "0001_typical_wrecking_crew",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1778507276496,
+      "tag": "0002_fat_black_queen",
+      "breakpoints": true
     }
   ]
 }

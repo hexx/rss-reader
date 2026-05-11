@@ -62,11 +62,13 @@ const siteUrl = 'https://b.hatena.ne.jp/entry/example.com/';
 const nonHatenaSiteUrl = 'https://example.com/';
 const article = {
   title: '記事タイトル',
+  pubDate: new Date('2024-01-01T00:00:00.000Z'),
   url: 'https://example.com/articles/1',
 };
 
 const nextArticle = {
   title: '次の記事',
+  pubDate: new Date('2024-01-02T00:00:00.000Z'),
   url: 'https://example.com/articles/2',
 };
 
@@ -112,6 +114,7 @@ describe('syncSite', () => {
         site_url TEXT NOT NULL,
         title TEXT NOT NULL,
         content TEXT,
+        published_at INTEGER,
         summary TEXT,
         hatena_summary TEXT,
         is_read INTEGER NOT NULL DEFAULT 0,
@@ -157,6 +160,7 @@ describe('syncSite', () => {
       content: '',
       hatenaSummary: 'はてブ要約',
       isRead: false,
+      publishedAt: new Date('2024-01-01T00:00:00.000Z'),
       summary: '要約文',
       siteUrl,
       title: article.title,
@@ -296,7 +300,7 @@ describe('syncSite', () => {
     expect(await db.select().from(articles)).toHaveLength(0);
   });
 
-  it('refreshes Hatena data for existing articles', async () => {
+  it('skips existing articles without refreshing Hatena data', async () => {
     const db = await setupDatabase();
     const vectorAddMock = vi.fn().mockResolvedValue(1);
     const { syncSite } = await import('./sync.js');
@@ -309,6 +313,7 @@ describe('syncSite', () => {
       content: '本文',
       summary: '既存要約',
       hatenaSummary: '古いはてブ要約',
+      publishedAt: new Date('2024-01-01T00:00:00.000Z'),
     });
 
     await db.insert(hatenaBookmarks).values({
@@ -319,34 +324,33 @@ describe('syncSite', () => {
     });
 
     fetchRssOrFallbackMock.mockResolvedValue([article]);
-    fetchHatenaBookmarksMock.mockResolvedValue(bookmarks);
-    generateHatenaSummaryMock.mockResolvedValue('更新後の要約');
     getVectorCollectionMock.mockResolvedValue({ add: vectorAddMock } as never);
 
     await syncSite(siteUrl);
 
     expect(fetchArticleContentMock).not.toHaveBeenCalled();
-    expect(fetchHatenaBookmarksMock).toHaveBeenCalledWith(article.url);
+    expect(fetchHatenaBookmarksMock).not.toHaveBeenCalled();
     expect(generateArticleSummaryMock).not.toHaveBeenCalled();
+    expect(generateHatenaSummaryMock).not.toHaveBeenCalled();
     expect(generateEmbeddingsMock).not.toHaveBeenCalled();
     expect(vectorAddMock).not.toHaveBeenCalled();
-    expect(generateHatenaSummaryMock).toHaveBeenCalledWith(bookmarks);
 
     const savedArticles = await db.select().from(articles);
     const savedBookmarks = await db.select().from(hatenaBookmarks);
 
     expect(savedArticles).toHaveLength(1);
     expect(savedArticles[0]).toMatchObject({
-      hatenaSummary: '更新後の要約',
+      hatenaSummary: '古いはてブ要約',
       id: 'existing-article',
+      publishedAt: new Date('2024-01-01T00:00:00.000Z'),
       title: article.title,
       url: article.url,
     });
     expect(savedBookmarks).toHaveLength(1);
     expect(savedBookmarks[0]).toMatchObject({
       articleId: 'existing-article',
-      comment: '参考になる',
-      user: 'alice',
+      comment: '古いコメント',
+      user: 'old',
     });
   });
 });

@@ -29,6 +29,7 @@ async function setupDatabase() {
       site_url TEXT NOT NULL,
       title TEXT NOT NULL,
       content TEXT,
+      published_at INTEGER,
       summary TEXT,
       hatena_summary TEXT,
       is_read INTEGER NOT NULL DEFAULT 0,
