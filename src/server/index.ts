@@ -1,5 +1,5 @@
 import express from 'express';
-import { and, count, desc, eq, inArray } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, sql } from 'drizzle-orm';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -23,6 +23,7 @@ type ArticleResponse = {
   id: string;
   hatenaSummary: string;
   isRead: boolean;
+  publishedAt: string;
   siteUrl: string;
   summary: string;
   title: string;
@@ -36,8 +37,9 @@ type SearchReferenceResponse = {
 };
 
 type SourceRow = {
-  articleCount: number | bigint | null;
+  articleId: string | null;
   id: string;
+  isRead: boolean | number | null;
   siteUrl: string;
   title: string | null;
 };
@@ -48,6 +50,7 @@ type ArticleRow = {
   id: string;
   hatenaSummary: string | null;
   isRead: boolean | number | null;
+  publishedAt: Date | string | number | null;
   siteUrl: string;
   summary: string | null;
   title: string;
@@ -99,6 +102,7 @@ function createArticleResponse(
     id: article.id,
     hatenaSummary: article.hatenaSummary?.trim() ?? '',
     isRead: Boolean(article.isRead),
+    publishedAt: formatDate(article.publishedAt ?? article.createdAt),
     siteUrl: article.siteUrl,
     summary: article.summary ?? '',
     title: article.title,
@@ -184,7 +188,7 @@ function normalizeSiteUrl(siteUrl: string): string {
   return new URL(siteUrl).toString();
 }
 
-async function fetchArticles(sourceUrl?: string, unreadOnly = false): Promise<ArticleRow[]> {
+async function fetchArticles(sourceUrl?: string, unreadOnly = true): Promise<ArticleRow[]> {
   const query = db
     .select({
       content: articles.content,
@@ -192,6 +196,7 @@ async function fetchArticles(sourceUrl?: string, unreadOnly = false): Promise<Ar
       hatenaSummary: articles.hatenaSummary,
       id: articles.id,
       isRead: articles.isRead,
+      publishedAt: articles.publishedAt,
       siteUrl: articles.siteUrl,
       summary: articles.summary,
       title: articles.title,
@@ -210,7 +215,7 @@ async function fetchArticles(sourceUrl?: string, unreadOnly = false): Promise<Ar
 
   const filteredQuery = filters.length > 0 ? query.where(and(...filters)) : query;
 
-  return await filteredQuery.orderBy(desc(articles.createdAt));
+  return await filteredQuery.orderBy(asc(sql`coalesce(${articles.publishedAt}, ${articles.createdAt})`));
 }
 
 async function fetchBookmarksByArticleIds(articleIds: string[]): Promise<BookmarkRow[]> {
@@ -242,7 +247,7 @@ export function createApp() {
         typeof request.query.source === 'string' && request.query.source.trim().length > 0
           ? request.query.source.trim()
           : undefined;
-      const unreadOnly = request.query.unread_only === 'true';
+      const unreadOnly = request.query.unread_only === undefined ? true : request.query.unread_only === 'true';
 
       const articleRows = await fetchArticles(sourceUrl, unreadOnly);
       const bookmarkRows = await fetchBookmarksByArticleIds(articleRows.map((article) => article.id));
@@ -269,29 +274,63 @@ export function createApp() {
       const sourceRows = await db
         .select({
           id: subscriptions.id,
+          articleId: articles.id,
+          isRead: articles.isRead,
           siteUrl: subscriptions.siteUrl,
           title: subscriptions.title,
-          articleCount: count(articles.id),
         })
         .from(subscriptions)
         .leftJoin(articles, eq(articles.siteUrl, subscriptions.siteUrl))
-        .groupBy(subscriptions.id, subscriptions.siteUrl, subscriptions.title)
         .orderBy(desc(subscriptions.addedAt));
 
       const titleCounts = new Map<string, number>();
+      const sourceMap = new Map<
+        string,
+        {
+          articleCount: number;
+          displayTitle: string;
+          id: string;
+          unreadCount: number;
+          siteUrl: string;
+          title: string | null;
+        }
+      >();
+
+      for (const source of sourceRows) {
+        const existingSource =
+          sourceMap.get(source.id) ??
+          (() => {
+            const baseSource = {
+              articleCount: 0,
+              displayTitle: '',
+              id: source.id,
+              unreadCount: 0,
+              siteUrl: source.siteUrl,
+              title: source.title,
+            };
+            sourceMap.set(source.id, baseSource);
+            return baseSource;
+          })();
+
+        if (source.articleId) {
+          existingSource.articleCount += 1;
+          if (!source.isRead) {
+            existingSource.unreadCount += 1;
+          }
+        }
+      }
+
       for (const source of sourceRows) {
         const baseTitle = sourceTitleBase(source);
         titleCounts.set(baseTitle, (titleCounts.get(baseTitle) ?? 0) + 1);
       }
 
+      for (const source of sourceMap.values()) {
+        source.displayTitle = sourceDisplayTitle(source, titleCounts);
+      }
+
       response.json({
-        sources: sourceRows.map((source) => ({
-          articleCount: Number(source.articleCount ?? 0),
-          displayTitle: sourceDisplayTitle(source, titleCounts),
-          id: source.id,
-          siteUrl: source.siteUrl,
-          title: source.title,
-        })),
+        sources: Array.from(sourceMap.values()),
       });
     } catch (error) {
       next(error);

@@ -16,6 +16,7 @@ const feedXml = `<?xml version="1.0" encoding="UTF-8"?>
     <item>
       <title>First article</title>
       <link>${articleOneUrl}</link>
+      <pubDate>Tue, 02 Jan 2024 03:04:05 GMT</pubDate>
     </item>
   </channel>
 </rss>`;
@@ -86,6 +87,7 @@ describe('scraper service', () => {
 
     await expect(fetchRssOrFallback(feedUrl)).resolves.toEqual([
       {
+        pubDate: new Date('2024-01-02T03:04:05.000Z'),
         title: 'First article',
         url: articleOneUrl,
       },
@@ -93,10 +95,12 @@ describe('scraper service', () => {
 
     await expect(fetchRssOrFallback(fallbackUrl)).resolves.toEqual([
       {
+        pubDate: null,
         title: 'First article',
         url: articleOneUrl,
       },
       {
+        pubDate: null,
         title: 'Second article title',
         url: articleTwoUrl,
       },
@@ -118,6 +122,7 @@ describe('scraper service', () => {
 
     await expect(promise).resolves.toEqual([
       {
+        pubDate: new Date('2024-01-02T03:04:05.000Z'),
         title: 'First article',
         url: articleOneUrl,
         content: 'First article Article body text.',

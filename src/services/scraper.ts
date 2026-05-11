@@ -7,6 +7,7 @@ import Parser from 'rss-parser';
 import { sleep } from '../utils/sleep.js';
 
 export interface ScrapedLink {
+  pubDate: Date | null;
   title: string;
   url: string;
 }
@@ -41,6 +42,15 @@ function normalizeText(value: string): string {
 
 function randomSleepMs(): number {
   return Math.floor(Math.random() * (maximumSleepMs - minimumSleepMs + 1)) + minimumSleepMs;
+}
+
+function parsePubDate(value: string | undefined): Date | null {
+  if (!value) {
+    return null;
+  }
+
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
 }
 
 function resolveUrl(rawUrl: string, baseUrl: string): string | null {
@@ -142,6 +152,7 @@ function extractFallbackLinks(html: string, baseUrl: string): ScrapedLink[] {
 
     seenUrls.add(resolvedUrl);
     links.push({
+      pubDate: null,
       title,
       url: resolvedUrl,
     });
@@ -167,6 +178,7 @@ export async function fetchRssOrFallback(siteUrl: string): Promise<ScrapedLink[]
 
         const title = normalizeText(item.title ?? '');
         return {
+          pubDate: parsePubDate(item.isoDate ?? item.pubDate),
           title: title.length > 0 ? title : url,
           url,
         };

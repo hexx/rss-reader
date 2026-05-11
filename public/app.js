@@ -12,10 +12,12 @@ const aiAnswerElement = document.querySelector('#ai-answer');
 const state = {
   query: '',
   sourceUrl: null,
-  unreadOnly: false,
+  unreadOnly: true,
 };
 
 let latestSources = [];
+
+unreadOnlyToggle.checked = state.unreadOnly;
 
 function setStatus(message) {
   statusElement.textContent = message;
@@ -279,7 +281,7 @@ function renderSources(sources) {
     button.type = 'button';
     button.className = 'source-item';
     button.dataset.sourceUrl = source.siteUrl;
-    button.textContent = `${sourceLabel(source)} (${source.articleCount})`;
+    button.textContent = `${sourceLabel(source)} (${source.unreadCount} / ${source.articleCount})`;
     button.title = source.siteUrl;
     button.addEventListener('click', () => {
       state.sourceUrl = source.siteUrl;
@@ -329,7 +331,7 @@ function createCard(article) {
   title.textContent = article.title;
   title.href = article.url;
   source.textContent = sourceLabel(article.siteUrl);
-  date.textContent = formatDate(article.createdAt);
+  date.textContent = formatDate(article.publishedAt ?? article.createdAt);
   readToggle.textContent = article.isRead ? '未読に戻す' : '既読にする';
 
   setSnippetHtml(articleSummary, article.summary, '記事の要約はまだありません。');
@@ -381,9 +383,7 @@ function buildArticlesUrl(sourceUrl = state.sourceUrl) {
     params.set('source', sourceUrl);
   }
 
-  if (state.unreadOnly) {
-    params.set('unread_only', 'true');
-  }
+  params.set('unread_only', String(state.unreadOnly));
 
   const query = params.toString();
   return query.length > 0 ? `/api/articles?${query}` : '/api/articles';
