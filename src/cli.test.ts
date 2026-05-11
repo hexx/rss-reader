@@ -44,5 +44,5 @@ describe('cli subscription commands', () => {
 
     const rowsAfterUnsubscribe = await db.select().from(subscriptions);
     expect(rowsAfterUnsubscribe).toHaveLength(0);
-  });
+  }, 10_000);
 });

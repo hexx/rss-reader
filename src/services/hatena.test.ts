@@ -65,4 +65,22 @@ describe('fetchHatenaBookmarks', () => {
       },
     ]);
   });
+
+  it('returns an empty list when Hatena responds with null', async () => {
+    server.use(
+      http.get(hatenaApiBaseUrl, () =>
+        HttpResponse.json(null, {
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      ),
+    );
+
+    vi.useFakeTimers();
+
+    const promise = fetchHatenaBookmarks(articleUrl);
+
+    await vi.advanceTimersByTimeAsync(1_000);
+
+    await expect(promise).resolves.toEqual([]);
+  });
 });
