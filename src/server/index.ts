@@ -29,6 +29,19 @@ type ArticleResponse = {
   url: string;
 };
 
+type SearchReferenceResponse = {
+  id: string;
+  title: string;
+  url: string;
+};
+
+type SourceRow = {
+  articleCount: number | bigint | null;
+  id: string;
+  siteUrl: string;
+  title: string | null;
+};
+
 type ArticleRow = {
   content: string | null;
   createdAt: Date | string | number | null;
@@ -107,6 +120,64 @@ function buildRagContexts(results: SearchArticleResult[]): string[] {
       .filter((line): line is string => line !== null)
       .join('\n'),
   );
+}
+
+function buildRagReferences(results: SearchArticleResult[]): SearchReferenceResponse[] {
+  return results.map((result) => ({
+    id: result.id,
+    title: result.title,
+    url: result.url,
+  }));
+}
+
+function sourceHostname(siteUrl: string): string {
+  try {
+    return new URL(siteUrl).hostname;
+  } catch {
+    return siteUrl;
+  }
+}
+
+function sourceTitleBase(source: Pick<SourceRow, 'siteUrl' | 'title'>): string {
+  const title = source.title?.trim();
+  return title && title.length > 0 ? title : sourceHostname(source.siteUrl);
+}
+
+function sourceSuffix(siteUrl: string): string {
+  try {
+    const url = new URL(siteUrl);
+    const segments = url.pathname.split('/').filter(Boolean);
+    if (segments.length === 0) {
+      return '';
+    }
+
+    return segments[segments.length - 1]!.replace(/\.[^.]+$/, '').trim().toUpperCase();
+  } catch {
+    return '';
+  }
+}
+
+function isHatenaSource(siteUrl: string): boolean {
+  try {
+    return new URL(siteUrl).hostname === 'b.hatena.ne.jp';
+  } catch {
+    return false;
+  }
+}
+
+function sourceDisplayTitle(
+  source: Pick<SourceRow, 'siteUrl' | 'title'>,
+  titleCounts: Map<string, number>,
+): string {
+  const base = sourceTitleBase(source);
+  const suffix = sourceSuffix(source.siteUrl);
+  const shouldDisambiguate = (titleCounts.get(base) ?? 0) > 1 || isHatenaSource(source.siteUrl);
+
+  if (!shouldDisambiguate || suffix.length === 0) {
+    return base;
+  }
+
+  return `${base} (${suffix})`;
 }
 
 function normalizeSiteUrl(siteUrl: string): string {
@@ -207,9 +278,16 @@ export function createApp() {
         .groupBy(subscriptions.id, subscriptions.siteUrl, subscriptions.title)
         .orderBy(desc(subscriptions.addedAt));
 
+      const titleCounts = new Map<string, number>();
+      for (const source of sourceRows) {
+        const baseTitle = sourceTitleBase(source);
+        titleCounts.set(baseTitle, (titleCounts.get(baseTitle) ?? 0) + 1);
+      }
+
       response.json({
         sources: sourceRows.map((source) => ({
           articleCount: Number(source.articleCount ?? 0),
+          displayTitle: sourceDisplayTitle(source, titleCounts),
           id: source.id,
           siteUrl: source.siteUrl,
           title: source.title,
@@ -266,9 +344,10 @@ export function createApp() {
         return;
       }
 
-      const results = await searchArticles(query);
-      const aiAnswer = await generateRagAnswer(query, buildRagContexts(results));
-      response.json({ results, aiAnswer });
+       const results = await searchArticles(query);
+       const references = buildRagReferences(results);
+       const aiAnswer = await generateRagAnswer(query, buildRagContexts(results), results);
+       response.json({ results, references, aiAnswer });
     } catch (error) {
       next(error);
     }

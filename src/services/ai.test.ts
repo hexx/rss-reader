@@ -115,14 +115,36 @@ describe('generateArticleSummary', () => {
   it('generates a RAG answer from contexts', async () => {
     generateTextMock.mockResolvedValue({ text: 'RAGの回答' } as never);
 
-    await expect(generateRagAnswer('質問ですか？', ['コンテキスト1', 'コンテキスト2'])).resolves.toBe('RAGの回答');
+    await expect(
+      generateRagAnswer(
+        '質問ですか？',
+        ['コンテキスト1', 'コンテキスト2'],
+        [
+          {
+            bookmarks: [],
+            createdAt: '1970-01-01T00:00:00.000Z',
+            id: 'article-1',
+            hatenaSummary: 'はてブ要約',
+            isRead: false,
+            siteUrl: 'https://example.com/',
+            summary: '記事の要約',
+            title: '検索対象の記事',
+            url: 'https://example.com/articles/1',
+          },
+        ],
+      ),
+    ).resolves.toBe('RAGの回答');
 
     const callArgs = generateTextMock.mock.calls[0]?.[0];
     expect(callArgs).toBeDefined();
     expect(callArgs?.system).toContain('提供されたコンテキストのみを使って回答してください');
     expect(callArgs?.system).toContain('情報が足りない場合は、推測せずにわからないと答えてください');
+    expect(callArgs?.system).toContain('必ず [1], [2] のような形式で参照番号を付けてください');
+    expect(callArgs?.system).toContain('Markdown 形式のリストで作成してください');
     expect(callArgs?.prompt).toContain('質問: 質問ですか？');
     expect(callArgs?.prompt).toContain('コンテキスト1');
     expect(callArgs?.prompt).toContain('コンテキスト2');
+    expect(callArgs?.prompt).toContain('参照一覧:');
+    expect(callArgs?.prompt).toContain('[1] 検索対象の記事');
   });
 });

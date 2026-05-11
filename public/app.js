@@ -33,18 +33,6 @@ function formatDate(value) {
   }).format(date);
 }
 
-function setAiAnswer(answer) {
-  const text = answer.trim();
-  if (text.length === 0) {
-    aiAnswerElement.textContent = '';
-    aiAnswerSection.hidden = true;
-    return;
-  }
-
-  aiAnswerElement.textContent = text;
-  aiAnswerSection.hidden = false;
-}
-
 function sourceHostname(siteUrl) {
   try {
     return new URL(siteUrl).hostname;
@@ -58,60 +46,146 @@ function sourceLabel(source) {
     return sourceHostname(source);
   }
 
-  const title = source.title?.trim();
+  const title = source.displayTitle?.trim() || source.title?.trim();
   return title && title.length > 0 ? title : sourceHostname(source.siteUrl);
 }
 
-function sanitizeSnippetHtml(html) {
-  const templateElement = document.createElement('template');
-  templateElement.innerHTML = html;
+function getReferenceMap(references) {
+  const map = new Map();
+  references.forEach((reference, index) => {
+    map.set(index + 1, reference);
+  });
 
-  const allowedTags = new Set(['P', 'UL', 'LI', 'OL', 'STRONG', 'EM', 'BR', 'A']);
-  const elements = Array.from(templateElement.content.querySelectorAll('*')).reverse();
-
-  for (const element of elements) {
-    if (!allowedTags.has(element.tagName)) {
-      const childNodes = Array.from(element.childNodes);
-      element.replaceWith(...childNodes);
-      continue;
-    }
-
-    for (const attribute of Array.from(element.attributes)) {
-      if (element.tagName === 'A' && attribute.name === 'href') {
-        const href = attribute.value.trim();
-        if (
-          !/^https?:\/\//i.test(href) &&
-          !href.startsWith('mailto:') &&
-          !href.startsWith('#')
-        ) {
-          element.removeAttribute(attribute.name);
-        }
-        continue;
-      }
-
-      if (element.tagName === 'A' && (attribute.name === 'title' || attribute.name === 'target' || attribute.name === 'rel')) {
-        continue;
-      }
-
-      element.removeAttribute(attribute.name);
-    }
-
-    if (element.tagName === 'A' && !element.getAttribute('rel')) {
-      element.setAttribute('rel', 'noreferrer noopener');
-    }
-  }
-
-  return templateElement.innerHTML;
+  return map;
 }
 
-function setSnippetHtml(element, html, fallbackText) {
-  const snippet = html.trim();
+function appendReferenceText(parent, text, referenceMap) {
+  const referencePattern = /\[(\d+)\]/g;
+  let lastIndex = 0;
+  let match = referencePattern.exec(text);
+
+  while (match) {
+    if (match.index > lastIndex) {
+      parent.append(document.createTextNode(text.slice(lastIndex, match.index)));
+    }
+
+    const referenceNumber = Number(match[1]);
+    const reference = referenceMap.get(referenceNumber);
+    if (reference) {
+      const link = document.createElement('a');
+      link.href = `#article-${reference.id}`;
+      link.className = 'ai-answer__reference';
+      link.textContent = `[${referenceNumber}]`;
+      link.title = reference.title;
+      parent.append(link);
+    } else {
+      parent.append(document.createTextNode(match[0]));
+    }
+
+    lastIndex = referencePattern.lastIndex;
+    match = referencePattern.exec(text);
+  }
+
+  if (lastIndex < text.length) {
+    parent.append(document.createTextNode(text.slice(lastIndex)));
+  }
+}
+
+function renderAiAnswer(answer, references) {
+  const snippet = typeof answer === 'string' ? answer.trim() : '';
   if (snippet.length === 0) {
-    element.textContent = fallbackText;
+    aiAnswerElement.replaceChildren();
+    aiAnswerSection.hidden = true;
     return;
   }
 
-  element.innerHTML = sanitizeSnippetHtml(snippet);
+  const referenceMap = getReferenceMap(references);
+  const fragment = document.createDocumentFragment();
+  const lines = snippet.split(/\r?\n/);
+  let paragraphLines = [];
+  let listElement = null;
+
+  const flushParagraph = () => {
+    if (paragraphLines.length === 0) {
+      return;
+    }
+
+    const paragraph = document.createElement('p');
+    appendReferenceText(paragraph, paragraphLines.join(' '), referenceMap);
+    fragment.append(paragraph);
+    paragraphLines = [];
+  };
+
+  const flushList = () => {
+    if (!listElement) {
+      return;
+    }
+
+    fragment.append(listElement);
+    listElement = null;
+  };
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (trimmed.length === 0) {
+      flushParagraph();
+      flushList();
+      continue;
+    }
+
+    const listMatch = trimmed.match(/^[-*]\s+\[(\d+)\]\s*(.+)$/);
+    if (listMatch) {
+      flushParagraph();
+      if (!listElement) {
+        listElement = document.createElement('ul');
+      }
+
+      const referenceNumber = Number(listMatch[1]);
+      const reference = referenceMap.get(referenceNumber);
+      const listItem = document.createElement('li');
+
+      if (reference) {
+        const numberLink = document.createElement('a');
+        numberLink.href = `#article-${reference.id}`;
+        numberLink.className = 'ai-answer__reference';
+        numberLink.textContent = `[${referenceNumber}]`;
+        numberLink.title = reference.title;
+
+        const titleLink = document.createElement('a');
+        titleLink.href = reference.url;
+        titleLink.target = '_blank';
+        titleLink.rel = 'noreferrer noopener';
+        titleLink.textContent = listMatch[2].trim() || reference.title;
+        titleLink.title = reference.url;
+
+        listItem.append(numberLink, document.createTextNode(' '), titleLink);
+      } else {
+        appendReferenceText(listItem, trimmed, referenceMap);
+      }
+
+      listElement.append(listItem);
+      continue;
+    }
+
+    flushList();
+    paragraphLines.push(trimmed);
+  }
+
+  flushParagraph();
+  flushList();
+  aiAnswerElement.replaceChildren(fragment);
+  aiAnswerSection.hidden = false;
+}
+
+function setAiAnswer(answer, references = []) {
+  const normalizedAnswer = typeof answer === 'string' ? answer : '';
+  if (normalizedAnswer.trim().length === 0) {
+    aiAnswerElement.replaceChildren();
+    aiAnswerSection.hidden = true;
+    return;
+  }
+
+  renderAiAnswer(normalizedAnswer, Array.isArray(references) ? references : []);
 }
 
 function updateSourceListActiveState() {
@@ -132,6 +206,7 @@ function renderSources(sources) {
   allButton.type = 'button';
   allButton.className = 'source-item';
   allButton.textContent = 'すべて';
+  allButton.title = 'すべての記事を表示';
   allButton.dataset.sourceUrl = '';
   allButton.addEventListener('click', () => {
     state.sourceUrl = null;
@@ -154,6 +229,7 @@ function renderSources(sources) {
     button.className = 'source-item';
     button.dataset.sourceUrl = source.siteUrl;
     button.textContent = `${sourceLabel(source)} (${source.articleCount})`;
+    button.title = source.siteUrl;
     button.addEventListener('click', () => {
       state.sourceUrl = source.siteUrl;
       state.query = '';
@@ -165,6 +241,7 @@ function renderSources(sources) {
     removeButton.type = 'button';
     removeButton.className = 'source-remove';
     removeButton.textContent = '解除';
+    removeButton.title = source.siteUrl;
     removeButton.addEventListener('click', () => {
       void removeSubscription(source.siteUrl).catch((error) => {
         setStatus(error instanceof Error ? error.message : '購読解除に失敗しました。');
@@ -195,6 +272,7 @@ function createCard(article) {
 
   card.classList.toggle('is-read', Boolean(article.isRead));
   card.classList.toggle('is-unread', !article.isRead);
+  card.id = `article-${article.id}`;
   card.dataset.articleId = article.id;
 
   title.textContent = article.title;
@@ -338,7 +416,10 @@ async function runSearch(query) {
     }
 
     renderArticles(data.results ?? []);
-    setAiAnswer(typeof data.aiAnswer === 'string' ? data.aiAnswer : '');
+    setAiAnswer(
+      typeof data.aiAnswer === 'string' ? data.aiAnswer : '',
+      Array.isArray(data.references) ? data.references : [],
+    );
     setStatus('検索結果を表示しています。');
   } catch (error) {
     setStatus(error instanceof Error ? error.message : '検索に失敗しました。');

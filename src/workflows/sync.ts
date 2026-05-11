@@ -73,6 +73,7 @@ export async function syncSite(siteUrl: string, debug = false): Promise<void> {
   const vectorCollection = await getVectorCollection();
 
   for (const article of siteArticles) {
+    logger.info('記事の同期処理を実行します。', { title: article.title, url: article.url });
     await sleep(randomArticleDelayMs());
 
     try {
@@ -178,7 +179,6 @@ export async function syncAllSubscriptions(debug = false): Promise<void> {
   }
 
   for (const [index, subscription] of subscribedSites.entries()) {
-    logger.info('購読サイトを同期します。', { siteUrl: subscription.siteUrl });
     await syncSite(subscription.siteUrl, debug);
 
     if (index < subscribedSites.length - 1) {
