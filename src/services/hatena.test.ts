@@ -26,6 +26,7 @@ const hatenaResponse = {
 
 describe('fetchHatenaBookmarks', () => {
   afterEach(() => {
+    vi.restoreAllMocks();
     vi.useRealTimers();
   });
 
@@ -33,6 +34,7 @@ describe('fetchHatenaBookmarks', () => {
     server.use(
       http.get(hatenaApiBaseUrl, ({ request }) => {
         const requestUrl = new URL(request.url);
+        expect(request.headers.get('user-agent')).toBe('rss-reader/1.0');
         if (requestUrl.searchParams.get('url') !== articleUrl) {
           return HttpResponse.json(
             { bookmarks: [] },
@@ -48,6 +50,7 @@ describe('fetchHatenaBookmarks', () => {
       }),
     );
 
+    vi.spyOn(Math, 'random').mockReturnValue(0);
     vi.useFakeTimers();
 
     const promise = fetchHatenaBookmarks(articleUrl);
@@ -68,13 +71,15 @@ describe('fetchHatenaBookmarks', () => {
 
   it('returns an empty list when Hatena responds with null', async () => {
     server.use(
-      http.get(hatenaApiBaseUrl, () =>
-        HttpResponse.json(null, {
+      http.get(hatenaApiBaseUrl, ({ request }) => {
+        expect(request.headers.get('user-agent')).toBe('rss-reader/1.0');
+        return HttpResponse.json(null, {
           headers: { 'Content-Type': 'application/json' },
-        }),
-      ),
+        });
+      }),
     );
 
+    vi.spyOn(Math, 'random').mockReturnValue(0);
     vi.useFakeTimers();
 
     const promise = fetchHatenaBookmarks(articleUrl);

@@ -13,18 +13,28 @@ interface HatenaBookmarkApiResponse {
 }
 
 const hatenaEntryJsonLiteBaseUrl = 'https://b.hatena.ne.jp/entry/jsonlite/?url=';
-const hatenaRequestDelayMs = 1_000;
+const minimumHatenaRequestDelayMs = 1_000;
+const maximumHatenaRequestDelayMs = 3_000;
+const hatenaUserAgent = 'rss-reader/1.0';
+
+function randomHatenaRequestDelayMs(): number {
+  return (
+    Math.floor(Math.random() * (maximumHatenaRequestDelayMs - minimumHatenaRequestDelayMs + 1)) +
+    minimumHatenaRequestDelayMs
+  );
+}
 
 function normalizeComment(comment: string): string {
   return comment.replace(/\s+/g, ' ').trim();
 }
 
 export async function fetchHatenaBookmarks(articleUrl: string): Promise<HatenaBookmarkComment[]> {
-  await sleep(hatenaRequestDelayMs);
+  await sleep(randomHatenaRequestDelayMs());
 
   const response = await fetch(`${hatenaEntryJsonLiteBaseUrl}${encodeURIComponent(articleUrl)}`, {
     headers: {
       accept: 'application/json',
+      'user-agent': hatenaUserAgent,
     },
   });
 
