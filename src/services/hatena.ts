@@ -32,8 +32,8 @@ export async function fetchHatenaBookmarks(articleUrl: string): Promise<HatenaBo
     throw new Error(`Failed to fetch Hatena bookmarks for ${articleUrl}: ${response.status} ${response.statusText}`);
   }
 
-  const payload = (await response.json()) as HatenaBookmarkApiResponse;
-  const bookmarks = Array.isArray(payload.bookmarks) ? payload.bookmarks : [];
+  const payload = (await response.json()) as HatenaBookmarkApiResponse | null | undefined;
+  const bookmarks = payload && Array.isArray(payload.bookmarks) ? payload.bookmarks : [];
 
   return bookmarks
     .map((bookmark): HatenaBookmarkComment | null => {
