@@ -52,6 +52,7 @@ async function setupDatabase() {
     CREATE TABLE subscriptions (
       id TEXT PRIMARY KEY,
       site_url TEXT NOT NULL UNIQUE,
+      title TEXT,
       added_at INTEGER NOT NULL DEFAULT 0
     );
   `);
@@ -119,10 +120,12 @@ describe('server api', () => {
       {
         id: 'subscription-1',
         siteUrl: 'https://example.com/',
+        title: 'Example Feed',
       },
       {
         id: 'subscription-2',
         siteUrl: 'https://another.example/',
+        title: null,
       },
     ]);
 
@@ -286,10 +289,12 @@ describe('server api', () => {
       {
         id: 'subscription-1',
         siteUrl: 'https://example.com/',
+        title: 'Example Feed',
       },
       {
         id: 'subscription-2',
         siteUrl: 'https://another.example/',
+        title: 'Another Feed',
       },
     ]);
 
@@ -327,14 +332,54 @@ describe('server api', () => {
         {
           articleCount: 0,
           id: 'subscription-2',
+          title: 'Another Feed',
           siteUrl: 'https://another.example/',
         },
         {
           articleCount: 2,
           id: 'subscription-1',
+          title: 'Example Feed',
           siteUrl: 'https://example.com/',
         },
       ]),
     );
+  });
+
+  it('deletes subscriptions through the API', async () => {
+    const { db } = await import('../db/index.js');
+
+    await db.insert(subscriptions).values([
+      {
+        id: 'subscription-1',
+        siteUrl: 'https://example.com/',
+        title: 'Example Feed',
+      },
+      {
+        id: 'subscription-2',
+        siteUrl: 'https://another.example/',
+        title: 'Another Feed',
+      },
+    ]);
+
+    const baseUrl = await startServer();
+    const response = await fetch(`${baseUrl}/api/subscriptions`, {
+      method: 'DELETE',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ siteUrl: 'https://example.com/' }),
+    });
+
+    expect(response.ok).toBe(true);
+    await expect(response.json()).resolves.toEqual({
+      siteUrl: 'https://example.com/',
+    });
+
+    const rows = await db.select().from(subscriptions);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      siteUrl: 'https://another.example/',
+      title: 'Another Feed',
+    });
   });
 });

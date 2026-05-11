@@ -62,22 +62,23 @@
     <template id="article-card-template">
       <article class="card">
         <header class="card__header">
-          <div class="card__title-group">
-            <a class="card__title" target="_blank" rel="noreferrer"></a>
-            <div class="card__meta">
-              <span class="card__source"></span>
-              <span class="card__date"></span>
+            <div class="card__title-group">
+              <a class="card__title" target="_blank" rel="noreferrer"></a>
+              <div class="card__meta">
+                <span class="card__source"></span>
+                <span class="card__date"></span>
+                <span class="card__url"></span>
+              </div>
             </div>
-          </div>
           <button class="card__read-toggle" type="button"></button>
         </header>
         <section class="card__summary-section">
           <h3>記事の要約</h3>
-          <p class="card__article-summary"></p>
+          <div class="card__article-summary"></div>
         </section>
         <section class="card__summary-section card__summary-section--hatena">
           <h3>はてブの反応</h3>
-          <p class="card__hatena-summary"></p>
+          <div class="card__hatena-summary"></div>
         </section>
         <a class="card__article-link" target="_blank" rel="noreferrer">記事を読む</a>
         <div class="card__comments-heading">個別コメント</div>

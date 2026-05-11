@@ -12,8 +12,9 @@ function normalizeSiteUrl(siteUrl: string): string {
   return new URL(siteUrl).toString();
 }
 
-async function subscribeSite(siteUrl: string): Promise<void> {
+export async function subscribeSite(siteUrl: string): Promise<void> {
   const normalizedSiteUrl = normalizeSiteUrl(siteUrl);
+  const siteTitle = new URL(normalizedSiteUrl).hostname;
 
   const existingSubscription = await db
     .select({ id: subscriptions.id })
@@ -29,9 +30,29 @@ async function subscribeSite(siteUrl: string): Promise<void> {
   await db.insert(subscriptions).values({
     id: randomUUID(),
     siteUrl: normalizedSiteUrl,
+    title: siteTitle,
   });
 
   console.log(`購読を追加しました: ${normalizedSiteUrl}`);
+}
+
+export async function unsubscribeSite(siteUrl: string): Promise<void> {
+  const normalizedSiteUrl = normalizeSiteUrl(siteUrl);
+
+  const existingSubscription = await db
+    .select({ id: subscriptions.id })
+    .from(subscriptions)
+    .where(eq(subscriptions.siteUrl, normalizedSiteUrl))
+    .limit(1);
+
+  if (existingSubscription.length === 0) {
+    console.log(`購読が見つかりません: ${normalizedSiteUrl}`);
+    return;
+  }
+
+  await db.delete(subscriptions).where(eq(subscriptions.siteUrl, normalizedSiteUrl)).run();
+
+  console.log(`購読を解除しました: ${normalizedSiteUrl}`);
 }
 
 async function syncSubscriptions(debug = false): Promise<void> {
@@ -72,6 +93,14 @@ program
   });
 
 program
+  .command('unsubscribe')
+  .argument('<siteUrl>')
+  .description('サイトの購読を解除する')
+  .action(async (siteUrl: string) => {
+    await unsubscribeSite(siteUrl);
+  });
+
+program
   .command('sync')
   .description('登録済みのサイトを同期する')
   .action(async () => {
@@ -86,4 +115,6 @@ program
     await searchForArticles(queryParts.join(' '));
   });
 
-await program.parseAsync(process.argv);
+if (!process.env.VITEST && process.argv[1]?.includes('src/cli.ts')) {
+  await program.parseAsync(process.argv);
+}

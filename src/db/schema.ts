@@ -36,6 +36,7 @@ export const hatenaBookmarks = sqliteTable('hatena_bookmarks', {
 export const subscriptions = sqliteTable('subscriptions', {
   id: text('id').primaryKey(),
   siteUrl: text('site_url').notNull().unique(),
+  title: text('title'),
   addedAt: integer('added_at', { mode: 'timestamp_ms' })
     .notNull()
     .default(createdAtDefault),

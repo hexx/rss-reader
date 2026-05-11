@@ -18,6 +18,7 @@ function requireEnv(name: string): string {
 function buildArticleSummaryPrompt(title: string, content: string): string {
   return [
     '記事のタイトルと本文を踏まえて、全体の要点を日本語で簡潔に要約してください。',
+    '出力は段落(<p>)やリスト(<ul>,<li>)、強調(<strong>)などのHTMLタグを用いて、見やすく構造化されたHTMLスニペットにしてください。',
     '',
     `タイトル: ${title}`,
     '',
@@ -80,7 +81,7 @@ export async function generateArticleSummary(
   const result = await generateText({
     model: getOpenCodeGoChatModel(),
     system:
-      'あなたは日本語の要約アシスタントです。与えられた記事を簡潔に要約してください。記事本文が空で提供される場合もあります。その場合は、タイトルから推測できる範囲で要約を作成してください。',
+      'あなたは日本語の要約アシスタントです。与えられた記事を簡潔に要約してください。記事本文が空で提供される場合もあります。その場合は、タイトルから推測できる範囲で要約を作成してください。出力は段落(<p>)やリスト(<ul>,<li>)、強調(<strong>)などのHTMLタグを用いて、見やすく構造化されたHTMLスニペットにしてください。',
     prompt: buildArticleSummaryPrompt(title, content),
   });
 
@@ -94,7 +95,8 @@ export async function generateHatenaSummary(comments: HatenaBookmarkComment[]): 
 
   const result = await generateText({
     model: getOpenCodeGoChatModel(),
-    system: 'あなたは日本語の要約アシスタントです。はてなブックマークのコメントの雰囲気を簡潔に要約してください。',
+    system:
+      'あなたは日本語の要約アシスタントです。はてなブックマークのコメントの雰囲気を簡潔に要約してください。出力は段落(<p>)やリスト(<ul>,<li>)、強調(<strong>)などのHTMLタグを用いて、見やすく構造化されたHTMLスニペットにしてください。',
     prompt: buildHatenaSummaryPrompt(comments),
   });
 

@@ -68,6 +68,12 @@ button:disabled {
   gap: 0.5rem;
 }
 
+.source-row {
+  display: flex;
+  gap: 0.5rem;
+  align-items: stretch;
+}
+
 .source-item {
   width: 100%;
   padding: 0.75rem 0.85rem;
@@ -78,6 +84,10 @@ button:disabled {
   text-align: left;
 }
 
+.source-row .source-item {
+  flex: 1;
+}
+
 .source-item:hover {
   background: #e0e7ff;
 }
@@ -85,6 +95,19 @@ button:disabled {
 .source-item.is-active {
   background: #4f46e5;
   color: #fff;
+}
+
+.source-remove {
+  flex-shrink: 0;
+  padding: 0.75rem 0.8rem;
+  border: 1px solid #fecaca;
+  border-radius: 0.9rem;
+  background: #fff1f2;
+  color: #b91c1c;
+}
+
+.source-remove:hover {
+  background: #ffe4e6;
 }
 
 .workspace {
@@ -228,9 +251,16 @@ button:disabled {
 }
 
 .card__source,
-.card__date {
+.card__date,
+.card__url {
   display: inline-flex;
   align-items: center;
+}
+
+.card__url {
+  font-size: 0.8rem;
+  color: #9ca3af;
+  word-break: break-all;
 }
 
 .card__read-toggle {

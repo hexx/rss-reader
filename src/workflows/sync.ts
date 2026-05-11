@@ -28,6 +28,10 @@ function randomSubscriptionDelayMs(): number {
   ) + minimumSubscriptionDelayMs;
 }
 
+function shouldFetchHatenaBookmarks(siteUrl: string): boolean {
+  return siteUrl.includes('b.hatena.ne.jp');
+}
+
 function buildArticleChunkSource(title: string, content: string): string {
   const parts = [`タイトル: ${title}`];
   const body = content.trim();
@@ -80,7 +84,7 @@ export async function syncSite(siteUrl: string, debug = false): Promise<void> {
 
       if (existingArticle.length > 0) {
         const articleId = existingArticle[0]!.id;
-        const bookmarks = await fetchHatenaBookmarks(article.url);
+        const bookmarks = shouldFetchHatenaBookmarks(siteUrl) ? await fetchHatenaBookmarks(article.url) : [];
         const hatenaSummary = bookmarks.length > 0 ? await generateHatenaSummary(bookmarks) : null;
 
         db.transaction((transaction) => {
@@ -108,7 +112,7 @@ export async function syncSite(siteUrl: string, debug = false): Promise<void> {
       }
 
       const content = await fetchArticleContent(article.url);
-      const bookmarks = await fetchHatenaBookmarks(article.url);
+      const bookmarks = shouldFetchHatenaBookmarks(siteUrl) ? await fetchHatenaBookmarks(article.url) : [];
       const summary = await generateArticleSummary(article.title, content);
       const hatenaSummary = bookmarks.length > 0 ? await generateHatenaSummary(bookmarks) : null;
       const articleId = randomUUID();
