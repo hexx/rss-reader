@@ -17,6 +17,10 @@ vi.mock('../utils/chunking.js', () => ({
   chunkText: vi.fn(),
 }));
 
+vi.mock('../utils/sleep.js', () => ({
+  sleep: vi.fn().mockResolvedValue(undefined),
+}));
+
 vi.mock('../utils/logger.js', () => ({
   logger: {
     info: vi.fn(),
@@ -40,6 +44,7 @@ import { generateArticleSummary, generateEmbeddings, generateHatenaSummary } fro
 import { fetchArticleContent, fetchRssOrFallback } from '../services/scraper.js';
 import { getVectorCollection } from '../db/vector.js';
 import { chunkText } from '../utils/chunking.js';
+import { sleep } from '../utils/sleep.js';
 import { logger } from '../utils/logger.js';
 
 const fetchHatenaBookmarksMock = vi.mocked(fetchHatenaBookmarks);
@@ -50,9 +55,11 @@ const fetchArticleContentMock = vi.mocked(fetchArticleContent);
 const fetchRssOrFallbackMock = vi.mocked(fetchRssOrFallback);
 const getVectorCollectionMock = vi.mocked(getVectorCollection);
 const chunkTextMock = vi.mocked(chunkText);
+const sleepMock = vi.mocked(sleep);
 const loggerMock = vi.mocked(logger);
 
-const siteUrl = 'https://example.com/';
+const siteUrl = 'https://b.hatena.ne.jp/entry/example.com/';
+const nonHatenaSiteUrl = 'https://example.com/';
 const article = {
   title: '記事タイトル',
   url: 'https://example.com/articles/1',
@@ -86,6 +93,7 @@ describe('syncSite', () => {
     fetchRssOrFallbackMock.mockReset();
     getVectorCollectionMock.mockReset();
     chunkTextMock.mockReset();
+    sleepMock.mockReset();
     loggerMock.info.mockReset();
     loggerMock.warn.mockReset();
   });
@@ -181,6 +189,38 @@ describe('syncSite', () => {
     expect(generateArticleSummaryMock).toHaveBeenCalledWith(article.title, '');
     expect(generateHatenaSummaryMock).toHaveBeenCalledWith(bookmarks);
     expect(generateEmbeddingsMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('skips Hatena bookmarks for non-Hatena sites', async () => {
+    const db = await setupDatabase();
+    const vectorAddMock = vi.fn().mockResolvedValue(1);
+    const { syncSite } = await import('./sync.js');
+
+    fetchRssOrFallbackMock.mockResolvedValue([article]);
+    fetchArticleContentMock.mockResolvedValue('本文の内容です。');
+    generateArticleSummaryMock.mockResolvedValue('要約文');
+    chunkTextMock.mockReturnValue(['chunk-1']);
+    generateEmbeddingsMock.mockResolvedValue([[0.1, 0.2]]);
+    getVectorCollectionMock.mockResolvedValue({ add: vectorAddMock } as never);
+
+    await syncSite(nonHatenaSiteUrl);
+
+    expect(fetchHatenaBookmarksMock).not.toHaveBeenCalled();
+    expect(generateHatenaSummaryMock).not.toHaveBeenCalled();
+
+    const savedArticles = await db.select().from(articles);
+    const savedBookmarks = await db.select().from(hatenaBookmarks);
+
+    expect(savedArticles).toHaveLength(1);
+    expect(savedArticles[0]).toMatchObject({
+      hatenaSummary: null,
+      siteUrl: nonHatenaSiteUrl,
+      summary: '要約文',
+      title: article.title,
+      url: article.url,
+    });
+    expect(savedBookmarks).toHaveLength(0);
+    expect(vectorAddMock).toHaveBeenCalledTimes(1);
   });
 
   it('continues processing later articles when one article fails', async () => {

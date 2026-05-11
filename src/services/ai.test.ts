@@ -52,6 +52,7 @@ describe('generateArticleSummary', () => {
     expect(callArgs).toBeDefined();
     expect(callArgs?.system).toContain('日本語の要約アシスタント');
     expect(callArgs?.system).toContain('記事本文が空で提供される場合もあります');
+    expect(callArgs?.system).toContain('HTMLタグを用いて、見やすく構造化されたHTMLスニペット');
     expect(callArgs?.prompt).toContain('記事タイトル');
     expect(callArgs?.prompt).toContain('本文の内容です。');
     expect(callArgs?.prompt).not.toContain('参考になる');
@@ -70,6 +71,7 @@ describe('generateArticleSummary', () => {
     const callArgs = generateTextMock.mock.calls[0]?.[0];
     expect(callArgs).toBeDefined();
     expect(callArgs?.system).toContain('はてなブックマークのコメントの雰囲気');
+    expect(callArgs?.system).toContain('HTMLタグを用いて、見やすく構造化されたHTMLスニペット');
     expect(callArgs?.prompt).toContain('参考になる');
     expect(callArgs?.prompt).toContain('視点が面白い');
   });

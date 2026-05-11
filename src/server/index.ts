@@ -93,16 +93,24 @@ function createArticleResponse(
   };
 }
 
+function stripHtml(text: string): string {
+  return text.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
 function buildRagContexts(results: SearchArticleResult[]): string[] {
   return results.map((result) =>
     [
       `タイトル: ${result.title}`,
-      result.summary.trim().length > 0 ? `記事要約: ${result.summary}` : null,
-      result.hatenaSummary.trim().length > 0 ? `はてブ要約: ${result.hatenaSummary}` : null,
+      stripHtml(result.summary).length > 0 ? `記事要約: ${stripHtml(result.summary)}` : null,
+      stripHtml(result.hatenaSummary).length > 0 ? `はてブ要約: ${stripHtml(result.hatenaSummary)}` : null,
     ]
       .filter((line): line is string => line !== null)
       .join('\n'),
   );
+}
+
+function normalizeSiteUrl(siteUrl: string): string {
+  return new URL(siteUrl).toString();
 }
 
 async function fetchArticles(sourceUrl?: string, unreadOnly = false): Promise<ArticleRow[]> {
@@ -191,11 +199,12 @@ export function createApp() {
         .select({
           id: subscriptions.id,
           siteUrl: subscriptions.siteUrl,
+          title: subscriptions.title,
           articleCount: count(articles.id),
         })
         .from(subscriptions)
         .leftJoin(articles, eq(articles.siteUrl, subscriptions.siteUrl))
-        .groupBy(subscriptions.id, subscriptions.siteUrl)
+        .groupBy(subscriptions.id, subscriptions.siteUrl, subscriptions.title)
         .orderBy(desc(subscriptions.addedAt));
 
       response.json({
@@ -203,8 +212,37 @@ export function createApp() {
           articleCount: Number(source.articleCount ?? 0),
           id: source.id,
           siteUrl: source.siteUrl,
+          title: source.title,
         })),
       });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.delete('/api/subscriptions', async (request, response, next) => {
+    try {
+      const siteUrl = typeof request.body?.siteUrl === 'string' ? request.body.siteUrl : '';
+      if (siteUrl.trim().length === 0) {
+        response.status(400).json({ error: 'siteUrl is required.' });
+        return;
+      }
+
+      const normalizedSiteUrl = normalizeSiteUrl(siteUrl);
+      const existingSubscription = await db
+        .select({ id: subscriptions.id })
+        .from(subscriptions)
+        .where(eq(subscriptions.siteUrl, normalizedSiteUrl))
+        .limit(1);
+
+      if (existingSubscription.length === 0) {
+        response.status(404).json({ error: 'Subscription not found.' });
+        return;
+      }
+
+      await db.delete(subscriptions).where(eq(subscriptions.siteUrl, normalizedSiteUrl)).run();
+
+      response.json({ siteUrl: normalizedSiteUrl });
     } catch (error) {
       next(error);
     }

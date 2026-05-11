@@ -45,12 +45,73 @@ function setAiAnswer(answer) {
   aiAnswerSection.hidden = false;
 }
 
-function sourceLabel(siteUrl) {
+function sourceHostname(siteUrl) {
   try {
     return new URL(siteUrl).hostname;
   } catch {
     return siteUrl;
   }
+}
+
+function sourceLabel(source) {
+  if (typeof source === 'string') {
+    return sourceHostname(source);
+  }
+
+  const title = source.title?.trim();
+  return title && title.length > 0 ? title : sourceHostname(source.siteUrl);
+}
+
+function sanitizeSnippetHtml(html) {
+  const templateElement = document.createElement('template');
+  templateElement.innerHTML = html;
+
+  const allowedTags = new Set(['P', 'UL', 'LI', 'OL', 'STRONG', 'EM', 'BR', 'A']);
+  const elements = Array.from(templateElement.content.querySelectorAll('*')).reverse();
+
+  for (const element of elements) {
+    if (!allowedTags.has(element.tagName)) {
+      const childNodes = Array.from(element.childNodes);
+      element.replaceWith(...childNodes);
+      continue;
+    }
+
+    for (const attribute of Array.from(element.attributes)) {
+      if (element.tagName === 'A' && attribute.name === 'href') {
+        const href = attribute.value.trim();
+        if (
+          !/^https?:\/\//i.test(href) &&
+          !href.startsWith('mailto:') &&
+          !href.startsWith('#')
+        ) {
+          element.removeAttribute(attribute.name);
+        }
+        continue;
+      }
+
+      if (element.tagName === 'A' && (attribute.name === 'title' || attribute.name === 'target' || attribute.name === 'rel')) {
+        continue;
+      }
+
+      element.removeAttribute(attribute.name);
+    }
+
+    if (element.tagName === 'A' && !element.getAttribute('rel')) {
+      element.setAttribute('rel', 'noreferrer noopener');
+    }
+  }
+
+  return templateElement.innerHTML;
+}
+
+function setSnippetHtml(element, html, fallbackText) {
+  const snippet = html.trim();
+  if (snippet.length === 0) {
+    element.textContent = fallbackText;
+    return;
+  }
+
+  element.innerHTML = sanitizeSnippetHtml(snippet);
 }
 
 function updateSourceListActiveState() {
@@ -85,11 +146,14 @@ function renderSources(sources) {
     const item = document.createElement('li');
     item.dataset.sourceUrl = source.siteUrl;
 
+    const row = document.createElement('div');
+    row.className = 'source-row';
+
     const button = document.createElement('button');
     button.type = 'button';
     button.className = 'source-item';
     button.dataset.sourceUrl = source.siteUrl;
-    button.textContent = `${sourceLabel(source.siteUrl)} (${source.articleCount})`;
+    button.textContent = `${sourceLabel(source)} (${source.articleCount})`;
     button.addEventListener('click', () => {
       state.sourceUrl = source.siteUrl;
       state.query = '';
@@ -97,7 +161,18 @@ function renderSources(sources) {
       void loadArticles(source.siteUrl);
     });
 
-    item.append(button);
+    const removeButton = document.createElement('button');
+    removeButton.type = 'button';
+    removeButton.className = 'source-remove';
+    removeButton.textContent = '解除';
+    removeButton.addEventListener('click', () => {
+      void removeSubscription(source.siteUrl).catch((error) => {
+        setStatus(error instanceof Error ? error.message : '購読解除に失敗しました。');
+      });
+    });
+
+    row.append(button, removeButton);
+    item.append(row);
     sourcesList.append(item);
   }
 
@@ -113,6 +188,7 @@ function createCard(article) {
   const readToggle = fragment.querySelector('.card__read-toggle');
   const articleSummary = fragment.querySelector('.card__article-summary');
   const hatenaSummary = fragment.querySelector('.card__hatena-summary');
+  const articleUrl = fragment.querySelector('.card__url');
   const articleLink = fragment.querySelector('.card__article-link');
   const comments = fragment.querySelector('.comments');
   const commentHeading = fragment.querySelector('.card__comments-heading');
@@ -127,8 +203,9 @@ function createCard(article) {
   date.textContent = formatDate(article.createdAt);
   readToggle.textContent = article.isRead ? '未読に戻す' : '既読にする';
 
-  articleSummary.textContent = article.summary || '記事の要約はまだありません。';
-  hatenaSummary.textContent = article.hatenaSummary || 'はてブの反応要約はまだありません。';
+  setSnippetHtml(articleSummary, article.summary, '記事の要約はまだありません。');
+  setSnippetHtml(hatenaSummary, article.hatenaSummary, 'はてブの反応要約はまだありません。');
+  articleUrl.textContent = article.url;
   articleLink.href = article.url;
   articleLink.textContent = '記事を読む';
   commentHeading.textContent = '個別コメント';
@@ -192,6 +269,28 @@ async function loadSources() {
   const data = await response.json();
   latestSources = Array.isArray(data.sources) ? data.sources : [];
   renderSources(latestSources);
+}
+
+async function removeSubscription(siteUrl) {
+  const response = await fetch('/api/subscriptions', {
+    method: 'DELETE',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ siteUrl }),
+  });
+
+  if (!response.ok) {
+    const payload = await response.json().catch(() => ({}));
+    throw new Error(payload.error || '購読解除に失敗しました。');
+  }
+
+  if (state.sourceUrl === siteUrl) {
+    state.sourceUrl = null;
+  }
+
+  await loadSources();
+  await refreshCurrentView();
 }
 
 async function loadArticles(sourceUrl = state.sourceUrl) {
