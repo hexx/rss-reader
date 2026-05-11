@@ -177,6 +177,57 @@ function renderAiAnswer(answer, references) {
   aiAnswerSection.hidden = false;
 }
 
+function sanitizeSnippetHtml(html) {
+  const templateElement = document.createElement('template');
+  templateElement.innerHTML = html;
+
+  const allowedTags = new Set(['P', 'UL', 'LI', 'OL', 'STRONG', 'EM', 'BR', 'A']);
+  const elements = Array.from(templateElement.content.querySelectorAll('*')).reverse();
+
+  for (const element of elements) {
+    if (!allowedTags.has(element.tagName)) {
+      const childNodes = Array.from(element.childNodes);
+      element.replaceWith(...childNodes);
+      continue;
+    }
+
+    for (const attribute of Array.from(element.attributes)) {
+      if (element.tagName === 'A' && attribute.name === 'href') {
+        const href = attribute.value.trim();
+        if (!/^https?:\/\//i.test(href) && !href.startsWith('mailto:') && !href.startsWith('#')) {
+          element.removeAttribute(attribute.name);
+        }
+        continue;
+      }
+
+      if (
+        element.tagName === 'A' &&
+        (attribute.name === 'title' || attribute.name === 'target' || attribute.name === 'rel')
+      ) {
+        continue;
+      }
+
+      element.removeAttribute(attribute.name);
+    }
+
+    if (element.tagName === 'A' && !element.getAttribute('rel')) {
+      element.setAttribute('rel', 'noreferrer noopener');
+    }
+  }
+
+  return templateElement.innerHTML;
+}
+
+function setSnippetHtml(element, html, fallbackText) {
+  const snippet = typeof html === 'string' ? html.trim() : '';
+  if (snippet.length === 0) {
+    element.textContent = fallbackText;
+    return;
+  }
+
+  element.innerHTML = sanitizeSnippetHtml(snippet);
+}
+
 function setAiAnswer(answer, references = []) {
   const normalizedAnswer = typeof answer === 'string' ? answer : '';
   if (normalizedAnswer.trim().length === 0) {
