@@ -97,6 +97,11 @@ button:disabled {
   color: #fff;
 }
 
+.source-item,
+.source-remove {
+  position: relative;
+}
+
 .source-remove {
   flex-shrink: 0;
   padding: 0.75rem 0.8rem;
@@ -182,7 +187,8 @@ button:disabled {
 .ai-answer {
   padding: 1rem;
   border-radius: 1rem;
-  background: #eef2ff;
+  background: #f0f9ff;
+  border: 1px solid #bae6fd;
 }
 
 .ai-answer h2 {
@@ -191,8 +197,36 @@ button:disabled {
 }
 
 .ai-answer__text {
-  margin: 0;
+  display: grid;
+  gap: 0.75rem;
   line-height: 1.7;
+}
+
+.ai-answer__text p {
+  margin: 0;
+}
+
+.ai-answer__text ul {
+  margin: 0;
+  padding-left: 1.4rem;
+}
+
+.ai-answer__text li + li {
+  margin-top: 0.35rem;
+}
+
+.ai-answer__reference {
+  font-weight: 700;
+  color: #0369a1;
+  text-decoration: none;
+}
+
+.ai-answer__reference:hover {
+  text-decoration: underline;
+}
+
+.card {
+  scroll-margin-top: 1.5rem;
 }
 
 .status {

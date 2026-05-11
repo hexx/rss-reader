@@ -3,6 +3,7 @@ import { embed, embedMany, generateText } from 'ai';
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
 
 import type { HatenaBookmarkComment } from './hatena.js';
+import type { SearchArticleResult } from './search.js';
 
 const defaultModelId = 'opencode-go';
 
@@ -54,6 +55,14 @@ function buildRagPrompt(query: string, contexts: string[]): string {
   ].join('\n');
 }
 
+function buildRagReferenceList(references: SearchArticleResult[]): string {
+  if (references.length === 0) {
+    return '（なし）';
+  }
+
+  return references.map((reference, index) => `[${index + 1}] ${reference.title}`).join('\n');
+}
+
 function createOpenCodeGoProvider() {
   const baseURL = requireEnv('OPENCODE_GO_BASE_URL');
   const apiKey = requireEnv('OPENCODE_GO_API_KEY');
@@ -103,12 +112,21 @@ export async function generateHatenaSummary(comments: HatenaBookmarkComment[]): 
   return result.text.trim();
 }
 
-export async function generateRagAnswer(query: string, contexts: string[]): Promise<string> {
+export async function generateRagAnswer(
+  query: string,
+  contexts: string[],
+  references: SearchArticleResult[] = [],
+): Promise<string> {
   const result = await generateText({
     model: getOpenCodeGoChatModel(),
     system:
-      'あなたは日本語のRAGアシスタントです。提供されたコンテキストのみを使って回答してください。情報が足りない場合は、推測せずにわからないと答えてください。',
-    prompt: buildRagPrompt(query, contexts),
+      'あなたは日本語のRAGアシスタントです。提供されたコンテキストのみを使って回答してください。情報が足りない場合は、推測せずにわからないと答えてください。回答の中で言及する情報には、必ず [1], [2] のような形式で参照番号を付けてください。回答の末尾に、参照番号と記事タイトルの対応表を Markdown 形式のリストで作成してください。',
+    prompt: [
+      buildRagPrompt(query, contexts),
+      '',
+      '参照一覧:',
+      buildRagReferenceList(references),
+    ].join('\n'),
   });
 
   return result.text.trim();

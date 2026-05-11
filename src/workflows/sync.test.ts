@@ -189,6 +189,10 @@ describe('syncSite', () => {
     expect(generateArticleSummaryMock).toHaveBeenCalledWith(article.title, '');
     expect(generateHatenaSummaryMock).toHaveBeenCalledWith(bookmarks);
     expect(generateEmbeddingsMock).toHaveBeenCalledTimes(1);
+    expect(loggerMock.info).toHaveBeenCalledWith('記事の同期処理を実行します。', {
+      title: article.title,
+      url: article.url,
+    });
   });
 
   it('skips Hatena bookmarks for non-Hatena sites', async () => {

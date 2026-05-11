@@ -172,17 +172,17 @@ describe('server api', () => {
       title: '別の記事',
       url: 'https://another.example/posts/2',
     });
-    expect(allPayload.articles.find((article: { title: string }) => article.title === '最初の記事')).toMatchObject({
-      bookmarks: [
-        {
-          comment: '参考になる',
-          id: 'bookmark-1',
-          user: 'alice',
-        },
-      ],
-      hatenaSummary: '反応要約',
-      isRead: false,
-      siteUrl: 'https://example.com/',
+      expect(allPayload.articles.find((article: { title: string }) => article.title === '最初の記事')).toMatchObject({
+        bookmarks: [
+          {
+            comment: '参考になる',
+            id: 'bookmark-1',
+            user: 'alice',
+          },
+        ],
+        hatenaSummary: '反応要約',
+        isRead: false,
+        siteUrl: 'https://example.com/',
         title: '最初の記事',
         url: 'https://example.com/articles/1',
       });
@@ -242,10 +242,29 @@ describe('server api', () => {
           url: 'https://example.com/articles/1',
         },
       ],
+      references: [
+        {
+          id: 'article-1',
+          title: '検索対象の記事',
+          url: 'https://example.com/articles/1',
+        },
+      ],
       aiAnswer: 'AIの回答',
     });
     expect(generateRagAnswerMock).toHaveBeenCalledWith('検索語', [
       'タイトル: 検索対象の記事\n記事要約: 記事の要約\nはてブ要約: はてブ要約',
+    ], [
+      {
+        bookmarks: [],
+        createdAt: '1970-01-01T00:00:00.000Z',
+        id: 'article-1',
+        hatenaSummary: 'はてブ要約',
+        isRead: false,
+        siteUrl: 'https://example.com/',
+        summary: '記事の要約',
+        title: '検索対象の記事',
+        url: 'https://example.com/articles/1',
+      },
     ]);
   });
 
@@ -331,16 +350,65 @@ describe('server api', () => {
       expect.arrayContaining([
         {
           articleCount: 0,
+          displayTitle: 'Another Feed',
           id: 'subscription-2',
           title: 'Another Feed',
           siteUrl: 'https://another.example/',
         },
         {
           articleCount: 2,
+          displayTitle: 'Example Feed',
           id: 'subscription-1',
           title: 'Example Feed',
           siteUrl: 'https://example.com/',
         },
+      ]),
+    );
+  });
+
+  it('disambiguates duplicate and Hatena source labels', async () => {
+    const { db } = await import('../db/index.js');
+
+    await db.insert(subscriptions).values([
+      {
+        id: 'subscription-1',
+        siteUrl: 'https://example.com/daily.rss',
+        title: 'Example Feed',
+      },
+      {
+        id: 'subscription-2',
+        siteUrl: 'https://another.example/weekly.rss',
+        title: 'Example Feed',
+      },
+      {
+        id: 'subscription-3',
+        siteUrl: 'https://b.hatena.ne.jp/hotentry/it.rss',
+        title: 'はてなブックマーク - 人気エントリー',
+      },
+    ]);
+
+    const baseUrl = await startServer();
+    const response = await fetch(`${baseUrl}/api/sources`);
+    const payload = await response.json();
+
+    expect(response.ok).toBe(true);
+    expect(payload.sources).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          displayTitle: 'Example Feed (DAILY)',
+          id: 'subscription-1',
+          siteUrl: 'https://example.com/daily.rss',
+        }),
+        expect.objectContaining({
+          displayTitle: 'Example Feed (WEEKLY)',
+          id: 'subscription-2',
+          siteUrl: 'https://another.example/weekly.rss',
+        }),
+        expect.objectContaining({
+          displayTitle: 'はてなブックマーク - 人気エントリー (IT)',
+          id: 'subscription-3',
+          siteUrl: 'https://b.hatena.ne.jp/hotentry/it.rss',
+        }),
       ]),
     );
   });
