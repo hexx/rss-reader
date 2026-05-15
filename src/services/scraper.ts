@@ -1,5 +1,3 @@
-import 'dotenv/config';
-
 import { load, type CheerioAPI } from 'cheerio';
 import { isTag, type Element } from 'domhandler';
 import Parser from 'rss-parser';

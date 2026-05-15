@@ -1,5 +1,3 @@
-import 'dotenv/config';
-
 import type { VectorizeIndex } from '@cloudflare/workers-types';
 
 import type { RuntimeEnv } from '../env.js';

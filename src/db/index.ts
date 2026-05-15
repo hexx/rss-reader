@@ -1,5 +1,3 @@
-import 'dotenv/config';
-
 import type { D1Database } from '@cloudflare/workers-types';
 import { drizzle as drizzleD1 } from 'drizzle-orm/d1';
 
