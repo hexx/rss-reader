@@ -1,0 +1,17 @@
+name = "rss-reader"
+main = "src/worker.ts"
+compatibility_date = "2024-05-01"
+
+assets = { directory = "./public", binding = "ASSETS" }
+
+[[d1_databases]]
+binding = "DB"
+database_name = "rss-reader"
+database_id = "DATABASE_ID_PLACEHOLDER"
+
+[[vectorize]]
+binding = "VECTORIZE_INDEX"
+index_name = "article-chunks"
+
+[triggers]
+crons = ["0 */3 * * *"]
