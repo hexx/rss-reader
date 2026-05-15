@@ -1,5 +1,3 @@
-import 'dotenv/config';
-
 import type { Config } from 'drizzle-kit';
 
 export default {
@@ -12,4 +10,3 @@ export default {
   strict: true,
   verbose: true,
 } satisfies Config;
-
