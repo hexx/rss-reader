@@ -45,4 +45,25 @@ describe('createSyncCronRunner', () => {
     await expect(firstRun).resolves.toBe(true);
     expect(runSync).toHaveBeenCalledTimes(1);
   });
+
+  it('uses the env timezone when scheduling', () => {
+    const scheduleJob = vi.fn().mockReturnValue({} as never);
+    const runSync = vi.fn().mockResolvedValue(undefined);
+
+    const runner = createSyncCronRunner(
+      {
+        runSync,
+        scheduleJob,
+      },
+      {
+        CRON_TIMEZONE: 'Asia/Tokyo',
+      },
+    );
+
+    runner.start();
+
+    expect(scheduleJob).toHaveBeenCalledWith('0 */3 * * *', expect.any(Function), {
+      timezone: 'Asia/Tokyo',
+    });
+  });
 });
