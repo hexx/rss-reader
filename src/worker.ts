@@ -177,9 +177,9 @@ function normalizeSiteUrl(siteUrl: string): string {
   return new URL(siteUrl).toString();
 }
 
-function createBasicAuthMiddleware(env: Bindings) {
-  const username = env.ADMIN_USERNAME?.trim();
-  const password = env.ADMIN_PASSWORD ?? '';
+function createBasicAuthMiddleware(env: Bindings | undefined) {
+  const username = env?.ADMIN_USERNAME?.trim();
+  const password = env?.ADMIN_PASSWORD ?? '';
 
   if (!username || password.length === 0) {
     return undefined;

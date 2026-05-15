@@ -99,8 +99,8 @@ export async function syncSite(
       const hatenaSummary = bookmarks.length > 0 ? await generateHatenaSummary(bookmarks, env) : null;
       const articleId = randomUUID();
 
-      database.transaction((transaction: any) => {
-        transaction.insert(articles).values({
+      await database.transaction(async (transaction: any) => {
+        await transaction.insert(articles).values({
           id: articleId,
           siteUrl,
           url: article.url,
@@ -113,7 +113,7 @@ export async function syncSite(
         }).run();
 
         if (bookmarks.length > 0) {
-          transaction.insert(hatenaBookmarks).values(
+          await transaction.insert(hatenaBookmarks).values(
             bookmarks.map((bookmark) => ({
               id: randomUUID(),
               articleId,

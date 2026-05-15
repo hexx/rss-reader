@@ -4,9 +4,6 @@ import type { InferSelectModel } from 'drizzle-orm';
 
 const createdAtDefault = sql<number>`(cast((julianday('now') - 2440587.5) * 86400000 as integer))`;
 
-// Migration steps:
-// DATABASE_URL=./sqlite.db npx drizzle-kit generate
-// DATABASE_URL=./sqlite.db npx drizzle-kit push
 export const articles = sqliteTable('articles', {
   id: text('id').primaryKey(),
   url: text('url').notNull().unique(),

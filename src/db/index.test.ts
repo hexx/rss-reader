@@ -1,30 +1,22 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
-let createSqliteDatabase: typeof import('./index.js').createSqliteDatabase;
-let getDatabasePath: typeof import('./index.js').getDatabasePath;
+const { drizzleMock } = vi.hoisted(() => ({
+  drizzleMock: vi.fn(),
+}));
 
-beforeEach(async () => {
-  vi.resetModules();
-  vi.stubEnv('DATABASE_URL', ':memory:');
+vi.mock('drizzle-orm/d1', () => ({
+  drizzle: drizzleMock,
+}));
 
-  ({ createSqliteDatabase, getDatabasePath } = await import('./index.js'));
-});
-
-afterEach(() => {
-  vi.unstubAllEnvs();
-});
+import { getDb } from './index.js';
 
 describe('database env adapter', () => {
-  it('resolves the sqlite path from env bindings', () => {
-    expect(getDatabasePath({ DATABASE_URL: '/tmp/rss-reader.sqlite' })).toBe('/tmp/rss-reader.sqlite');
-    expect(getDatabasePath({})).toBe('./sqlite.db');
-  });
+  it('forwards the D1 binding to drizzle', () => {
+    const client = { tag: 'db-client' };
+    const d1 = {} as never;
+    drizzleMock.mockReturnValue(client);
 
-  it('creates a sqlite database from env bindings', () => {
-    const sqlite = createSqliteDatabase({ DATABASE_URL: ':memory:' });
-
-    expect(sqlite.prepare('select 1 as value').get()).toEqual({ value: 1 });
-
-    sqlite.close();
+    expect(getDb({ DB: d1 } as never)).toBe(client);
+    expect(drizzleMock).toHaveBeenCalledWith(d1, expect.objectContaining({ schema: expect.any(Object) }));
   });
 });
