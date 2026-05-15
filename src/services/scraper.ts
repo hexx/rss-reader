@@ -167,8 +167,10 @@ export async function fetchArticleContent(url: string): Promise<string> {
 }
 
 export async function fetchRssOrFallback(siteUrl: string): Promise<ScrapedLink[]> {
+  const htmlOrXml = await fetchHtml(siteUrl);
+
   try {
-    const feed = await rssParser.parseURL(siteUrl);
+    const feed = await rssParser.parseString(htmlOrXml);
     const items = feed.items
       .map((item): ScrapedLink | null => {
         const url = item.link ?? item.guid ?? null;
@@ -192,8 +194,7 @@ export async function fetchRssOrFallback(siteUrl: string): Promise<ScrapedLink[]
     // Fall back to scraping the site HTML when RSS parsing is unavailable.
   }
 
-  const html = await fetchHtml(siteUrl);
-  return extractFallbackLinks(html, siteUrl);
+  return extractFallbackLinks(htmlOrXml, siteUrl);
 }
 
 export async function getSiteArticles(siteUrl: string): Promise<ScrapedArticle[]> {

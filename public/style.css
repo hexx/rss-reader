@@ -172,6 +172,10 @@ button:disabled {
   background: #fff;
 }
 
+.subscription-form {
+  margin-bottom: 1rem;
+}
+
 .search-filter {
   display: inline-flex;
   align-items: center;
