@@ -4,7 +4,7 @@ import { and, asc, desc, eq, inArray, sql } from 'drizzle-orm';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { db } from '../db/index.js';
+import { getDb } from '../db/index.js';
 import { articles, hatenaBookmarks, subscriptions } from '../db/schema.js';
 import type { RuntimeEnv } from '../env.js';
 import { generateRagAnswer } from '../services/ai.js';
@@ -217,8 +217,12 @@ function normalizeSiteUrl(siteUrl: string): string {
   return new URL(siteUrl).toString();
 }
 
-async function fetchArticles(sourceUrl?: string, unreadOnly = true): Promise<ArticleRow[]> {
-  const query = db
+async function fetchArticles(
+  database: ReturnType<typeof getDb>,
+  sourceUrl?: string,
+  unreadOnly = true,
+): Promise<ArticleRow[]> {
+  const query = database
     .select({
       content: articles.content,
       createdAt: articles.createdAt,
@@ -247,12 +251,15 @@ async function fetchArticles(sourceUrl?: string, unreadOnly = true): Promise<Art
   return await filteredQuery.orderBy(asc(sql`coalesce(${articles.publishedAt}, ${articles.createdAt})`));
 }
 
-async function fetchBookmarksByArticleIds(articleIds: string[]): Promise<BookmarkRow[]> {
+async function fetchBookmarksByArticleIds(
+  database: ReturnType<typeof getDb>,
+  articleIds: string[],
+): Promise<BookmarkRow[]> {
   if (articleIds.length === 0) {
     return [];
   }
 
-  return db
+  return database
     .select({
       articleId: hatenaBookmarks.articleId,
       comment: hatenaBookmarks.comment,
@@ -266,6 +273,7 @@ async function fetchBookmarksByArticleIds(articleIds: string[]): Promise<Bookmar
 
 export function createApp(env: ServerEnv = process.env) {
   const app = express();
+  const database = getDb(env);
 
   const basicAuthMiddleware = createBasicAuthMiddleware(env);
   if (basicAuthMiddleware) {
@@ -283,8 +291,8 @@ export function createApp(env: ServerEnv = process.env) {
           : undefined;
       const unreadOnly = request.query.unread_only === undefined ? true : request.query.unread_only === 'true';
 
-      const articleRows = await fetchArticles(sourceUrl, unreadOnly);
-      const bookmarkRows = await fetchBookmarksByArticleIds(articleRows.map((article) => article.id));
+       const articleRows = await fetchArticles(database, sourceUrl, unreadOnly);
+       const bookmarkRows = await fetchBookmarksByArticleIds(database, articleRows.map((article) => article.id));
 
       const bookmarksByArticleId = new Map<string, BookmarkRow[]>();
       for (const bookmark of bookmarkRows) {
@@ -305,7 +313,7 @@ export function createApp(env: ServerEnv = process.env) {
 
   app.get('/api/sources', async (_request, response, next) => {
     try {
-      const sourceRows = await db
+       const sourceRows = await database
         .select({
           id: subscriptions.id,
           articleId: articles.id,
@@ -380,7 +388,7 @@ export function createApp(env: ServerEnv = process.env) {
       }
 
       const normalizedSiteUrl = normalizeSiteUrl(siteUrl);
-      const existingSubscription = await db
+       const existingSubscription = await database
         .select({ id: subscriptions.id })
         .from(subscriptions)
         .where(eq(subscriptions.siteUrl, normalizedSiteUrl))
@@ -391,7 +399,7 @@ export function createApp(env: ServerEnv = process.env) {
         return;
       }
 
-      await db.delete(subscriptions).where(eq(subscriptions.siteUrl, normalizedSiteUrl)).run();
+       await database.delete(subscriptions).where(eq(subscriptions.siteUrl, normalizedSiteUrl)).run();
 
       response.json({ siteUrl: normalizedSiteUrl });
     } catch (error) {
@@ -429,7 +437,7 @@ export function createApp(env: ServerEnv = process.env) {
   app.patch('/api/articles/:id/read', async (request, response, next) => {
     try {
       const articleId = request.params.id;
-      const existingArticle = await db
+       const existingArticle = await database
         .select({ id: articles.id })
         .from(articles)
         .where(eq(articles.id, articleId))
@@ -441,7 +449,7 @@ export function createApp(env: ServerEnv = process.env) {
       }
 
       const isRead = typeof request.body?.isRead === 'boolean' ? request.body.isRead : true;
-      await db.update(articles).set({ isRead }).where(eq(articles.id, articleId)).run();
+       await database.update(articles).set({ isRead }).where(eq(articles.id, articleId)).run();
 
       response.json({ id: articleId, isRead });
     } catch (error) {

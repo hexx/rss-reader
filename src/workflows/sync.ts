@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { eq } from 'drizzle-orm';
 
 import type { RuntimeEnv } from '../env.js';
-import { db } from '../db/index.js';
+import { getDb } from '../db/index.js';
 import { articles, hatenaBookmarks, subscriptions } from '../db/schema.js';
 import { getVectorCollection } from '../db/vector.js';
 import { generateArticleSummary, generateEmbeddings, generateHatenaSummary } from '../services/ai.js';
@@ -74,6 +74,7 @@ export async function syncSite(
   env: RuntimeEnv = process.env,
 ): Promise<void> {
   logger.info('サイト同期を開始します。', { siteUrl });
+  const database = getDb(env);
   const siteArticles = await fetchRssOrFallback(siteUrl);
   const vectorCollection = await getVectorCollection(env);
 
@@ -82,7 +83,7 @@ export async function syncSite(
     await sleep(randomArticleDelayMs());
 
     try {
-      const existingArticle = await db
+      const existingArticle = await database
         .select({ id: articles.id, hatenaSummary: articles.hatenaSummary })
         .from(articles)
         .where(eq(articles.url, article.url))
@@ -98,7 +99,7 @@ export async function syncSite(
       const hatenaSummary = bookmarks.length > 0 ? await generateHatenaSummary(bookmarks, env) : null;
       const articleId = randomUUID();
 
-      db.transaction((transaction) => {
+      database.transaction((transaction: any) => {
         transaction.insert(articles).values({
           id: articleId,
           siteUrl,
@@ -151,7 +152,8 @@ export async function syncAllSubscriptions(
   debug = false,
   env: RuntimeEnv = process.env,
 ): Promise<void> {
-  const subscribedSites = await db
+  const database = getDb(env);
+  const subscribedSites = await database
     .select({
       siteUrl: subscriptions.siteUrl,
     })

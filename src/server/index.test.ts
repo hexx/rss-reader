@@ -105,6 +105,7 @@ describe('server api', () => {
 
   it('threads env bindings into search responses', async () => {
     const env = {
+      DATABASE_URL: ':memory:',
       OPENCODE_GO_API_KEY: 'custom-api-key',
       OPENCODE_GO_BASE_URL: 'https://opencode.example/v1',
       OPENCODE_GO_MODEL: 'custom-model',
