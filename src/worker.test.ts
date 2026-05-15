@@ -1,8 +1,6 @@
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { createTestDatabase } from './test-utils/sqljs-db.js';
 
 vi.mock('./services/search.js', () => ({
   searchArticles: vi.fn(),
@@ -20,9 +18,17 @@ vi.mock('./services/ai.js', async () => {
   };
 });
 
+let testDb: Awaited<ReturnType<typeof createTestDatabase>>['db'];
+
+const { getDbMock } = vi.hoisted(() => ({
+  getDbMock: vi.fn(() => testDb),
+}));
+
+vi.mock('./db/index.js', () => ({
+  getDb: getDbMock,
+}));
+
 import { articles, hatenaBookmarks, subscriptions } from './db/schema.js';
-import { createSqliteDatabase, getDb } from './db/index.js';
-import { getVectorCollection } from './db/vector.js';
 import { generateRagAnswer } from './services/ai.js';
 import { searchArticles } from './services/search.js';
 import { syncAllSubscriptions } from './workflows/sync.js';
@@ -31,7 +37,6 @@ const searchArticlesMock = vi.mocked(searchArticles);
 const generateRagAnswerMock = vi.mocked(generateRagAnswer);
 const syncAllSubscriptionsMock = vi.mocked(syncAllSubscriptions);
 
-let vectorPath = '';
 let app: typeof import('./worker.js').app;
 
 async function loadWorkerApp() {
@@ -39,56 +44,17 @@ async function loadWorkerApp() {
   return module.app;
 }
 
-async function setupDatabase(env: { DATABASE_URL: string }) {
-  const sqlite = createSqliteDatabase(env);
-
-  sqlite.exec(`
-    CREATE TABLE articles (
-      id TEXT PRIMARY KEY,
-      url TEXT NOT NULL UNIQUE,
-      site_url TEXT NOT NULL,
-      title TEXT NOT NULL,
-      content TEXT,
-      published_at INTEGER,
-      summary TEXT,
-      hatena_summary TEXT,
-      is_read INTEGER NOT NULL DEFAULT 0,
-      created_at INTEGER NOT NULL DEFAULT 0
-    );
-    CREATE TABLE hatena_bookmarks (
-      id TEXT PRIMARY KEY,
-      article_id TEXT NOT NULL,
-      user TEXT NOT NULL,
-      comment TEXT,
-      created_at INTEGER NOT NULL DEFAULT 0
-    );
-    CREATE TABLE subscriptions (
-      id TEXT PRIMARY KEY,
-      site_url TEXT NOT NULL UNIQUE,
-      title TEXT,
-      added_at INTEGER NOT NULL DEFAULT 0
-    );
-  `);
-
-  return getDb(env);
-}
-
 beforeEach(async () => {
   vi.resetModules();
-  vi.stubEnv('DATABASE_URL', ':memory:');
+  testDb = (await createTestDatabase()).db;
   searchArticlesMock.mockReset();
   generateRagAnswerMock.mockReset();
   syncAllSubscriptionsMock.mockReset();
-  vectorPath = mkdtempSync(join(tmpdir(), 'rss-worker-vector-'));
   app = await loadWorkerApp();
 });
 
 afterEach(() => {
   vi.unstubAllEnvs();
-  if (vectorPath.length > 0) {
-    rmSync(vectorPath, { recursive: true, force: true });
-    vectorPath = '';
-  }
 });
 
 describe('worker app', () => {
@@ -100,13 +66,7 @@ describe('worker app', () => {
   });
 
   it('returns articles and sources from the worker database', async () => {
-    const env = {
-      DATABASE_URL: join(vectorPath, 'worker.sqlite'),
-      VECTOR_DB_PATH: vectorPath,
-    };
-    const database = await setupDatabase(env);
-
-    await database.insert(subscriptions).values([
+    await testDb.insert(subscriptions).values([
       {
         id: 'subscription-1',
         siteUrl: 'https://example.com/',
@@ -119,7 +79,7 @@ describe('worker app', () => {
       },
     ]);
 
-    await database.insert(articles).values([
+    await testDb.insert(articles).values([
       {
         id: 'article-1',
         siteUrl: 'https://example.com/',
@@ -144,14 +104,14 @@ describe('worker app', () => {
       },
     ]);
 
-    await database.insert(hatenaBookmarks).values({
+    await testDb.insert(hatenaBookmarks).values({
       id: 'bookmark-1',
       articleId: 'article-1',
       user: 'alice',
       comment: '参考になる',
     });
 
-    const articlesResponse = await app.fetch(new Request('http://localhost/api/articles'), env as never);
+    const articlesResponse = await app.fetch(new Request('http://localhost/api/articles'));
     const articlesPayload = (await articlesResponse.json()) as {
       articles: Array<{ title: string; url: string; bookmarks: Array<{ comment: string }> }>;
     };
@@ -163,7 +123,7 @@ describe('worker app', () => {
       url: 'https://example.com/articles/1',
     });
 
-    const sourcesResponse = await app.fetch(new Request('http://localhost/api/sources'), env as never);
+    const sourcesResponse = await app.fetch(new Request('http://localhost/api/sources'));
     const sourcesPayload = (await sourcesResponse.json()) as {
       sources: Array<{ articleId: string | null; id: string; isRead: boolean; siteUrl: string; title: string }>;
     };
@@ -181,12 +141,9 @@ describe('worker app', () => {
 
   it('threads env bindings into search and sync routes', async () => {
     const env = {
-      DATABASE_URL: ':memory:',
       OPENCODE_GO_API_KEY: 'test-api-key',
       OPENCODE_GO_BASE_URL: 'https://opencode.example/v1',
       OPENCODE_GO_MODEL: 'test-model',
-      VECTOR_DB_PATH: vectorPath,
-      VECTOR_DIMENSION: '2',
     };
 
     searchArticlesMock.mockResolvedValue([

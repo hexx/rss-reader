@@ -1,5 +1,18 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { articles, hatenaBookmarks } from '../db/schema.js';
+import { createTestDatabase } from '../test-utils/sqljs-db.js';
+
+let testDb: Awaited<ReturnType<typeof createTestDatabase>>['db'];
+
+const { getDbMock } = vi.hoisted(() => ({
+  getDbMock: vi.fn(() => testDb),
+}));
+
+vi.mock('../db/index.js', () => ({
+  getDb: getDbMock,
+}));
+
 vi.mock('../db/vector.js', () => ({
   getVectorCollection: vi.fn(),
 }));
@@ -12,45 +25,16 @@ vi.mock('../services/ai.js', async () => {
   };
 });
 
-import { articles, hatenaBookmarks } from '../db/schema.js';
 import { getVectorCollection } from '../db/vector.js';
 import { generateEmbedding } from '../services/ai.js';
 
 const getVectorCollectionMock = vi.mocked(getVectorCollection);
 const generateEmbeddingMock = vi.mocked(generateEmbedding);
 
-async function setupDatabase() {
-  const { sqlite, db } = await import('../db/index.js');
-
-  sqlite.exec(`
-    CREATE TABLE articles (
-      id TEXT PRIMARY KEY,
-      url TEXT NOT NULL UNIQUE,
-      site_url TEXT NOT NULL,
-      title TEXT NOT NULL,
-      content TEXT,
-      published_at INTEGER,
-      summary TEXT,
-      hatena_summary TEXT,
-      is_read INTEGER NOT NULL DEFAULT 0,
-      created_at INTEGER NOT NULL DEFAULT 0
-    );
-    CREATE TABLE hatena_bookmarks (
-      id TEXT PRIMARY KEY,
-      article_id TEXT NOT NULL,
-      user TEXT NOT NULL,
-      comment TEXT,
-      created_at INTEGER NOT NULL DEFAULT 0
-    );
-  `);
-
-  return db;
-}
-
 describe('searchArticles', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.resetModules();
-    vi.stubEnv('DATABASE_URL', ':memory:');
+    testDb = (await createTestDatabase()).db;
     vi.stubEnv('OPENCODE_GO_BASE_URL', 'https://opencode.example/v1');
     vi.stubEnv('OPENCODE_GO_API_KEY', 'test-api-key');
     getVectorCollectionMock.mockReset();
@@ -61,9 +45,8 @@ describe('searchArticles', () => {
     vi.unstubAllEnvs();
   });
 
-  it('hydrates article search results from LanceDB matches', async () => {
-    const db = await setupDatabase();
-    await db.insert(articles).values({
+  it('hydrates article search results from Vectorize matches', async () => {
+    await testDb.insert(articles).values({
       id: 'article-1',
       siteUrl: 'https://example.com/',
       url: 'https://example.com/articles/1',
@@ -75,7 +58,7 @@ describe('searchArticles', () => {
       createdAt: new Date(0),
     });
 
-    await db.insert(hatenaBookmarks).values({
+    await testDb.insert(hatenaBookmarks).values({
       id: 'bookmark-1',
       articleId: 'article-1',
       user: 'alice',

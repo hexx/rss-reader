@@ -3,21 +3,31 @@ import { randomUUID } from 'node:crypto';
 import { Command } from 'commander';
 import { eq } from 'drizzle-orm';
 
-import { db } from './db/index.js';
+import { getDb } from './db/index.js';
 import { subscriptions } from './db/schema.js';
+import type { D1Database } from '@cloudflare/workers-types';
 import type { RuntimeEnv } from './env.js';
 import { searchArticles } from './services/search.js';
 import { syncAllSubscriptions } from './workflows/sync.js';
 
+type CliEnv = RuntimeEnv & {
+  DB?: D1Database;
+};
+
 function normalizeSiteUrl(siteUrl: string): string {
   return new URL(siteUrl).toString();
+}
+
+function getCliDb() {
+  return getDb(process.env as unknown as CliEnv);
 }
 
 export async function subscribeSite(siteUrl: string): Promise<void> {
   const normalizedSiteUrl = normalizeSiteUrl(siteUrl);
   const siteTitle = new URL(normalizedSiteUrl).hostname;
 
-  const existingSubscription = await db
+  const database = getCliDb();
+  const existingSubscription = await database
     .select({ id: subscriptions.id })
     .from(subscriptions)
     .where(eq(subscriptions.siteUrl, normalizedSiteUrl))
@@ -28,7 +38,7 @@ export async function subscribeSite(siteUrl: string): Promise<void> {
     return;
   }
 
-  await db.insert(subscriptions).values({
+  await database.insert(subscriptions).values({
     id: randomUUID(),
     siteUrl: normalizedSiteUrl,
     title: siteTitle,
@@ -40,7 +50,8 @@ export async function subscribeSite(siteUrl: string): Promise<void> {
 export async function unsubscribeSite(siteUrl: string): Promise<void> {
   const normalizedSiteUrl = normalizeSiteUrl(siteUrl);
 
-  const existingSubscription = await db
+  const database = getCliDb();
+  const existingSubscription = await database
     .select({ id: subscriptions.id })
     .from(subscriptions)
     .where(eq(subscriptions.siteUrl, normalizedSiteUrl))
@@ -51,7 +62,7 @@ export async function unsubscribeSite(siteUrl: string): Promise<void> {
     return;
   }
 
-  await db.delete(subscriptions).where(eq(subscriptions.siteUrl, normalizedSiteUrl)).run();
+  await database.delete(subscriptions).where(eq(subscriptions.siteUrl, normalizedSiteUrl)).run();
 
   console.log(`購読を解除しました: ${normalizedSiteUrl}`);
 }

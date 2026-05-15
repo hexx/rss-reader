@@ -1,5 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { articles, hatenaBookmarks } from '../db/schema.js';
+import { createTestDatabase } from '../test-utils/sqljs-db.js';
+
 vi.mock('../services/scraper.js', () => ({
   fetchArticleContent: vi.fn(),
   fetchRssOrFallback: vi.fn(),
@@ -11,6 +14,14 @@ vi.mock('../services/hatena.js', () => ({
 
 vi.mock('../db/vector.js', () => ({
   getVectorCollection: vi.fn(),
+}));
+
+const { getDbMock } = vi.hoisted(() => ({
+  getDbMock: vi.fn(() => testDb),
+}));
+
+vi.mock('../db/index.js', () => ({
+  getDb: getDbMock,
 }));
 
 vi.mock('../utils/chunking.js', () => ({
@@ -38,7 +49,6 @@ vi.mock('../services/ai.js', async () => {
   };
 });
 
-import { articles, hatenaBookmarks } from '../db/schema.js';
 import { fetchHatenaBookmarks } from '../services/hatena.js';
 import { generateArticleSummary, generateEmbeddings, generateHatenaSummary } from '../services/ai.js';
 import { fetchArticleContent, fetchRssOrFallback } from '../services/scraper.js';
@@ -57,6 +67,8 @@ const getVectorCollectionMock = vi.mocked(getVectorCollection);
 const chunkTextMock = vi.mocked(chunkText);
 const sleepMock = vi.mocked(sleep);
 const loggerMock = vi.mocked(logger);
+
+let testDb: Awaited<ReturnType<typeof createTestDatabase>>['db'];
 
 const siteUrl = 'https://b.hatena.ne.jp/entry/example.com/';
 const nonHatenaSiteUrl = 'https://example.com/';
@@ -80,12 +92,9 @@ const bookmarks = [
 ];
 
 describe('syncSite', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.resetModules();
-    vi.stubEnv('DATABASE_URL', ':memory:');
-    vi.stubEnv('OPENCODE_GO_BASE_URL', 'https://opencode.example/v1');
-    vi.stubEnv('OPENCODE_GO_API_KEY', 'test-api-key');
-    vi.stubEnv('OPENCODE_GO_MODEL', 'test-model');
+    testDb = (await createTestDatabase()).db;
 
     fetchHatenaBookmarksMock.mockReset();
     generateArticleSummaryMock.mockReset();
@@ -104,37 +113,7 @@ describe('syncSite', () => {
     vi.unstubAllEnvs();
   });
 
-  async function setupDatabase() {
-    const { sqlite, db } = await import('../db/index.js');
-
-    sqlite.exec(`
-      CREATE TABLE articles (
-        id TEXT PRIMARY KEY,
-        url TEXT NOT NULL UNIQUE,
-        site_url TEXT NOT NULL,
-        title TEXT NOT NULL,
-        content TEXT,
-        published_at INTEGER,
-        summary TEXT,
-        hatena_summary TEXT,
-        is_read INTEGER NOT NULL DEFAULT 0,
-        created_at INTEGER NOT NULL DEFAULT 0
-      );
-      CREATE TABLE hatena_bookmarks (
-        id TEXT PRIMARY KEY,
-        article_id TEXT NOT NULL,
-        user TEXT NOT NULL,
-        comment TEXT,
-        created_at INTEGER NOT NULL DEFAULT 0,
-        FOREIGN KEY (article_id) REFERENCES articles(id) ON DELETE CASCADE
-      );
-    `);
-
-    return db;
-  }
-
   it('stores new articles, comments, summaries, and embeddings even when content is empty', async () => {
-    const db = await setupDatabase();
     const vectorAddMock = vi.fn().mockResolvedValue(1);
     const { syncSite } = await import('./sync.js');
 
@@ -152,8 +131,8 @@ describe('syncSite', () => {
 
     await syncSite(siteUrl);
 
-    const savedArticles = await db.select().from(articles);
-    const savedBookmarks = await db.select().from(hatenaBookmarks);
+    const savedArticles = await testDb.select().from(articles);
+    const savedBookmarks = await testDb.select().from(hatenaBookmarks);
 
     expect(savedArticles).toHaveLength(1);
     expect(savedArticles[0]).toMatchObject({
@@ -200,7 +179,6 @@ describe('syncSite', () => {
   });
 
   it('skips Hatena bookmarks for non-Hatena sites', async () => {
-    const db = await setupDatabase();
     const vectorAddMock = vi.fn().mockResolvedValue(1);
     const { syncSite } = await import('./sync.js');
 
@@ -216,8 +194,8 @@ describe('syncSite', () => {
     expect(fetchHatenaBookmarksMock).not.toHaveBeenCalled();
     expect(generateHatenaSummaryMock).not.toHaveBeenCalled();
 
-    const savedArticles = await db.select().from(articles);
-    const savedBookmarks = await db.select().from(hatenaBookmarks);
+    const savedArticles = await testDb.select().from(articles);
+    const savedBookmarks = await testDb.select().from(hatenaBookmarks);
 
     expect(savedArticles).toHaveLength(1);
     expect(savedArticles[0]).toMatchObject({
@@ -232,7 +210,6 @@ describe('syncSite', () => {
   });
 
   it('continues processing later articles when one article fails', async () => {
-    const db = await setupDatabase();
     const vectorAddMock = vi.fn().mockResolvedValue(1);
     const { syncSite } = await import('./sync.js');
 
@@ -251,7 +228,7 @@ describe('syncSite', () => {
 
     await syncSite(siteUrl);
 
-    const savedArticles = await db.select().from(articles);
+    const savedArticles = await testDb.select().from(articles);
     expect(savedArticles).toHaveLength(1);
     expect(savedArticles[0]).toMatchObject({
       content: '次の記事本文',
@@ -277,7 +254,6 @@ describe('syncSite', () => {
   });
 
   it('fails fast in debug mode when an article sync fails', async () => {
-    const db = await setupDatabase();
     const vectorAddMock = vi.fn().mockResolvedValue(1);
     const { syncSite } = await import('./sync.js');
     const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
@@ -297,15 +273,14 @@ describe('syncSite', () => {
     expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining('scrape failed'));
 
     consoleErrorSpy.mockRestore();
-    expect(await db.select().from(articles)).toHaveLength(0);
+    expect(await testDb.select().from(articles)).toHaveLength(0);
   });
 
   it('skips existing articles without refreshing Hatena data', async () => {
-    const db = await setupDatabase();
     const vectorAddMock = vi.fn().mockResolvedValue(1);
     const { syncSite } = await import('./sync.js');
 
-    await db.insert(articles).values({
+    await testDb.insert(articles).values({
       id: 'existing-article',
       siteUrl,
       url: article.url,
@@ -316,7 +291,7 @@ describe('syncSite', () => {
       publishedAt: new Date('2024-01-01T00:00:00.000Z'),
     });
 
-    await db.insert(hatenaBookmarks).values({
+    await testDb.insert(hatenaBookmarks).values({
       id: 'old-bookmark',
       articleId: 'existing-article',
       user: 'old',
@@ -335,8 +310,8 @@ describe('syncSite', () => {
     expect(generateEmbeddingsMock).not.toHaveBeenCalled();
     expect(vectorAddMock).not.toHaveBeenCalled();
 
-    const savedArticles = await db.select().from(articles);
-    const savedBookmarks = await db.select().from(hatenaBookmarks);
+    const savedArticles = await testDb.select().from(articles);
+    const savedBookmarks = await testDb.select().from(hatenaBookmarks);
 
     expect(savedArticles).toHaveLength(1);
     expect(savedArticles[0]).toMatchObject({
