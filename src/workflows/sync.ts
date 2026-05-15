@@ -1,5 +1,3 @@
-import { randomUUID } from 'node:crypto';
-
 import { eq } from 'drizzle-orm';
 
 import type { RuntimeEnv } from '../env.js';
@@ -97,7 +95,7 @@ export async function syncSite(
       const bookmarks = shouldFetchHatenaBookmarks(siteUrl) ? await fetchHatenaBookmarks(article.url) : [];
       const summary = await generateArticleSummary(article.title, content, env);
       const hatenaSummary = bookmarks.length > 0 ? await generateHatenaSummary(bookmarks, env) : null;
-      const articleId = randomUUID();
+      const articleId = crypto.randomUUID();
 
       await database.transaction(async (transaction: any) => {
         await transaction.insert(articles).values({
@@ -115,7 +113,7 @@ export async function syncSite(
         if (bookmarks.length > 0) {
           await transaction.insert(hatenaBookmarks).values(
             bookmarks.map((bookmark) => ({
-              id: randomUUID(),
+              id: crypto.randomUUID(),
               articleId,
               user: bookmark.user,
               comment: bookmark.comment,
