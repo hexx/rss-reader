@@ -12,8 +12,13 @@ vi.mock('@ai-sdk/openai', () => ({
   },
 }));
 
+vi.mock('@ai-sdk/openai-compatible', () => ({
+  createOpenAICompatible: vi.fn(),
+}));
+
 import { embedMany, generateText } from 'ai';
 import { openai } from '@ai-sdk/openai';
+import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
 
 import {
   generateArticleSummary,
@@ -21,11 +26,13 @@ import {
   generateEmbeddings,
   generateHatenaSummary,
   generateRagAnswer,
+  getOpenCodeGoChatModel,
 } from './ai.js';
 
 const generateTextMock = vi.mocked(generateText);
 const embedManyMock = vi.mocked(embedMany);
 const openaiEmbeddingMock = vi.mocked(openai.embedding);
+const createOpenAICompatibleMock = vi.mocked(createOpenAICompatible);
 
 describe('generateArticleSummary', () => {
   beforeEach(() => {
@@ -35,6 +42,10 @@ describe('generateArticleSummary', () => {
     generateTextMock.mockReset();
     embedManyMock.mockReset();
     openaiEmbeddingMock.mockReset();
+    createOpenAICompatibleMock.mockReset();
+    createOpenAICompatibleMock.mockReturnValue({
+      chatModel: vi.fn().mockReturnValue('chat-model'),
+    } as never);
   });
 
   afterEach(() => {
@@ -56,6 +67,27 @@ describe('generateArticleSummary', () => {
     expect(callArgs?.prompt).toContain('記事タイトル');
     expect(callArgs?.prompt).toContain('本文の内容です。');
     expect(callArgs?.prompt).not.toContain('参考になる');
+  });
+
+  it('builds the OpenCode Go chat model from env bindings', () => {
+    const chatModelMock = vi.fn().mockReturnValue('chat-model');
+    createOpenAICompatibleMock.mockReturnValue({
+      chatModel: chatModelMock,
+    } as never);
+
+    const model = getOpenCodeGoChatModel({
+      OPENCODE_GO_BASE_URL: 'https://opencode.example/v1',
+      OPENCODE_GO_API_KEY: 'test-api-key',
+      OPENCODE_GO_MODEL: 'test-model',
+    });
+
+    expect(model).toBe('chat-model');
+    expect(createOpenAICompatibleMock).toHaveBeenCalledWith({
+      baseURL: 'https://opencode.example/v1',
+      name: 'opencode-go',
+      apiKey: 'test-api-key',
+    });
+    expect(chatModelMock).toHaveBeenCalledWith('test-model');
   });
 
   it('summarizes Hatena reactions from comments only', async () => {

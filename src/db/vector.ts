@@ -3,14 +3,19 @@ import 'dotenv/config';
 import * as lancedb from '@lancedb/lancedb';
 import type { Table } from '@lancedb/lancedb';
 
-export const vectorDatabasePath = process.env.VECTOR_DB_PATH ?? './lancedb';
+import type { RuntimeEnv } from '../env.js';
+
+export function getVectorDatabasePath(env: RuntimeEnv = process.env): string {
+  return env.VECTOR_DB_PATH?.trim() || './lancedb';
+}
+
 export const vectorCollectionName = 'article_chunks';
 export const defaultVectorDimension = 1536;
 
-let vectorCollectionPromise: Promise<Table> | undefined;
+const vectorCollectionCache = new WeakMap<object, Promise<Table>>();
 
-function getVectorDimension(): number {
-  const rawValue = process.env.VECTOR_DIMENSION;
+export function getVectorDimension(env: RuntimeEnv = process.env): number {
+  const rawValue = env.VECTOR_DIMENSION;
 
   if (rawValue === undefined || rawValue.trim() === '') {
     return defaultVectorDimension;
@@ -24,8 +29,8 @@ function getVectorDimension(): number {
   return dimension;
 }
 
-function createPlaceholderRow(): Record<string, unknown> {
-  const vectorDimension = getVectorDimension();
+function createPlaceholderRow(env: RuntimeEnv): Record<string, unknown> {
+  const vectorDimension = getVectorDimension(env);
 
   return {
     article_id: '__placeholder__',
@@ -34,9 +39,15 @@ function createPlaceholderRow(): Record<string, unknown> {
   };
 }
 
-export function getVectorCollection(): Promise<Table> {
-  vectorCollectionPromise ??= (async () => {
-    const database = await lancedb.connect(vectorDatabasePath);
+export function getVectorCollection(env: RuntimeEnv = process.env): Promise<Table> {
+  const cacheKey = env as object;
+  const cachedCollection = vectorCollectionCache.get(cacheKey);
+  if (cachedCollection) {
+    return cachedCollection;
+  }
+
+  const collectionPromise = (async () => {
+    const database = await lancedb.connect(getVectorDatabasePath(env));
     const tableNames = await database.tableNames();
 
     if (tableNames.includes(vectorCollectionName)) {
@@ -45,7 +56,7 @@ export function getVectorCollection(): Promise<Table> {
 
     const table = await database.createTable({
       name: vectorCollectionName,
-      data: [createPlaceholderRow()],
+      data: [createPlaceholderRow(env)],
     });
 
     await table.delete("article_id = '__placeholder__'");
@@ -53,5 +64,7 @@ export function getVectorCollection(): Promise<Table> {
     return table;
   })();
 
-  return vectorCollectionPromise;
+  vectorCollectionCache.set(cacheKey, collectionPromise);
+
+  return collectionPromise;
 }

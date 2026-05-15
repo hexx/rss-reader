@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 
 import { eq } from 'drizzle-orm';
 
+import type { RuntimeEnv } from '../env.js';
 import { db } from '../db/index.js';
 import { articles, hatenaBookmarks, subscriptions } from '../db/schema.js';
 import { getVectorCollection } from '../db/vector.js';
@@ -67,10 +68,14 @@ function buildArticleChunks(
   return chunkText(buildArticleChunkSource(title, content), articleChunkSize);
 }
 
-export async function syncSite(siteUrl: string, debug = false): Promise<void> {
+export async function syncSite(
+  siteUrl: string,
+  debug = false,
+  env: RuntimeEnv = process.env,
+): Promise<void> {
   logger.info('サイト同期を開始します。', { siteUrl });
   const siteArticles = await fetchRssOrFallback(siteUrl);
-  const vectorCollection = await getVectorCollection();
+  const vectorCollection = await getVectorCollection(env);
 
   for (const article of siteArticles) {
     logger.info('記事の同期処理を実行します。', { title: article.title, url: article.url });
@@ -89,8 +94,8 @@ export async function syncSite(siteUrl: string, debug = false): Promise<void> {
 
       const content = await fetchArticleContent(article.url);
       const bookmarks = shouldFetchHatenaBookmarks(siteUrl) ? await fetchHatenaBookmarks(article.url) : [];
-      const summary = await generateArticleSummary(article.title, content);
-      const hatenaSummary = bookmarks.length > 0 ? await generateHatenaSummary(bookmarks) : null;
+      const summary = await generateArticleSummary(article.title, content, env);
+      const hatenaSummary = bookmarks.length > 0 ? await generateHatenaSummary(bookmarks, env) : null;
       const articleId = randomUUID();
 
       db.transaction((transaction) => {
@@ -120,7 +125,7 @@ export async function syncSite(siteUrl: string, debug = false): Promise<void> {
 
       const chunks = buildArticleChunks(article.title, content);
       if (chunks.length > 0) {
-        const embeddings = await generateEmbeddings(chunks);
+        const embeddings = await generateEmbeddings(chunks, env);
         await vectorCollection.add(buildChunkRows(articleId, chunks, embeddings));
       }
     } catch (error) {
@@ -142,7 +147,10 @@ export async function syncSite(siteUrl: string, debug = false): Promise<void> {
   logger.info('サイト同期が完了しました。', { siteUrl, articles: siteArticles.length });
 }
 
-export async function syncAllSubscriptions(debug = false): Promise<void> {
+export async function syncAllSubscriptions(
+  debug = false,
+  env: RuntimeEnv = process.env,
+): Promise<void> {
   const subscribedSites = await db
     .select({
       siteUrl: subscriptions.siteUrl,
@@ -155,7 +163,7 @@ export async function syncAllSubscriptions(debug = false): Promise<void> {
   }
 
   for (const [index, subscription] of subscribedSites.entries()) {
-    await syncSite(subscription.siteUrl, debug);
+    await syncSite(subscription.siteUrl, debug, env);
 
     if (index < subscribedSites.length - 1) {
       await sleep(randomSubscriptionDelayMs());

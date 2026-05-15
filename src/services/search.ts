@@ -4,6 +4,7 @@ import { db } from '../db/index.js';
 import { articles, hatenaBookmarks } from '../db/schema.js';
 import { getVectorCollection } from '../db/vector.js';
 import { generateEmbedding } from './ai.js';
+import type { RuntimeEnv } from '../env.js';
 
 export interface SearchArticleResult {
   bookmarks: Array<{
@@ -56,15 +57,18 @@ function uniqueArticleIds(articleIds: string[]): string[] {
   return [...new Set(articleIds)];
 }
 
-export async function searchArticles(query: string): Promise<SearchArticleResult[]> {
+export async function searchArticles(
+  query: string,
+  env: RuntimeEnv = process.env,
+): Promise<SearchArticleResult[]> {
   const normalizedQuery = query.trim();
   if (normalizedQuery.length === 0) {
     return [];
   }
 
-  const embedding = await generateEmbedding(normalizedQuery);
+  const embedding = await generateEmbedding(normalizedQuery, env);
 
-  const collection = await getVectorCollection();
+  const collection = await getVectorCollection(env);
   const chunkResults = (await collection.search(embedding).limit(maxSearchHits).toArray()) as SearchChunkResult[];
   const articleIds = uniqueArticleIds(
     chunkResults
