@@ -115,6 +115,6 @@ describe('searchArticles', () => {
       },
     ]);
 
-    expect(generateEmbeddingMock).toHaveBeenCalledWith('検索語');
+    expect(generateEmbeddingMock).toHaveBeenCalledWith('検索語', expect.any(Object));
   });
 });

@@ -175,7 +175,7 @@ describe('syncSite', () => {
       'タイトル: 記事タイトル\n\n本文:',
       1500,
     );
-    expect(generateEmbeddingsMock).toHaveBeenCalledWith(['chunk-1', 'chunk-2']);
+    expect(generateEmbeddingsMock).toHaveBeenCalledWith(['chunk-1', 'chunk-2'], expect.any(Object));
     expect(vectorAddMock).toHaveBeenCalledWith([
       {
         article_id: expect.any(String),
@@ -190,8 +190,8 @@ describe('syncSite', () => {
     ]);
     expect(fetchArticleContentMock).toHaveBeenCalledWith(article.url);
     expect(fetchHatenaBookmarksMock).toHaveBeenCalledWith(article.url);
-    expect(generateArticleSummaryMock).toHaveBeenCalledWith(article.title, '');
-    expect(generateHatenaSummaryMock).toHaveBeenCalledWith(bookmarks);
+    expect(generateArticleSummaryMock).toHaveBeenCalledWith(article.title, '', expect.any(Object));
+    expect(generateHatenaSummaryMock).toHaveBeenCalledWith(bookmarks, expect.any(Object));
     expect(generateEmbeddingsMock).toHaveBeenCalledTimes(1);
     expect(loggerMock.info).toHaveBeenCalledWith('記事の同期処理を実行します。', {
       title: article.title,
