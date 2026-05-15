@@ -1,6 +1,6 @@
 import { inArray } from 'drizzle-orm';
 
-import { db } from '../db/index.js';
+import { getDb } from '../db/index.js';
 import { articles, hatenaBookmarks } from '../db/schema.js';
 import { getVectorCollection } from '../db/vector.js';
 import { generateEmbedding } from './ai.js';
@@ -33,6 +33,17 @@ interface SearchBookmarkRow {
   createdAt: Date | string | number | null;
   id: string;
   user: string;
+}
+
+interface SearchArticleRow {
+  createdAt: Date | string | number | null;
+  hatenaSummary: string | null;
+  id: string;
+  isRead: boolean | number | null;
+  siteUrl: string;
+  summary: string | null;
+  title: string;
+  url: string;
 }
 
 const maxSearchHits = 10;
@@ -68,6 +79,7 @@ export async function searchArticles(
 
   const embedding = await generateEmbedding(normalizedQuery, env);
 
+  const database = getDb(env);
   const collection = await getVectorCollection(env);
   const chunkResults = (await collection.search(embedding).limit(maxSearchHits).toArray()) as SearchChunkResult[];
   const articleIds = uniqueArticleIds(
@@ -80,7 +92,7 @@ export async function searchArticles(
     return [];
   }
 
-  const rows = await db
+  const rows = (await database
     .select({
       createdAt: articles.createdAt,
       id: articles.id,
@@ -92,12 +104,12 @@ export async function searchArticles(
       url: articles.url,
     })
     .from(articles)
-    .where(inArray(articles.id, articleIds));
+    .where(inArray(articles.id, articleIds))) as SearchArticleRow[];
 
   const bookmarkRows =
     articleIds.length === 0
       ? []
-      : await db
+      : await database
           .select({
             articleId: hatenaBookmarks.articleId,
             comment: hatenaBookmarks.comment,
@@ -115,7 +127,7 @@ export async function searchArticles(
     bookmarksByArticleId.set(bookmark.articleId, items);
   }
 
-  const rowsById = new Map(rows.map((row) => [row.id, row]));
+  const rowsById = new Map(rows.map((row: SearchArticleRow) => [row.id, row]));
 
   return articleIds
     .map((articleId) => {
