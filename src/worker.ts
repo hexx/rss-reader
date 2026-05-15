@@ -1,5 +1,3 @@
-import { randomUUID } from 'node:crypto';
-
 import { Hono } from 'hono';
 
 import { and, asc, desc, eq, inArray, sql } from 'drizzle-orm';
@@ -386,7 +384,7 @@ app.post('/api/subscriptions', async (c) => {
     return c.json({ error: 'Subscription already exists.' }, 409);
   }
 
-  const id = randomUUID();
+  const id = crypto.randomUUID();
   const title = sourceHostname(normalizedSiteUrl);
   await database.insert(subscriptions).values({
     id,
