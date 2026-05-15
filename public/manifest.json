@@ -1,0 +1,11 @@
+{
+  "name": "理想のRSSリーダー",
+  "short_name": "RSS Reader",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#f5f7fb",
+  "theme_color": "#4f46e5",
+  "description": "記事、要約、はてブコメントをひとまとめに閲覧するRSSリーダー",
+  "lang": "ja"
+}

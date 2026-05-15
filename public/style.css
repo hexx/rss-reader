@@ -13,6 +13,7 @@ body {
   margin: 0;
   min-height: 100vh;
   background: linear-gradient(180deg, #f5f7fb 0%, #eef2ff 100%);
+  -webkit-text-size-adjust: 100%;
 }
 
 button,
@@ -369,5 +370,65 @@ button:disabled {
   .layout {
     padding-left: 1rem;
     padding-right: 1rem;
+  }
+}
+
+@media (max-width: 600px) {
+  .sidebar {
+    padding: 1rem;
+  }
+
+  .topbar {
+    flex-direction: column;
+    align-items: stretch;
+    padding: 1rem;
+  }
+
+  .topbar h1 {
+    font-size: 1.3rem;
+  }
+
+  .layout {
+    padding: 1rem;
+  }
+
+  .search-form {
+    flex-direction: column;
+  }
+
+  .search-form button,
+  .topbar button {
+    width: 100%;
+  }
+
+  .card {
+    padding: 0.85rem;
+    border-radius: 0.9rem;
+  }
+
+  .card__header {
+    flex-direction: column;
+  }
+
+  .card__read-toggle {
+    width: 100%;
+  }
+
+  .card__title {
+    font-size: 1rem;
+  }
+
+  .card__summary-section {
+    padding: 0.8rem;
+  }
+
+  .card__meta {
+    gap: 0.35rem 0.5rem;
+    font-size: 0.75rem;
+  }
+
+  .source-item,
+  .source-remove {
+    padding: 0.7rem 0.75rem;
   }
 }
