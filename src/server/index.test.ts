@@ -95,6 +95,13 @@ describe('server api', () => {
     await setupDatabase();
   });
 
+  it('starts the server on an ephemeral port', async () => {
+    const baseUrl = await startServer();
+
+    expect(baseUrl).toMatch(/^http:\/\/127\.0\.0\.1:/);
+    expect(server?.listening).toBe(true);
+  });
+
   afterEach(async () => {
     vi.unstubAllEnvs();
     if (server) {
@@ -364,6 +371,27 @@ describe('server api', () => {
         },
       ]),
     );
+  });
+
+  it('requires basic auth when credentials are configured', async () => {
+    vi.stubEnv('ADMIN_USERNAME', 'admin');
+    vi.stubEnv('ADMIN_PASSWORD', 'secret');
+
+    const baseUrl = await startServer();
+    const authHeader = `Basic ${Buffer.from('admin:secret').toString('base64')}`;
+
+    const unauthenticatedApiResponse = await fetch(`${baseUrl}/api/sources`);
+    const unauthenticatedStaticResponse = await fetch(`${baseUrl}/app.js`);
+    const authenticatedResponse = await fetch(`${baseUrl}/api/sources`, {
+      headers: {
+        Authorization: authHeader,
+      },
+    });
+
+    expect(unauthenticatedApiResponse.status).toBe(401);
+    expect(unauthenticatedApiResponse.headers.get('www-authenticate')).toContain('Basic');
+    expect(unauthenticatedStaticResponse.status).toBe(401);
+    expect(authenticatedResponse.status).toBe(200);
   });
 
   it('disambiguates duplicate and Hatena source labels', async () => {

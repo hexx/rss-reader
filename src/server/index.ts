@@ -1,3 +1,4 @@
+import basicAuth from 'express-basic-auth';
 import express from 'express';
 import { and, count, desc, eq, inArray } from 'drizzle-orm';
 import path from 'node:path';
@@ -66,6 +67,23 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const publicDir = path.resolve(__dirname, '../../public');
 const port = Number(process.env.PORT ?? 3000);
+
+function createBasicAuthMiddleware() {
+  const username = process.env.ADMIN_USERNAME?.trim();
+  const password = process.env.ADMIN_PASSWORD ?? '';
+
+  if (!username || password.length === 0) {
+    return null;
+  }
+
+  return basicAuth({
+    challenge: true,
+    realm: 'RSS Reader',
+    users: {
+      [username]: password,
+    },
+  });
+}
 
 function formatDate(value: Date | string | number | null | undefined): string {
   if (value instanceof Date) {
@@ -233,6 +251,11 @@ async function fetchBookmarksByArticleIds(articleIds: string[]): Promise<Bookmar
 export function createApp() {
   const app = express();
 
+  const basicAuthMiddleware = createBasicAuthMiddleware();
+  if (basicAuthMiddleware) {
+    app.use(basicAuthMiddleware);
+  }
+
   app.use(express.json());
   app.use(express.static(publicDir));
 
@@ -344,10 +367,10 @@ export function createApp() {
         return;
       }
 
-       const results = await searchArticles(query);
-       const references = buildRagReferences(results);
-       const aiAnswer = await generateRagAnswer(query, buildRagContexts(results), results);
-       response.json({ results, references, aiAnswer });
+      const results = await searchArticles(query);
+      const references = buildRagReferences(results);
+      const aiAnswer = await generateRagAnswer(query, buildRagContexts(results), results);
+      response.json({ results, references, aiAnswer });
     } catch (error) {
       next(error);
     }
@@ -403,7 +426,7 @@ export function createApp() {
 
 export function startServer() {
   const app = createApp();
-  return app.listen(port, () => {
+  return app.listen(port, '0.0.0.0', () => {
     logger.info(`Web server listening on http://localhost:${port}`);
   });
 }
