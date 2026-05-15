@@ -5,6 +5,7 @@ import { eq } from 'drizzle-orm';
 
 import { db } from './db/index.js';
 import { subscriptions } from './db/schema.js';
+import type { RuntimeEnv } from './env.js';
 import { searchArticles } from './services/search.js';
 import { syncAllSubscriptions } from './workflows/sync.js';
 
@@ -55,13 +56,13 @@ export async function unsubscribeSite(siteUrl: string): Promise<void> {
   console.log(`購読を解除しました: ${normalizedSiteUrl}`);
 }
 
-async function syncSubscriptions(debug = false): Promise<void> {
-  await syncAllSubscriptions(debug);
+async function syncSubscriptions(debug = false, env: RuntimeEnv = process.env): Promise<void> {
+  await syncAllSubscriptions(debug, env);
   console.log('同期が完了しました。');
 }
 
-async function searchForArticles(query: string): Promise<void> {
-  const results = await searchArticles(query);
+async function searchForArticles(query: string, env: RuntimeEnv = process.env): Promise<void> {
+  const results = await searchArticles(query, env);
 
   if (results.length === 0) {
     console.log('検索結果はありません。');
@@ -104,7 +105,7 @@ program
   .command('sync')
   .description('登録済みのサイトを同期する')
   .action(async () => {
-    await syncSubscriptions(Boolean(program.opts().debug));
+    await syncSubscriptions(Boolean(program.opts().debug), process.env);
   });
 
 program
@@ -112,7 +113,7 @@ program
   .argument('<query...>')
   .description('記事を横断検索する')
   .action(async (queryParts: string[]) => {
-    await searchForArticles(queryParts.join(' '));
+    await searchForArticles(queryParts.join(' '), process.env);
   });
 
 if (!process.env.VITEST && process.argv[1]?.includes('src/cli.ts')) {

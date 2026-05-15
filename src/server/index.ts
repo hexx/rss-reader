@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 
 import { db } from '../db/index.js';
 import { articles, hatenaBookmarks, subscriptions } from '../db/schema.js';
+import type { RuntimeEnv } from '../env.js';
 import { generateRagAnswer } from '../services/ai.js';
 import { searchArticles } from '../services/search.js';
 import { syncAllSubscriptions } from '../workflows/sync.js';
@@ -69,11 +70,21 @@ type BookmarkRow = {
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const publicDir = path.resolve(__dirname, '../../public');
-const port = Number(process.env.PORT ?? 3000);
+const defaultPort = 3000;
 
-function createBasicAuthMiddleware() {
-  const username = process.env.ADMIN_USERNAME?.trim();
-  const password = process.env.ADMIN_PASSWORD ?? '';
+type ServerEnv = RuntimeEnv & {
+  ADMIN_PASSWORD?: string;
+  ADMIN_USERNAME?: string;
+  PORT?: string;
+};
+
+function getPort(env: ServerEnv = process.env): number {
+  return Number(env.PORT ?? defaultPort);
+}
+
+function createBasicAuthMiddleware(env: ServerEnv) {
+  const username = env.ADMIN_USERNAME?.trim();
+  const password = env.ADMIN_PASSWORD ?? '';
 
   if (!username || password.length === 0) {
     return null;
@@ -253,10 +264,10 @@ async function fetchBookmarksByArticleIds(articleIds: string[]): Promise<Bookmar
     .where(inArray(hatenaBookmarks.articleId, articleIds));
 }
 
-export function createApp() {
+export function createApp(env: ServerEnv = process.env) {
   const app = express();
 
-  const basicAuthMiddleware = createBasicAuthMiddleware();
+  const basicAuthMiddleware = createBasicAuthMiddleware(env);
   if (basicAuthMiddleware) {
     app.use(basicAuthMiddleware);
   }
@@ -398,7 +409,7 @@ export function createApp() {
 
       if (
         query.trim().length > 0 &&
-        (process.env.OPENCODE_GO_BASE_URL === undefined || process.env.OPENCODE_GO_API_KEY === undefined)
+        (env.OPENCODE_GO_BASE_URL === undefined || env.OPENCODE_GO_API_KEY === undefined)
       ) {
         response.status(503).json({
           error: 'Search requires OPENCODE_GO_BASE_URL and OPENCODE_GO_API_KEY.',
@@ -406,9 +417,9 @@ export function createApp() {
         return;
       }
 
-      const results = await searchArticles(query);
+      const results = await searchArticles(query, env);
       const references = buildRagReferences(results);
-      const aiAnswer = await generateRagAnswer(query, buildRagContexts(results), results);
+      const aiAnswer = await generateRagAnswer(query, buildRagContexts(results), results, env);
       response.json({ results, references, aiAnswer });
     } catch (error) {
       next(error);
@@ -439,7 +450,7 @@ export function createApp() {
   });
 
   app.post('/api/sync', (_request, response) => {
-    void syncAllSubscriptions().catch((error: unknown) => {
+    void syncAllSubscriptions(false, env).catch((error: unknown) => {
       logger.error('同期APIの実行に失敗しました。', { error });
     });
 
@@ -463,8 +474,9 @@ export function createApp() {
   return app;
 }
 
-export function startServer() {
-  const app = createApp();
+export function startServer(env: ServerEnv = process.env) {
+  const app = createApp(env);
+  const port = getPort(env);
   return app.listen(port, '0.0.0.0', () => {
     logger.info(`Web server listening on http://localhost:${port}`);
   });

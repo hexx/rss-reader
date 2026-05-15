@@ -59,9 +59,9 @@ async function setupDatabase() {
   `);
 }
 
-async function startServer() {
+async function startServer(env = process.env) {
   const { createApp } = await import('./index.js');
-  const app = createApp();
+  const app = createApp(env);
   await new Promise<void>((resolve, reject) => {
     server = app.listen(0, (error?: Error) => {
       if (error) {
@@ -101,6 +101,30 @@ describe('server api', () => {
 
     expect(baseUrl).toMatch(/^http:\/\/127\.0\.0\.1:/);
     expect(server?.listening).toBe(true);
+  });
+
+  it('threads env bindings into search responses', async () => {
+    const env = {
+      OPENCODE_GO_API_KEY: 'custom-api-key',
+      OPENCODE_GO_BASE_URL: 'https://opencode.example/v1',
+      OPENCODE_GO_MODEL: 'custom-model',
+    };
+
+    searchArticlesMock.mockResolvedValue([]);
+    generateRagAnswerMock.mockResolvedValue('AI response');
+
+    const baseUrl = await startServer(env);
+    const response = await fetch(`${baseUrl}/api/search?q=hello`);
+    const payload = await response.json();
+
+    expect(response.ok).toBe(true);
+    expect(payload).toMatchObject({
+      aiAnswer: 'AI response',
+      references: [],
+      results: [],
+    });
+    expect(searchArticlesMock).toHaveBeenCalledWith('hello', env);
+    expect(generateRagAnswerMock).toHaveBeenCalledWith('hello', [], [], env);
   });
 
   afterEach(async () => {
@@ -309,7 +333,7 @@ describe('server api', () => {
         title: '検索対象の記事',
         url: 'https://example.com/articles/1',
       },
-    ]);
+    ], expect.any(Object));
   });
 
   it('updates read state through the API', async () => {

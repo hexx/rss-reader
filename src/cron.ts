@@ -1,9 +1,13 @@
 import { schedule, type ScheduledTask } from 'node-cron';
 
+import type { RuntimeEnv } from './env.js';
 import { logger } from './utils/logger.js';
 import { syncAllSubscriptions } from './workflows/sync.js';
 
 const defaultCronExpression = '0 */3 * * *';
+type CronEnv = RuntimeEnv & {
+  CRON_TIMEZONE?: string;
+};
 
 export interface CronLogger {
   error(message: string, meta?: Record<string, unknown>): void;
@@ -25,12 +29,15 @@ export interface SyncCronRunner {
   runOnce: () => Promise<boolean>;
 }
 
-export function createSyncCronRunner(dependencies: SyncCronDependencies = {}): SyncCronRunner {
+export function createSyncCronRunner(
+  dependencies: SyncCronDependencies = {},
+  env: CronEnv = process.env,
+): SyncCronRunner {
   const expression = dependencies.expression ?? defaultCronExpression;
   const log = dependencies.log ?? logger;
-  const runSync = dependencies.runSync ?? syncAllSubscriptions;
+  const runSync = dependencies.runSync ?? (() => syncAllSubscriptions(false, env));
   const scheduleJob = dependencies.scheduleJob ?? schedule;
-  const timezone = dependencies.timezone ?? process.env.CRON_TIMEZONE;
+  const timezone = dependencies.timezone ?? env.CRON_TIMEZONE;
 
   let running = false;
 
@@ -75,8 +82,8 @@ export function createSyncCronRunner(dependencies: SyncCronDependencies = {}): S
   };
 }
 
-export function startCron(): ScheduledTask {
-  return createSyncCronRunner().start();
+export function startCron(env: CronEnv = process.env): ScheduledTask {
+  return createSyncCronRunner({}, env).start();
 }
 
 if (process.argv[1]?.includes('src/cron.ts')) {
