@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto';
+
 import { Hono } from 'hono';
 
 import { and, asc, desc, eq, inArray, sql } from 'drizzle-orm';
@@ -196,7 +198,7 @@ function createBasicAuthMiddleware(env: Bindings | undefined) {
     const encoded = authorization.slice('Basic '.length);
     let decoded = '';
     try {
-      decoded = typeof atob === 'function' ? atob(encoded) : Buffer.from(encoded, 'base64').toString('utf8');
+      decoded = atob(encoded);
     } catch {
       return c.text('Unauthorized', 401, {
         'WWW-Authenticate': 'Basic realm="RSS Reader"',
@@ -365,6 +367,43 @@ app.delete('/api/subscriptions', async (c) => {
   return c.json({ siteUrl: normalizedSiteUrl });
 });
 
+app.post('/api/subscriptions', async (c) => {
+  const body = (await c.req.json().catch(() => ({}))) as { siteUrl?: unknown };
+  const siteUrl = typeof body.siteUrl === 'string' ? body.siteUrl : '';
+  if (siteUrl.trim().length === 0) {
+    return c.json({ error: 'siteUrl is required.' }, 400);
+  }
+
+  const normalizedSiteUrl = normalizeSiteUrl(siteUrl);
+  const database = getDb(c.env);
+  const existingSubscription = await database
+    .select({ id: subscriptions.id })
+    .from(subscriptions)
+    .where(eq(subscriptions.siteUrl, normalizedSiteUrl))
+    .limit(1);
+
+  if (existingSubscription.length > 0) {
+    return c.json({ error: 'Subscription already exists.' }, 409);
+  }
+
+  const id = randomUUID();
+  const title = sourceHostname(normalizedSiteUrl);
+  await database.insert(subscriptions).values({
+    id,
+    siteUrl: normalizedSiteUrl,
+    title,
+  }).run();
+
+  return c.json(
+    {
+      id,
+      siteUrl: normalizedSiteUrl,
+      title,
+    },
+    201,
+  );
+});
+
 app.get('/api/search', async (c) => {
   const query = c.req.query('q')?.trim() || '';
   if (query.length === 0) {
@@ -408,9 +447,14 @@ app.patch('/api/articles/:id/read', async (c) => {
 });
 
 app.post('/api/sync', (c) => {
-  void syncAllSubscriptions(false, c.env).catch((error: unknown) => {
+  const syncTask = syncAllSubscriptions(false, c.env).catch((error: unknown) => {
     console.error('同期APIの実行に失敗しました。', { error });
   });
+  if (c.executionCtx) {
+    c.executionCtx.waitUntil(syncTask);
+  } else {
+    void syncTask;
+  }
 
   return c.json({ status: 'accepted' }, 202);
 });

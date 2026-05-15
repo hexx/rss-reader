@@ -20,6 +20,17 @@
           <h2>RSS Sources</h2>
           <p>購読サイトをクリックして絞り込みます。</p>
         </div>
+        <form id="subscription-form" class="search-form subscription-form">
+          <input
+            id="subscription-input"
+            name="siteUrl"
+            type="url"
+            placeholder="RSSのURLを追加"
+            autocomplete="url"
+            required
+          />
+          <button type="submit">追加</button>
+        </form>
         <nav aria-label="RSS sources">
           <ul id="sources-list" class="sources-list"></ul>
         </nav>

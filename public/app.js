@@ -2,6 +2,8 @@ const articlesElement = document.querySelector('#articles');
 const statusElement = document.querySelector('#status');
 const searchForm = document.querySelector('#search-form');
 const searchInput = document.querySelector('#search-input');
+const subscriptionForm = document.querySelector('#subscription-form');
+const subscriptionInput = document.querySelector('#subscription-input');
 const unreadOnlyToggle = document.querySelector('#unread-only-toggle');
 const syncButton = document.querySelector('#sync-button');
 const sourcesList = document.querySelector('#sources-list');
@@ -400,6 +402,26 @@ async function loadSources() {
   renderSources(latestSources);
 }
 
+async function addSubscription(siteUrl) {
+  const response = await fetch('/api/subscriptions', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ siteUrl }),
+  });
+
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(payload.error || '購読の追加に失敗しました。');
+  }
+
+  subscriptionInput.value = '';
+  setStatus('購読を追加しました。');
+  await loadSources();
+  await loadArticles(state.sourceUrl);
+}
+
 async function removeSubscription(siteUrl) {
   const response = await fetch('/api/subscriptions', {
     method: 'DELETE',
@@ -542,6 +564,13 @@ unreadOnlyToggle.addEventListener('change', () => {
 searchForm.addEventListener('submit', (event) => {
   event.preventDefault();
   void runSearch(searchInput.value);
+});
+
+subscriptionForm.addEventListener('submit', (event) => {
+  event.preventDefault();
+  void addSubscription(subscriptionInput.value).catch((error) => {
+    setStatus(error instanceof Error ? error.message : '購読の追加に失敗しました。');
+  });
 });
 
 syncButton.addEventListener('click', () => {

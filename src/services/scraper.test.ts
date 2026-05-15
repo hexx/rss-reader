@@ -2,6 +2,21 @@ import { http, HttpResponse } from 'msw';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { server } from '../test/setup.js';
+
+const { parseStringMock, parseURLMock } = vi.hoisted(() => ({
+  parseStringMock: vi.fn(),
+  parseURLMock: vi.fn(),
+}));
+
+vi.mock('rss-parser', () => ({
+  default: class ParserMock {
+    parseString = parseStringMock;
+    parseURL = parseURLMock;
+
+    constructor(_options?: unknown) {}
+  },
+}));
+
 import { fetchArticleContent, fetchRssOrFallback, getSiteArticles } from './scraper.js';
 
 const feedUrl = 'https://example.com/feed.xml';
@@ -58,6 +73,8 @@ describe('scraper service', () => {
   afterEach(() => {
     vi.useRealTimers();
     vi.restoreAllMocks();
+    parseStringMock.mockReset();
+    parseURLMock.mockReset();
   });
 
   it('extracts article content while dropping boilerplate markup', async () => {
@@ -85,6 +102,19 @@ describe('scraper service', () => {
       http.get(fallbackUrl, () => HttpResponse.text(fallbackHtml, { headers: { 'Content-Type': 'text/html' } })),
     );
 
+    parseStringMock.mockResolvedValueOnce({
+      items: [
+        {
+          isoDate: '2024-01-02T03:04:05.000Z',
+          link: articleOneUrl,
+          title: 'First article',
+        },
+      ],
+    });
+    parseStringMock.mockResolvedValueOnce({
+      items: [],
+    });
+
     await expect(fetchRssOrFallback(feedUrl)).resolves.toEqual([
       {
         pubDate: new Date('2024-01-02T03:04:05.000Z'),
@@ -105,6 +135,8 @@ describe('scraper service', () => {
         url: articleTwoUrl,
       },
     ]);
+
+    expect(parseURLMock).not.toHaveBeenCalled();
   });
 
   it('paces article fetches while collecting site articles', async () => {
@@ -115,6 +147,15 @@ describe('scraper service', () => {
 
     vi.useFakeTimers();
     vi.spyOn(Math, 'random').mockReturnValue(0);
+    parseStringMock.mockResolvedValue({
+      items: [
+        {
+          isoDate: '2024-01-02T03:04:05.000Z',
+          link: articleOneUrl,
+          title: 'First article',
+        },
+      ],
+    });
 
     const promise = getSiteArticles(feedUrl);
 

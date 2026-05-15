@@ -139,11 +139,39 @@ describe('worker app', () => {
     ]);
   });
 
+  it('creates subscriptions through the worker API', async () => {
+    const response = await app.fetch(
+      new Request('http://localhost/api/subscriptions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ siteUrl: 'https://example.com/feed' }),
+      }),
+    );
+
+    expect(response.status).toBe(201);
+    await expect(response.json()).resolves.toMatchObject({
+      siteUrl: 'https://example.com/feed',
+      title: 'example.com',
+    });
+
+    const savedSubscriptions = await testDb.select().from(subscriptions);
+    expect(savedSubscriptions).toHaveLength(1);
+    expect(savedSubscriptions[0]).toMatchObject({
+      siteUrl: 'https://example.com/feed',
+      title: 'example.com',
+    });
+  });
+
   it('threads env bindings into search and sync routes', async () => {
     const env = {
       OPENCODE_GO_API_KEY: 'test-api-key',
       OPENCODE_GO_BASE_URL: 'https://opencode.example/v1',
       OPENCODE_GO_MODEL: 'test-model',
+    };
+    const executionContext = {
+      waitUntil: vi.fn(),
     };
 
     searchArticlesMock.mockResolvedValue([
@@ -187,8 +215,13 @@ describe('worker app', () => {
       env,
     );
 
-    const syncResponse = await app.fetch(new Request('http://localhost/api/sync', { method: 'POST' }), env as never);
+    const syncResponse = await app.fetch(
+      new Request('http://localhost/api/sync', { method: 'POST' }),
+      env as never,
+      executionContext as never,
+    );
     expect(syncResponse.status).toBe(202);
     expect(syncAllSubscriptionsMock).toHaveBeenCalledWith(false, env);
+    expect(executionContext.waitUntil).toHaveBeenCalledTimes(1);
   });
 });
