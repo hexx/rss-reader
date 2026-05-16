@@ -53,6 +53,24 @@ function buildArticleChunks(
   return chunkText(buildArticleChunkSource(title, content), articleChunkSize);
 }
 
+async function measureAsync<T>(
+  label: string,
+  articleUrl: string,
+  siteUrl: string,
+  operation: () => Promise<T>,
+): Promise<T> {
+  const startedAt = performance.now();
+
+  try {
+    return await operation();
+  } finally {
+    logger.info(`[計測] ${label}: ${Math.round(performance.now() - startedAt)}ms`, {
+      articleUrl,
+      siteUrl,
+    });
+  }
+}
+
 export async function syncSite(
   siteUrl: string,
   debug = false,
@@ -82,7 +100,7 @@ export async function syncSite(
 
         let content = '';
         try {
-          content = await fetchArticleContent(article.url);
+          content = await measureAsync('本文取得', article.url, siteUrl, () => fetchArticleContent(article.url));
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
           logger.warn('本文の取得に失敗したため、本文なしで処理を継続します。', {
@@ -92,9 +110,18 @@ export async function syncSite(
             error: message,
           });
         }
-        const bookmarks = shouldFetchHatenaBookmarks(siteUrl) ? await fetchHatenaBookmarks(article.url) : [];
-        const summary = await generateArticleSummary(article.title, content, env);
-        const hatenaSummary = bookmarks.length > 0 ? await generateHatenaSummary(bookmarks, env) : null;
+        const bookmarks = shouldFetchHatenaBookmarks(siteUrl)
+          ? await measureAsync('はてなAPI', article.url, siteUrl, () => fetchHatenaBookmarks(article.url))
+          : [];
+        const summary = await measureAsync('記事要約AI', article.url, siteUrl, () =>
+          generateArticleSummary(article.title, content, env),
+        );
+        const hatenaSummary =
+          bookmarks.length > 0
+            ? await measureAsync('コメント要約AI', article.url, siteUrl, () =>
+                generateHatenaSummary(bookmarks, env),
+              )
+            : null;
         const articleId = crypto.randomUUID();
 
         await database.insert(articles).values({
@@ -129,7 +156,9 @@ export async function syncSite(
 
         const chunks = buildArticleChunks(article.title, content);
         if (chunks.length > 0) {
-          const embeddings = await generateEmbeddings(chunks, env);
+          const embeddings = await measureAsync('ベクトル化AI', article.url, siteUrl, () =>
+            generateEmbeddings(chunks, env),
+          );
           await vectorCollection.add(buildChunkRows(articleId, chunks, embeddings));
         }
 
