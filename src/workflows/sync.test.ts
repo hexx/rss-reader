@@ -172,6 +172,7 @@ describe('syncSite', () => {
     expect(generateArticleSummaryMock).toHaveBeenCalledWith(article.title, '', expect.any(Object));
     expect(generateHatenaSummaryMock).toHaveBeenCalledWith(bookmarks, expect.any(Object));
     expect(generateEmbeddingsMock).toHaveBeenCalledTimes(1);
+    expect(sleepMock).toHaveBeenCalledTimes(1);
     expect(loggerMock.info).toHaveBeenCalledWith('記事の同期処理を実行します。', {
       title: article.title,
       url: article.url,
@@ -309,6 +310,7 @@ describe('syncSite', () => {
     expect(generateHatenaSummaryMock).not.toHaveBeenCalled();
     expect(generateEmbeddingsMock).not.toHaveBeenCalled();
     expect(vectorAddMock).not.toHaveBeenCalled();
+    expect(sleepMock).not.toHaveBeenCalled();
 
     const savedArticles = await testDb.select().from(articles);
     const savedBookmarks = await testDb.select().from(hatenaBookmarks);
