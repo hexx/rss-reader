@@ -264,7 +264,26 @@ describe('worker app', () => {
       executionContext as never,
     );
     expect(syncResponse.status).toBe(202);
-    expect(syncAllSubscriptionsMock).toHaveBeenCalledWith(false, env);
+    expect(syncAllSubscriptionsMock).toHaveBeenCalledWith(false, env, false);
+    expect(executionContext.waitUntil).toHaveBeenCalledTimes(1);
+  });
+
+  it('uses cron mode for scheduled syncs', async () => {
+    const env = {
+      OPENCODE_GO_API_KEY: 'test-api-key',
+      OPENCODE_GO_BASE_URL: 'https://opencode.example/v1',
+      OPENCODE_GO_MODEL: 'test-model',
+    };
+    const executionContext = {
+      waitUntil: vi.fn(),
+    };
+
+    syncAllSubscriptionsMock.mockResolvedValue(undefined);
+    const workerModule = await import('./worker.js');
+
+    await workerModule.default.scheduled({} as never, env as never, executionContext as never);
+
+    expect(syncAllSubscriptionsMock).toHaveBeenCalledWith(false, env, true);
     expect(executionContext.waitUntil).toHaveBeenCalledTimes(1);
   });
 });

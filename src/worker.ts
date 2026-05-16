@@ -485,7 +485,7 @@ app.patch('/api/articles/:id/read', async (c) => {
 });
 
 app.post('/api/sync', (c) => {
-  const syncTask = syncAllSubscriptions(false, c.env).catch((error: unknown) => {
+  const syncTask = syncAllSubscriptions(false, c.env, false).catch((error: unknown) => {
     console.error('同期APIの実行に失敗しました。', { error });
   });
   if (c.executionCtx) {
@@ -513,7 +513,7 @@ app.get('*', async (c) => {
 function createScheduledHandler() {
   return async (_event: unknown, env: Bindings, ctx: any) => {
     ctx.waitUntil(
-      syncAllSubscriptions(false, env).catch((error: unknown) => {
+      syncAllSubscriptions(false, env, true).catch((error: unknown) => {
         console.error('定期同期に失敗しました。', { error });
       }),
     );
