@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { articles, hatenaBookmarks } from '../db/schema.js';
+import { articles, hatenaBookmarks, subscriptions } from '../db/schema.js';
 import { createTestDatabase } from '../test-utils/sqljs-db.js';
 
 vi.mock('../services/scraper.js', () => ({
@@ -327,5 +327,100 @@ describe('syncSite', () => {
       comment: '古いコメント',
       user: 'old',
     });
+  });
+
+  it('stops after processing three new articles', async () => {
+    const vectorAddMock = vi.fn().mockResolvedValue(1);
+    const { syncSite } = await import('./sync.js');
+
+    const limitedArticles = [
+      {
+        title: '既存の記事',
+        pubDate: new Date('2024-01-01T00:00:00.000Z'),
+        url: 'https://example.com/articles/0',
+      },
+      {
+        title: '記事1',
+        pubDate: new Date('2024-01-02T00:00:00.000Z'),
+        url: 'https://example.com/articles/1',
+      },
+      {
+        title: '記事2',
+        pubDate: new Date('2024-01-03T00:00:00.000Z'),
+        url: 'https://example.com/articles/2',
+      },
+      {
+        title: '記事3',
+        pubDate: new Date('2024-01-04T00:00:00.000Z'),
+        url: 'https://example.com/articles/3',
+      },
+      {
+        title: '記事4',
+        pubDate: new Date('2024-01-05T00:00:00.000Z'),
+        url: 'https://example.com/articles/4',
+      },
+    ];
+
+    await testDb.insert(articles).values({
+      id: 'existing-article',
+      siteUrl,
+      url: limitedArticles[0]!.url,
+      title: limitedArticles[0]!.title,
+      content: '本文',
+      summary: '既存要約',
+      hatenaSummary: '既存はてブ要約',
+      publishedAt: limitedArticles[0]!.pubDate,
+    });
+
+    fetchRssOrFallbackMock.mockResolvedValue(limitedArticles);
+    fetchArticleContentMock.mockImplementation(async (url) => `本文: ${url}`);
+    fetchHatenaBookmarksMock.mockResolvedValue([]);
+    generateArticleSummaryMock.mockResolvedValue('要約文');
+    chunkTextMock.mockReturnValue(['chunk-1']);
+    generateEmbeddingsMock.mockResolvedValue([[0.1, 0.2]]);
+    getVectorCollectionMock.mockResolvedValue({ add: vectorAddMock } as never);
+
+    await syncSite(siteUrl);
+
+    expect(fetchArticleContentMock).toHaveBeenCalledTimes(3);
+    expect(generateArticleSummaryMock).toHaveBeenCalledTimes(3);
+    expect(vectorAddMock).toHaveBeenCalledTimes(3);
+    expect(loggerMock.info).toHaveBeenCalledWith('タイムアウト防止のため、記事の同期を中断して次回に回します。');
+    expect(fetchArticleContentMock).not.toHaveBeenCalledWith(limitedArticles[4]!.url);
+
+    const savedArticles = await testDb.select().from(articles);
+    expect(savedArticles).toHaveLength(4);
+    expect(savedArticles.some((savedArticle) => savedArticle.url === limitedArticles[4]!.url)).toBe(false);
+  });
+
+  it('limits subscription sync to two sites per run', async () => {
+    const { syncAllSubscriptions } = await import('./sync.js');
+
+    fetchRssOrFallbackMock.mockResolvedValue([]);
+    getVectorCollectionMock.mockResolvedValue({ add: vi.fn().mockResolvedValue(1) } as never);
+
+    await testDb.insert(subscriptions).values([
+      {
+        id: 'subscription-1',
+        siteUrl: 'https://example.com/site-1/',
+        title: 'site-1',
+      },
+      {
+        id: 'subscription-2',
+        siteUrl: 'https://example.com/site-2/',
+        title: 'site-2',
+      },
+      {
+        id: 'subscription-3',
+        siteUrl: 'https://example.com/site-3/',
+        title: 'site-3',
+      },
+    ]);
+
+    await syncAllSubscriptions();
+
+    expect(fetchRssOrFallbackMock).toHaveBeenCalledTimes(2);
+    expect(getVectorCollectionMock).toHaveBeenCalledTimes(2);
+    expect(sleepMock).toHaveBeenCalledTimes(1);
   });
 });
