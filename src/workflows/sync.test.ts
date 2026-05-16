@@ -159,16 +159,6 @@ describe('syncSite', () => {
     expect(generateArticleSummaryMock).toHaveBeenCalledWith(article.title, '', expect.any(Object));
     expect(generateHatenaSummaryMock).toHaveBeenCalledWith(bookmarks, expect.any(Object));
     expect(generateEmbeddingsMock).toHaveBeenCalledTimes(1);
-    const infoMessages = loggerMock.info.mock.calls.map(([message]) => String(message));
-    expect(infoMessages).toEqual(
-      expect.arrayContaining([
-        expect.stringContaining('[計測] 本文取得:'),
-        expect.stringContaining('[計測] はてなAPI:'),
-        expect.stringContaining('[計測] 記事要約AI:'),
-        expect.stringContaining('[計測] コメント要約AI:'),
-        expect.stringContaining('[計測] ベクトル化AI:'),
-      ]),
-    );
     expect(loggerMock.info).toHaveBeenCalledWith('記事の同期処理を実行します。', {
       title: article.title,
       url: article.url,
@@ -392,7 +382,7 @@ describe('syncSite', () => {
     expect(bookmarkInsertRunMock).toHaveBeenCalledTimes(2);
   });
 
-  it('stops after processing one new article', async () => {
+  it('processes multiple new articles per run', async () => {
     const vectorAddMock = vi.fn().mockResolvedValue(1);
     const { syncSite } = await import('./sync.js');
 
@@ -433,25 +423,26 @@ describe('syncSite', () => {
     generateEmbeddingsMock.mockResolvedValue([[0.1, 0.2]]);
     getVectorCollectionMock.mockResolvedValue({ add: vectorAddMock } as never);
 
-    await expect(syncSite(siteUrl)).resolves.toBe(1);
+    await expect(syncSite(siteUrl)).resolves.toBe(2);
 
-    expect(fetchArticleContentMock).toHaveBeenCalledTimes(1);
-    expect(generateArticleSummaryMock).toHaveBeenCalledTimes(1);
-    expect(vectorAddMock).toHaveBeenCalledTimes(1);
-    expect(loggerMock.info).toHaveBeenCalledWith('タイムアウト防止のため、記事の同期を中断して次回に回します。');
-    expect(fetchArticleContentMock).not.toHaveBeenCalledWith(limitedArticles[2]!.url);
+    expect(fetchArticleContentMock).toHaveBeenCalledTimes(2);
+    expect(generateArticleSummaryMock).toHaveBeenCalledTimes(2);
+    expect(vectorAddMock).toHaveBeenCalledTimes(2);
+    expect(fetchArticleContentMock).toHaveBeenNthCalledWith(1, limitedArticles[1]!.url);
+    expect(fetchArticleContentMock).toHaveBeenNthCalledWith(2, limitedArticles[2]!.url);
 
     const savedArticles = await testDb.select().from(articles);
-    expect(savedArticles).toHaveLength(2);
-    expect(savedArticles.some((savedArticle) => savedArticle.url === limitedArticles[2]!.url)).toBe(false);
+    expect(savedArticles).toHaveLength(3);
+    expect(savedArticles.some((savedArticle) => savedArticle.url === limitedArticles[2]!.url)).toBe(true);
   });
 
-  it('limits subscription sync to two sites per run', async () => {
+  it('syncs all subscriptions in one run', async () => {
     const { syncAllSubscriptions } = await import('./sync.js');
 
     fetchRssOrFallbackMock
       .mockResolvedValueOnce([])
-      .mockResolvedValueOnce([article]);
+      .mockResolvedValueOnce([article])
+      .mockResolvedValueOnce([]);
     fetchArticleContentMock.mockResolvedValue('本文の内容です。');
     generateArticleSummaryMock.mockResolvedValue('要約文');
     generateEmbeddingsMock.mockResolvedValue([[0.1, 0.2]]);
@@ -479,8 +470,8 @@ describe('syncSite', () => {
 
     await syncAllSubscriptions();
 
-    expect(fetchRssOrFallbackMock).toHaveBeenCalledTimes(2);
-    expect(getVectorCollectionMock).toHaveBeenCalledTimes(2);
+    expect(fetchRssOrFallbackMock).toHaveBeenCalledTimes(3);
+    expect(getVectorCollectionMock).toHaveBeenCalledTimes(3);
     expect(fetchArticleContentMock).toHaveBeenCalledTimes(1);
     expect(generateArticleSummaryMock).toHaveBeenCalledTimes(1);
   });
