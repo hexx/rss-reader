@@ -1,4 +1,4 @@
-import { openai } from '@ai-sdk/openai';
+import { createOpenAI } from '@ai-sdk/openai';
 import { embed, embedMany, generateText } from 'ai';
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
 
@@ -8,12 +8,12 @@ import type { SearchArticleResult } from './search.js';
 
 const defaultModelId = 'opencode-go';
 
-type OpenCodeGoEnv = Pick<
+type AiEnv = Pick<
   RuntimeEnv,
-  'OPENCODE_GO_API_KEY' | 'OPENCODE_GO_BASE_URL' | 'OPENCODE_GO_MODEL'
+  'OPENCODE_GO_API_KEY' | 'OPENCODE_GO_BASE_URL' | 'OPENCODE_GO_MODEL' | 'OPENAI_API_KEY'
 >;
 
-function requireEnv(env: OpenCodeGoEnv, name: keyof OpenCodeGoEnv): string {
+function requireEnv(env: AiEnv, name: keyof AiEnv): string {
   const value = env[name];
   if (value === undefined || value.trim() === '') {
     throw new Error(`Missing required environment variable: ${name}`);
@@ -69,7 +69,7 @@ function buildRagReferenceList(references: SearchArticleResult[]): string {
   return references.map((reference, index) => `[${index + 1}] ${reference.title}`).join('\n');
 }
 
-function createOpenCodeGoProvider(env: OpenCodeGoEnv) {
+function createOpenCodeGoProvider(env: AiEnv) {
   const baseURL = requireEnv(env, 'OPENCODE_GO_BASE_URL');
   const apiKey = requireEnv(env, 'OPENCODE_GO_API_KEY');
 
@@ -80,19 +80,23 @@ function createOpenCodeGoProvider(env: OpenCodeGoEnv) {
   });
 }
 
-export function getOpenCodeGoChatModel(env: OpenCodeGoEnv = process.env) {
+export function getOpenCodeGoChatModel(env: AiEnv = process.env) {
   const modelId = env.OPENCODE_GO_MODEL?.trim() || defaultModelId;
   return createOpenCodeGoProvider(env).chatModel(modelId);
 }
 
-function getEmbeddingModel() {
+function getEmbeddingModel(env: AiEnv) {
+  const openai = createOpenAI({
+    apiKey: requireEnv(env, 'OPENAI_API_KEY'),
+  });
+
   return openai.embedding('text-embedding-3-small');
 }
 
 export async function generateArticleSummary(
   title: string,
   content: string,
-  env: OpenCodeGoEnv = process.env,
+  env: AiEnv = process.env,
 ): Promise<string> {
   const result = await generateText({
     model: getOpenCodeGoChatModel(env),
@@ -106,7 +110,7 @@ export async function generateArticleSummary(
 
 export async function generateHatenaSummary(
   comments: HatenaBookmarkComment[],
-  env: OpenCodeGoEnv = process.env,
+  env: AiEnv = process.env,
 ): Promise<string> {
   if (comments.length === 0) {
     return '';
@@ -126,7 +130,7 @@ export async function generateRagAnswer(
   query: string,
   contexts: string[],
   references: SearchArticleResult[] = [],
-  env: OpenCodeGoEnv = process.env,
+  env: AiEnv = process.env,
 ): Promise<string> {
   const result = await generateText({
     model: getOpenCodeGoChatModel(env),
@@ -143,9 +147,9 @@ export async function generateRagAnswer(
   return result.text.trim();
 }
 
-export async function generateEmbedding(text: string, _env: OpenCodeGoEnv = process.env): Promise<number[]> {
+export async function generateEmbedding(text: string, env: AiEnv = process.env): Promise<number[]> {
   const result = await embed({
-    model: getEmbeddingModel(),
+    model: getEmbeddingModel(env),
     value: text,
   });
 
@@ -154,14 +158,14 @@ export async function generateEmbedding(text: string, _env: OpenCodeGoEnv = proc
 
 export async function generateEmbeddings(
   texts: string[],
-  _env: OpenCodeGoEnv = process.env,
+  env: AiEnv = process.env,
 ): Promise<number[][]> {
   if (texts.length === 0) {
     return [];
   }
 
   const result = await embedMany({
-    model: getEmbeddingModel(),
+    model: getEmbeddingModel(env),
     values: texts,
   });
 

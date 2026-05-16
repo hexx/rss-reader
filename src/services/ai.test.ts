@@ -7,9 +7,7 @@ vi.mock('ai', () => ({
 }));
 
 vi.mock('@ai-sdk/openai', () => ({
-  openai: {
-    embedding: vi.fn(),
-  },
+  createOpenAI: vi.fn(),
 }));
 
 vi.mock('@ai-sdk/openai-compatible', () => ({
@@ -17,7 +15,7 @@ vi.mock('@ai-sdk/openai-compatible', () => ({
 }));
 
 import { embedMany, generateText } from 'ai';
-import { openai } from '@ai-sdk/openai';
+import { createOpenAI } from '@ai-sdk/openai';
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
 
 import {
@@ -31,7 +29,7 @@ import {
 
 const generateTextMock = vi.mocked(generateText);
 const embedManyMock = vi.mocked(embedMany);
-const openaiEmbeddingMock = vi.mocked(openai.embedding);
+const createOpenAIMock = vi.mocked(createOpenAI);
 const createOpenAICompatibleMock = vi.mocked(createOpenAICompatible);
 
 describe('generateArticleSummary', () => {
@@ -39,10 +37,14 @@ describe('generateArticleSummary', () => {
     vi.stubEnv('OPENCODE_GO_BASE_URL', 'https://opencode.example/v1');
     vi.stubEnv('OPENCODE_GO_API_KEY', 'test-api-key');
     vi.stubEnv('OPENCODE_GO_MODEL', 'test-model');
+    vi.stubEnv('OPENAI_API_KEY', 'test-openai-api-key');
     generateTextMock.mockReset();
     embedManyMock.mockReset();
-    openaiEmbeddingMock.mockReset();
+    createOpenAIMock.mockReset();
     createOpenAICompatibleMock.mockReset();
+    createOpenAIMock.mockReturnValue({
+      embedding: vi.fn().mockReturnValue('embedding-model'),
+    } as never);
     createOpenAICompatibleMock.mockReturnValue({
       chatModel: vi.fn().mockReturnValue('chat-model'),
     } as never);
@@ -117,11 +119,17 @@ describe('generateArticleSummary', () => {
     const { embed } = await import('ai');
     const embedMock = vi.mocked(embed);
     embedMock.mockResolvedValue({ embedding: [0.1, 0.2, 0.3] } as never);
-    openaiEmbeddingMock.mockReturnValue('embedding-model' as never);
+    const embeddingModelMock = vi.fn().mockReturnValue('embedding-model');
+    createOpenAIMock.mockReturnValue({
+      embedding: embeddingModelMock,
+    } as never);
 
     await expect(generateEmbedding('embedding target')).resolves.toEqual([0.1, 0.2, 0.3]);
 
-    expect(openaiEmbeddingMock).toHaveBeenCalledWith('text-embedding-3-small');
+    expect(createOpenAIMock).toHaveBeenCalledWith({
+      apiKey: 'test-openai-api-key',
+    });
+    expect(embeddingModelMock).toHaveBeenCalledWith('text-embedding-3-small');
     expect(embedMock).toHaveBeenCalledWith({
       model: 'embedding-model',
       value: 'embedding target',
@@ -130,14 +138,20 @@ describe('generateArticleSummary', () => {
 
   it('returns many OpenAI embedding vectors', async () => {
     embedManyMock.mockResolvedValue({ embeddings: [[0.1, 0.2], [0.3, 0.4]] } as never);
-    openaiEmbeddingMock.mockReturnValue('embedding-model' as never);
+    const embeddingModelMock = vi.fn().mockReturnValue('embedding-model');
+    createOpenAIMock.mockReturnValue({
+      embedding: embeddingModelMock,
+    } as never);
 
     await expect(generateEmbeddings(['first', 'second'])).resolves.toEqual([
       [0.1, 0.2],
       [0.3, 0.4],
     ]);
 
-    expect(openaiEmbeddingMock).toHaveBeenCalledWith('text-embedding-3-small');
+    expect(createOpenAIMock).toHaveBeenCalledWith({
+      apiKey: 'test-openai-api-key',
+    });
+    expect(embeddingModelMock).toHaveBeenCalledWith('text-embedding-3-small');
     expect(embedManyMock).toHaveBeenCalledWith({
       model: 'embedding-model',
       values: ['first', 'second'],
