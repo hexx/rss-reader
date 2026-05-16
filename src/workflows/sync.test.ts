@@ -326,6 +326,71 @@ describe('syncSite', () => {
     });
   });
 
+  it('splits hatena bookmark inserts into chunks of 20', async () => {
+    const articleInsertRunMock = vi.fn().mockResolvedValue(undefined);
+    const bookmarkInsertRunMock = vi.fn().mockResolvedValue(undefined);
+    const bookmarkChunkLengths: number[] = [];
+    const bookmarkConflictCalls: number[] = [];
+    const insertCallTables: unknown[] = [];
+
+    const insertMock = vi.fn((table: unknown) => {
+      const insertIndex = insertCallTables.push(table) - 1;
+      const chain = {
+        values: vi.fn((values: unknown[]) => {
+          if (insertIndex > 0) {
+            bookmarkChunkLengths.push(values.length);
+          }
+          return chain;
+        }),
+        onConflictDoNothing: vi.fn(() => {
+          if (insertIndex > 0) {
+            bookmarkConflictCalls.push(1);
+          }
+          return chain;
+        }),
+        run: insertIndex > 0 ? bookmarkInsertRunMock : articleInsertRunMock,
+      };
+
+      return chain;
+    });
+
+    const selectChain = {
+      limit: vi.fn().mockResolvedValue([]),
+      where: vi.fn().mockReturnThis(),
+    };
+
+    const mockedDb = {
+      insert: insertMock,
+      select: vi.fn(() => ({
+        from: vi.fn(() => selectChain),
+      })),
+    };
+
+    const { syncSite } = await import('./sync.js');
+    getDbMock.mockReturnValueOnce(mockedDb as never);
+
+    fetchRssOrFallbackMock.mockResolvedValue([article]);
+    fetchArticleContentMock.mockResolvedValue('本文の内容です。');
+    fetchHatenaBookmarksMock.mockResolvedValue(
+      Array.from({ length: 25 }, (_, index) => ({
+        comment: `コメント${index + 1}`,
+        user: `user-${index + 1}`,
+      })),
+    );
+    generateArticleSummaryMock.mockResolvedValue('要約文');
+    generateHatenaSummaryMock.mockResolvedValue('はてブ要約');
+    chunkTextMock.mockReturnValue(['chunk-1']);
+    generateEmbeddingsMock.mockResolvedValue([[0.1, 0.2]]);
+    getVectorCollectionMock.mockResolvedValue({ add: vi.fn().mockResolvedValue(1) } as never);
+
+    await expect(syncSite(siteUrl)).resolves.toBe(1);
+
+    expect(bookmarkChunkLengths).toEqual([20, 5]);
+    expect(bookmarkConflictCalls).toHaveLength(2);
+    expect(articleInsertRunMock).toHaveBeenCalledTimes(1);
+    expect(bookmarkInsertRunMock).toHaveBeenCalledTimes(2);
+  });
+
   it('stops after processing one new article', async () => {
     const vectorAddMock = vi.fn().mockResolvedValue(1);
     const { syncSite } = await import('./sync.js');
