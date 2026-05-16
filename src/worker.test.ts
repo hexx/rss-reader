@@ -182,6 +182,50 @@ describe('worker app', () => {
     ]);
   });
 
+  it('chunks bookmark lookups for large article lists', async () => {
+    const { fetchBookmarksByArticleIds } = await import('./worker.js');
+
+    const bookmarkRows = [
+      {
+        articleId: 'article-1',
+        comment: 'first',
+        createdAt: new Date('2024-01-01T00:00:00.000Z'),
+        id: 'bookmark-1',
+        user: 'alice',
+      },
+      {
+        articleId: 'article-51',
+        comment: 'second',
+        createdAt: new Date('2024-01-02T00:00:00.000Z'),
+        id: 'bookmark-2',
+        user: 'bob',
+      },
+      {
+        articleId: 'article-101',
+        comment: 'third',
+        createdAt: new Date('2024-01-03T00:00:00.000Z'),
+        id: 'bookmark-3',
+        user: 'carol',
+      },
+    ];
+
+    const whereMock = vi
+      .fn()
+      .mockResolvedValueOnce([bookmarkRows[0]])
+      .mockResolvedValueOnce([bookmarkRows[1]])
+      .mockResolvedValueOnce([bookmarkRows[2]]);
+    const fromMock = vi.fn(() => ({ where: whereMock }));
+    const selectMock = vi.fn(() => ({ from: fromMock }));
+    const database = { select: selectMock } as unknown as Parameters<typeof fetchBookmarksByArticleIds>[0];
+
+    const articleIds = Array.from({ length: 101 }, (_, index) => `article-${index + 1}`);
+    const results = await fetchBookmarksByArticleIds(database, articleIds);
+
+    expect(selectMock).toHaveBeenCalledTimes(3);
+    expect(whereMock).toHaveBeenCalledTimes(3);
+    expect(results).toEqual(bookmarkRows);
+  });
+
   it('creates subscriptions through the worker API', async () => {
     const response = await app.fetch(
       new Request('http://localhost/api/subscriptions', {
