@@ -12,7 +12,6 @@ import { chunkText } from '../utils/chunking.js';
 
 const articleChunkSize = 1_500;
 const bookmarkChunkSize = 20;
-const maxProcessPerSync = 10;
 
 function shouldFetchHatenaBookmarks(siteUrl: string): boolean {
   return siteUrl.includes('b.hatena.ne.jp');
@@ -54,8 +53,10 @@ export async function syncSite(
   siteUrl: string,
   debug = false,
   env: RuntimeEnv = process.env,
+  isCron = false,
 ): Promise<number> {
   let processedCount = 0;
+  const maxProcessPerSync = isCron ? 10 : 2;
 
   try {
     logger.info('サイト同期を開始します。', { siteUrl });
@@ -172,6 +173,7 @@ export async function syncSite(
 export async function syncAllSubscriptions(
   debug = false,
   env: RuntimeEnv = process.env,
+  isCron = false,
 ): Promise<void> {
   const database = getDb(env);
   const subscribedSites = await database
@@ -185,7 +187,12 @@ export async function syncAllSubscriptions(
     return;
   }
 
+  let totalProcessedCount = 0;
+
   for (const subscription of subscribedSites) {
-    await syncSite(subscription.siteUrl, debug, env);
+    totalProcessedCount += await syncSite(subscription.siteUrl, debug, env, isCron);
+    if (!isCron && totalProcessedCount >= 2) {
+      break;
+    }
   }
 }

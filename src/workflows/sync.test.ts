@@ -72,6 +72,18 @@ const article = {
   url: 'https://example.com/articles/1',
 };
 
+const secondArticle = {
+  title: '記事タイトル2',
+  pubDate: new Date('2024-01-02T00:00:00.000Z'),
+  url: 'https://example.com/articles/2',
+};
+
+const thirdArticle = {
+  title: '記事タイトル3',
+  pubDate: new Date('2024-01-03T00:00:00.000Z'),
+  url: 'https://example.com/articles/3',
+};
+
 const bookmarks = [
   {
     comment: '参考になる',
@@ -436,14 +448,14 @@ describe('syncSite', () => {
     expect(savedArticles.some((savedArticle) => savedArticle.url === limitedArticles[2]!.url)).toBe(true);
   });
 
-  it('syncs all subscriptions in one run', async () => {
+  it('limits manual subscription sync after two processed articles', async () => {
     const { syncAllSubscriptions } = await import('./sync.js');
 
     fetchRssOrFallbackMock
-      .mockResolvedValueOnce([])
       .mockResolvedValueOnce([article])
-      .mockResolvedValueOnce([]);
-    fetchArticleContentMock.mockResolvedValue('本文の内容です。');
+      .mockResolvedValueOnce([secondArticle])
+      .mockResolvedValueOnce([thirdArticle]);
+    fetchArticleContentMock.mockImplementation(async (url) => `本文: ${url}`);
     generateArticleSummaryMock.mockResolvedValue('要約文');
     generateEmbeddingsMock.mockResolvedValue([[0.1, 0.2]]);
     fetchHatenaBookmarksMock.mockResolvedValue([]);
@@ -468,11 +480,55 @@ describe('syncSite', () => {
       },
     ]);
 
-    await syncAllSubscriptions();
+    await syncAllSubscriptions(false, process.env, false);
+
+    expect(fetchRssOrFallbackMock).toHaveBeenCalledTimes(2);
+    expect(getVectorCollectionMock).toHaveBeenCalledTimes(2);
+    expect(fetchArticleContentMock).toHaveBeenCalledTimes(2);
+    expect(generateArticleSummaryMock).toHaveBeenCalledTimes(2);
+    const savedArticles = await testDb.select().from(articles);
+    expect(savedArticles).toHaveLength(2);
+  });
+
+  it('syncs all subscriptions during cron runs', async () => {
+    const { syncAllSubscriptions } = await import('./sync.js');
+
+    fetchRssOrFallbackMock
+      .mockResolvedValueOnce([article])
+      .mockResolvedValueOnce([secondArticle])
+      .mockResolvedValueOnce([thirdArticle]);
+    fetchArticleContentMock.mockImplementation(async (url) => `本文: ${url}`);
+    generateArticleSummaryMock.mockResolvedValue('要約文');
+    generateEmbeddingsMock.mockResolvedValue([[0.1, 0.2]]);
+    fetchHatenaBookmarksMock.mockResolvedValue([]);
+    chunkTextMock.mockReturnValue(['chunk-1']);
+    getVectorCollectionMock.mockResolvedValue({ add: vi.fn().mockResolvedValue(1) } as never);
+
+    await testDb.insert(subscriptions).values([
+      {
+        id: 'subscription-1',
+        siteUrl: 'https://example.com/site-1/',
+        title: 'site-1',
+      },
+      {
+        id: 'subscription-2',
+        siteUrl: 'https://example.com/site-2/',
+        title: 'site-2',
+      },
+      {
+        id: 'subscription-3',
+        siteUrl: 'https://example.com/site-3/',
+        title: 'site-3',
+      },
+    ]);
+
+    await syncAllSubscriptions(false, process.env, true);
 
     expect(fetchRssOrFallbackMock).toHaveBeenCalledTimes(3);
     expect(getVectorCollectionMock).toHaveBeenCalledTimes(3);
-    expect(fetchArticleContentMock).toHaveBeenCalledTimes(1);
-    expect(generateArticleSummaryMock).toHaveBeenCalledTimes(1);
+    expect(fetchArticleContentMock).toHaveBeenCalledTimes(3);
+    expect(generateArticleSummaryMock).toHaveBeenCalledTimes(3);
+    const savedArticles = await testDb.select().from(articles);
+    expect(savedArticles).toHaveLength(3);
   });
 });
