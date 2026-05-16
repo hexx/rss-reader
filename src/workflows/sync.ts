@@ -12,6 +12,8 @@ import { chunkText } from '../utils/chunking.js';
 import { sleep } from '../utils/sleep.js';
 
 const articleChunkSize = 1_500;
+const maxProcessPerSync = 3;
+const maxSitesPerSync = 2;
 const minimumArticleDelayMs = 1_000;
 const maximumArticleDelayMs = 3_000;
 const minimumSubscriptionDelayMs = 1_000;
@@ -75,6 +77,7 @@ export async function syncSite(
   const database = getDb(env);
   const siteArticles = await fetchRssOrFallback(siteUrl);
   const vectorCollection = await getVectorCollection(env);
+  let processedCount = 0;
 
   for (const article of siteArticles) {
     logger.info('記事の同期処理を実行します。', { title: article.title, url: article.url });
@@ -97,35 +100,39 @@ export async function syncSite(
       const hatenaSummary = bookmarks.length > 0 ? await generateHatenaSummary(bookmarks, env) : null;
       const articleId = crypto.randomUUID();
 
-      await database.transaction(async (transaction: any) => {
-        await transaction.insert(articles).values({
-          id: articleId,
-          siteUrl,
-          url: article.url,
-          title: article.title,
-          content,
-          summary,
-          hatenaSummary,
-          publishedAt: article.pubDate,
-          isRead: false,
-        }).run();
+      await database.insert(articles).values({
+        id: articleId,
+        siteUrl,
+        url: article.url,
+        title: article.title,
+        content,
+        summary,
+        hatenaSummary,
+        publishedAt: article.pubDate,
+        isRead: false,
+      }).run();
 
-        if (bookmarks.length > 0) {
-          await transaction.insert(hatenaBookmarks).values(
-            bookmarks.map((bookmark) => ({
-              id: crypto.randomUUID(),
-              articleId,
-              user: bookmark.user,
-              comment: bookmark.comment,
-            })),
-          ).run();
-        }
-      });
+      if (bookmarks.length > 0) {
+        await database.insert(hatenaBookmarks).values(
+          bookmarks.map((bookmark) => ({
+            id: crypto.randomUUID(),
+            articleId,
+            user: bookmark.user,
+            comment: bookmark.comment,
+          })),
+        ).run();
+      }
 
       const chunks = buildArticleChunks(article.title, content);
       if (chunks.length > 0) {
         const embeddings = await generateEmbeddings(chunks, env);
         await vectorCollection.add(buildChunkRows(articleId, chunks, embeddings));
+      }
+
+      processedCount += 1;
+      if (processedCount >= maxProcessPerSync) {
+        logger.info('タイムアウト防止のため、記事の同期を中断して次回に回します。');
+        break;
       }
     } catch (error) {
       if (debug) {
@@ -162,10 +169,17 @@ export async function syncAllSubscriptions(
     return;
   }
 
-  for (const [index, subscription] of subscribedSites.entries()) {
-    await syncSite(subscription.siteUrl, debug, env);
+  let processedSiteCount = 0;
 
-    if (index < subscribedSites.length - 1) {
+  for (const subscription of subscribedSites) {
+    await syncSite(subscription.siteUrl, debug, env);
+    processedSiteCount += 1;
+
+    if (processedSiteCount >= maxSitesPerSync) {
+      break;
+    }
+
+    if (processedSiteCount < subscribedSites.length) {
       await sleep(randomSubscriptionDelayMs());
     }
   }
