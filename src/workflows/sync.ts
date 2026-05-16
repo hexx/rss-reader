@@ -12,7 +12,7 @@ import { chunkText } from '../utils/chunking.js';
 
 const articleChunkSize = 1_500;
 const bookmarkChunkSize = 20;
-const maxProcessPerSync = 1;
+const maxProcessPerSync = 10;
 
 function shouldFetchHatenaBookmarks(siteUrl: string): boolean {
   return siteUrl.includes('b.hatena.ne.jp');
@@ -46,29 +46,8 @@ function buildChunkRows(
   }));
 }
 
-function buildArticleChunks(
-  title: string,
-  content: string,
-): string[] {
+function buildArticleChunks(title: string, content: string): string[] {
   return chunkText(buildArticleChunkSource(title, content), articleChunkSize);
-}
-
-async function measureAsync<T>(
-  label: string,
-  articleUrl: string,
-  siteUrl: string,
-  operation: () => Promise<T>,
-): Promise<T> {
-  const startedAt = performance.now();
-
-  try {
-    return await operation();
-  } finally {
-    logger.info(`[計測] ${label}: ${Math.round(performance.now() - startedAt)}ms`, {
-      articleUrl,
-      siteUrl,
-    });
-  }
 }
 
 export async function syncSite(
@@ -100,7 +79,7 @@ export async function syncSite(
 
         let content = '';
         try {
-          content = await measureAsync('本文取得', article.url, siteUrl, () => fetchArticleContent(article.url));
+          content = await fetchArticleContent(article.url);
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
           logger.warn('本文の取得に失敗したため、本文なしで処理を継続します。', {
@@ -110,18 +89,10 @@ export async function syncSite(
             error: message,
           });
         }
-        const bookmarks = shouldFetchHatenaBookmarks(siteUrl)
-          ? await measureAsync('はてなAPI', article.url, siteUrl, () => fetchHatenaBookmarks(article.url))
-          : [];
-        const summary = await measureAsync('記事要約AI', article.url, siteUrl, () =>
-          generateArticleSummary(article.title, content, env),
-        );
+        const bookmarks = shouldFetchHatenaBookmarks(siteUrl) ? await fetchHatenaBookmarks(article.url) : [];
+        const summary = await generateArticleSummary(article.title, content, env);
         const hatenaSummary =
-          bookmarks.length > 0
-            ? await measureAsync('コメント要約AI', article.url, siteUrl, () =>
-                generateHatenaSummary(bookmarks, env),
-              )
-            : null;
+          bookmarks.length > 0 ? await generateHatenaSummary(bookmarks, env) : null;
         const articleId = crypto.randomUUID();
 
         await database.insert(articles).values({
@@ -156,9 +127,7 @@ export async function syncSite(
 
         const chunks = buildArticleChunks(article.title, content);
         if (chunks.length > 0) {
-          const embeddings = await measureAsync('ベクトル化AI', article.url, siteUrl, () =>
-            generateEmbeddings(chunks, env),
-          );
+          const embeddings = await generateEmbeddings(chunks, env);
           await vectorCollection.add(buildChunkRows(articleId, chunks, embeddings));
         }
 
@@ -216,12 +185,7 @@ export async function syncAllSubscriptions(
     return;
   }
 
-  let totalProcessedCount = 0;
-
   for (const subscription of subscribedSites) {
-    totalProcessedCount += await syncSite(subscription.siteUrl, debug, env);
-    if (totalProcessedCount >= 1) {
-      break;
-    }
+    await syncSite(subscription.siteUrl, debug, env);
   }
 }
