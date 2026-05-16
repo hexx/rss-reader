@@ -42,6 +42,23 @@ type SourceRow = {
   title: string | null;
 };
 
+type SourceAggregate = {
+  articleCount: number;
+  id: string;
+  siteUrl: string;
+  title: string | null;
+  unreadCount: number;
+};
+
+type SourceResponse = {
+  articleCount: number;
+  displayTitle: string;
+  id: string;
+  siteUrl: string;
+  title: string;
+  unreadCount: number;
+};
+
 type ArticleRow = {
   content: string | null;
   createdAt: Date | string | number | null;
@@ -322,22 +339,45 @@ app.get('/api/sources', async (c) => {
     .leftJoin(articles, eq(articles.siteUrl, subscriptions.siteUrl))
     .orderBy(desc(subscriptions.addedAt))) as SourceRow[];
 
-  const titleCounts = new Map<string, number>();
+  const sourcesById = new Map<string, SourceAggregate>();
   for (const source of sourceRows) {
+    const current = sourcesById.get(source.id);
+    if (current) {
+      if (source.articleId !== null) {
+        current.articleCount += 1;
+      }
+
+      if (source.articleId !== null && source.isRead === false) {
+        current.unreadCount += 1;
+      }
+      continue;
+    }
+
+    sourcesById.set(source.id, {
+      articleCount: source.articleId === null ? 0 : 1,
+      id: source.id,
+      siteUrl: source.siteUrl,
+      title: source.title,
+      unreadCount: source.articleId !== null && source.isRead === false ? 1 : 0,
+    });
+  }
+
+  const groupedSources = Array.from(sourcesById.values());
+  const titleCounts = new Map<string, number>();
+  for (const source of groupedSources) {
     const base = sourceTitleBase(source);
     titleCounts.set(base, (titleCounts.get(base) ?? 0) + 1);
   }
 
   return c.json({
-    sources: sourceRows
-      .filter((source: SourceRow) => source.articleId === null || source.isRead === false)
-      .map((source: SourceRow) => ({
-        articleId: source.articleId,
-        id: source.id,
-        isRead: Boolean(source.isRead),
-        siteUrl: source.siteUrl,
-        title: sourceDisplayTitle(source, titleCounts),
-      })),
+    sources: groupedSources.map((source): SourceResponse => ({
+      articleCount: source.articleCount,
+      displayTitle: sourceDisplayTitle(source, titleCounts),
+      id: source.id,
+      siteUrl: source.siteUrl,
+      title: sourceTitleBase(source),
+      unreadCount: source.unreadCount,
+    })),
   });
 });
 

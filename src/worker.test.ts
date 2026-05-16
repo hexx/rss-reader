@@ -69,20 +69,28 @@ describe('worker app', () => {
     await testDb.insert(subscriptions).values([
       {
         id: 'subscription-1',
-        siteUrl: 'https://example.com/',
+        siteUrl: 'https://example.com/feed.xml',
         title: 'Example Feed',
+        addedAt: new Date('2024-01-03T00:00:00.000Z'),
       },
       {
         id: 'subscription-2',
-        siteUrl: 'https://another.example/',
+        siteUrl: 'https://example.com/other.xml',
+        title: 'Example Feed',
+        addedAt: new Date('2024-01-02T00:00:00.000Z'),
+      },
+      {
+        id: 'subscription-3',
+        siteUrl: 'https://third.example/rss.xml',
         title: null,
+        addedAt: new Date('2024-01-01T00:00:00.000Z'),
       },
     ]);
 
     await testDb.insert(articles).values([
       {
         id: 'article-1',
-        siteUrl: 'https://example.com/',
+        siteUrl: 'https://example.com/feed.xml',
         url: 'https://example.com/articles/1',
         title: '最初の記事',
         content: '本文',
@@ -93,10 +101,21 @@ describe('worker app', () => {
       },
       {
         id: 'article-2',
-        siteUrl: 'https://another.example/',
-        url: 'https://another.example/posts/2',
-        title: '別の記事',
+        siteUrl: 'https://example.com/feed.xml',
+        url: 'https://example.com/articles/2',
+        title: '二番目の記事',
         content: '本文2',
+        summary: '別の要約',
+        hatenaSummary: null,
+        isRead: true,
+        publishedAt: new Date('2024-01-02T00:00:00.000Z'),
+      },
+      {
+        id: 'article-3',
+        siteUrl: 'https://example.com/other.xml',
+        url: 'https://example.com/articles/3',
+        title: '別の記事',
+        content: '本文3',
         summary: '別の要約',
         hatenaSummary: null,
         isRead: true,
@@ -125,16 +144,40 @@ describe('worker app', () => {
 
     const sourcesResponse = await app.fetch(new Request('http://localhost/api/sources'));
     const sourcesPayload = (await sourcesResponse.json()) as {
-      sources: Array<{ articleId: string | null; id: string; isRead: boolean; siteUrl: string; title: string }>;
+      sources: Array<{
+        articleCount: number;
+        displayTitle: string;
+        id: string;
+        siteUrl: string;
+        title: string;
+        unreadCount: number;
+      }>;
     };
     expect(sourcesResponse.ok).toBe(true);
     expect(sourcesPayload.sources).toEqual([
       {
-        articleId: 'article-1',
         id: 'subscription-1',
-        isRead: false,
-        siteUrl: 'https://example.com/',
+        siteUrl: 'https://example.com/feed.xml',
         title: 'Example Feed',
+        displayTitle: 'Example Feed (FEED)',
+        articleCount: 2,
+        unreadCount: 1,
+      },
+      {
+        id: 'subscription-2',
+        siteUrl: 'https://example.com/other.xml',
+        title: 'Example Feed',
+        displayTitle: 'Example Feed (OTHER)',
+        articleCount: 1,
+        unreadCount: 0,
+      },
+      {
+        id: 'subscription-3',
+        siteUrl: 'https://third.example/rss.xml',
+        title: 'third.example',
+        displayTitle: 'third.example',
+        articleCount: 0,
+        unreadCount: 0,
       },
     ]);
   });
