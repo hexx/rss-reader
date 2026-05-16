@@ -80,9 +80,6 @@ export async function syncSite(
   let processedCount = 0;
 
   for (const article of siteArticles) {
-    logger.info('記事の同期処理を実行します。', { title: article.title, url: article.url });
-    await sleep(randomArticleDelayMs());
-
     try {
       const existingArticle = await database
         .select({ id: articles.id, hatenaSummary: articles.hatenaSummary })
@@ -93,6 +90,9 @@ export async function syncSite(
       if (existingArticle.length > 0) {
         continue;
       }
+
+      logger.info('記事の同期処理を実行します。', { title: article.title, url: article.url });
+      await sleep(randomArticleDelayMs());
 
       const content = await fetchArticleContent(article.url);
       const bookmarks = shouldFetchHatenaBookmarks(siteUrl) ? await fetchHatenaBookmarks(article.url) : [];
