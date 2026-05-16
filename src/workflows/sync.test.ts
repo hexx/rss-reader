@@ -159,6 +159,16 @@ describe('syncSite', () => {
     expect(generateArticleSummaryMock).toHaveBeenCalledWith(article.title, '', expect.any(Object));
     expect(generateHatenaSummaryMock).toHaveBeenCalledWith(bookmarks, expect.any(Object));
     expect(generateEmbeddingsMock).toHaveBeenCalledTimes(1);
+    const infoMessages = loggerMock.info.mock.calls.map(([message]) => String(message));
+    expect(infoMessages).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining('[計測] 本文取得:'),
+        expect.stringContaining('[計測] はてなAPI:'),
+        expect.stringContaining('[計測] 記事要約AI:'),
+        expect.stringContaining('[計測] コメント要約AI:'),
+        expect.stringContaining('[計測] ベクトル化AI:'),
+      ]),
+    );
     expect(loggerMock.info).toHaveBeenCalledWith('記事の同期処理を実行します。', {
       title: article.title,
       url: article.url,
