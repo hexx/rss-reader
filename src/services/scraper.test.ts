@@ -23,6 +23,12 @@ const feedUrl = 'https://example.com/feed.xml';
 const fallbackUrl = 'https://example.com/';
 const articleOneUrl = 'https://example.com/posts/one';
 const articleTwoUrl = 'https://example.com/posts/two';
+const browserHeaders = {
+  accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+  'accept-language': 'ja,en-US;q=0.9,en;q=0.8',
+  'cache-control': 'no-cache',
+  'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+};
 
 const feedXml = `<?xml version="1.0" encoding="UTF-8"?>
 <rss version="2.0">
@@ -79,7 +85,14 @@ describe('scraper service', () => {
 
   it('extracts article content while dropping boilerplate markup', async () => {
     server.use(
-      http.get(articleOneUrl, () => HttpResponse.text(articleHtml, { headers: { 'Content-Type': 'text/html' } })),
+      http.get(articleOneUrl, ({ request }) => {
+        expect(request.headers.get('accept')).toBe(browserHeaders.accept);
+        expect(request.headers.get('accept-language')).toBe(browserHeaders['accept-language']);
+        expect(request.headers.get('cache-control')).toBe(browserHeaders['cache-control']);
+        expect(request.headers.get('user-agent')).toBe(browserHeaders['user-agent']);
+
+        return HttpResponse.text(articleHtml, { headers: { 'Content-Type': 'text/html' } });
+      }),
     );
 
     await expect(fetchArticleContent(articleOneUrl)).resolves.toBe('First article Article body text.');
@@ -98,8 +111,22 @@ describe('scraper service', () => {
 
   it('parses RSS feeds before falling back to HTML link discovery', async () => {
     server.use(
-      http.get(feedUrl, () => HttpResponse.text(feedXml, { headers: { 'Content-Type': 'application/rss+xml' } })),
-      http.get(fallbackUrl, () => HttpResponse.text(fallbackHtml, { headers: { 'Content-Type': 'text/html' } })),
+      http.get(feedUrl, ({ request }) => {
+        expect(request.headers.get('accept')).toBe(browserHeaders.accept);
+        expect(request.headers.get('accept-language')).toBe(browserHeaders['accept-language']);
+        expect(request.headers.get('cache-control')).toBe(browserHeaders['cache-control']);
+        expect(request.headers.get('user-agent')).toBe(browserHeaders['user-agent']);
+
+        return HttpResponse.text(feedXml, { headers: { 'Content-Type': 'application/rss+xml' } });
+      }),
+      http.get(fallbackUrl, ({ request }) => {
+        expect(request.headers.get('accept')).toBe(browserHeaders.accept);
+        expect(request.headers.get('accept-language')).toBe(browserHeaders['accept-language']);
+        expect(request.headers.get('cache-control')).toBe(browserHeaders['cache-control']);
+        expect(request.headers.get('user-agent')).toBe(browserHeaders['user-agent']);
+
+        return HttpResponse.text(fallbackHtml, { headers: { 'Content-Type': 'text/html' } });
+      }),
     );
 
     parseStringMock.mockResolvedValueOnce({
@@ -141,8 +168,22 @@ describe('scraper service', () => {
 
   it('paces article fetches while collecting site articles', async () => {
     server.use(
-      http.get(feedUrl, () => HttpResponse.text(feedXml, { headers: { 'Content-Type': 'application/rss+xml' } })),
-      http.get(articleOneUrl, () => HttpResponse.text(articleHtml, { headers: { 'Content-Type': 'text/html' } })),
+      http.get(feedUrl, ({ request }) => {
+        expect(request.headers.get('accept')).toBe(browserHeaders.accept);
+        expect(request.headers.get('accept-language')).toBe(browserHeaders['accept-language']);
+        expect(request.headers.get('cache-control')).toBe(browserHeaders['cache-control']);
+        expect(request.headers.get('user-agent')).toBe(browserHeaders['user-agent']);
+
+        return HttpResponse.text(feedXml, { headers: { 'Content-Type': 'application/rss+xml' } });
+      }),
+      http.get(articleOneUrl, ({ request }) => {
+        expect(request.headers.get('accept')).toBe(browserHeaders.accept);
+        expect(request.headers.get('accept-language')).toBe(browserHeaders['accept-language']);
+        expect(request.headers.get('cache-control')).toBe(browserHeaders['cache-control']);
+        expect(request.headers.get('user-agent')).toBe(browserHeaders['user-agent']);
+
+        return HttpResponse.text(articleHtml, { headers: { 'Content-Type': 'text/html' } });
+      }),
     );
 
     vi.useFakeTimers();

@@ -6,6 +6,12 @@ import { fetchHatenaBookmarks } from './hatena.js';
 
 const articleUrl = 'https://example.com/articles/1';
 const hatenaApiBaseUrl = 'https://b.hatena.ne.jp/entry/jsonlite/';
+const browserHeaders = {
+  accept: 'application/json',
+  'accept-language': 'ja,en-US;q=0.9,en;q=0.8',
+  'cache-control': 'no-cache',
+  'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+};
 
 const hatenaResponse = {
   bookmarks: [
@@ -34,6 +40,9 @@ describe('fetchHatenaBookmarks', () => {
     server.use(
       http.get(hatenaApiBaseUrl, ({ request }) => {
         const requestUrl = new URL(request.url);
+        expect(request.headers.get('accept')).toBe(browserHeaders.accept);
+        expect(request.headers.get('accept-language')).toBe(browserHeaders['accept-language']);
+        expect(request.headers.get('cache-control')).toBe(browserHeaders['cache-control']);
         expect(request.headers.get('user-agent')).toBe('rss-reader/1.0');
         if (requestUrl.searchParams.get('url') !== articleUrl) {
           return HttpResponse.json(
@@ -72,6 +81,9 @@ describe('fetchHatenaBookmarks', () => {
   it('returns an empty list when Hatena responds with null', async () => {
     server.use(
       http.get(hatenaApiBaseUrl, ({ request }) => {
+        expect(request.headers.get('accept')).toBe(browserHeaders.accept);
+        expect(request.headers.get('accept-language')).toBe(browserHeaders['accept-language']);
+        expect(request.headers.get('cache-control')).toBe(browserHeaders['cache-control']);
         expect(request.headers.get('user-agent')).toBe('rss-reader/1.0');
         return HttpResponse.json(null, {
           headers: { 'Content-Type': 'application/json' },

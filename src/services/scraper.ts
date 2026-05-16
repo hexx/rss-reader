@@ -33,6 +33,12 @@ const linkSelectors = [
 
 const minimumSleepMs = 1_000;
 const maximumSleepMs = 3_000;
+export const browserRequestHeaders = {
+  'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+  'accept-language': 'ja,en-US;q=0.9,en;q=0.8',
+  'cache-control': 'no-cache',
+  'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+} as const;
 
 function normalizeText(value: string): string {
   return value.replace(/\s+/g, ' ').trim();
@@ -75,9 +81,7 @@ function extractLinkTitle($: CheerioAPI, element: Element): string {
 
 async function fetchHtml(url: string): Promise<string> {
   const response = await fetch(url, {
-    headers: {
-      'user-agent': 'rss-reader/1.0',
-    },
+    headers: browserRequestHeaders,
   });
 
   if (!response.ok) {

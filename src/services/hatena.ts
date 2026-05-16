@@ -1,4 +1,5 @@
 import { sleep } from '../utils/sleep.js';
+import { browserRequestHeaders } from './scraper.js';
 
 export interface HatenaBookmarkComment {
   comment: string;
@@ -33,6 +34,7 @@ export async function fetchHatenaBookmarks(articleUrl: string): Promise<HatenaBo
 
   const response = await fetch(`${hatenaEntryJsonLiteBaseUrl}${encodeURIComponent(articleUrl)}`, {
     headers: {
+      ...browserRequestHeaders,
       accept: 'application/json',
       'user-agent': hatenaUserAgent,
     },
