@@ -28,10 +28,6 @@ vi.mock('../utils/chunking.js', () => ({
   chunkText: vi.fn(),
 }));
 
-vi.mock('../utils/sleep.js', () => ({
-  sleep: vi.fn().mockResolvedValue(undefined),
-}));
-
 vi.mock('../utils/logger.js', () => ({
   logger: {
     info: vi.fn(),
@@ -54,7 +50,6 @@ import { generateArticleSummary, generateEmbeddings, generateHatenaSummary } fro
 import { fetchArticleContent, fetchRssOrFallback } from '../services/scraper.js';
 import { getVectorCollection } from '../db/vector.js';
 import { chunkText } from '../utils/chunking.js';
-import { sleep } from '../utils/sleep.js';
 import { logger } from '../utils/logger.js';
 
 const fetchHatenaBookmarksMock = vi.mocked(fetchHatenaBookmarks);
@@ -65,7 +60,6 @@ const fetchArticleContentMock = vi.mocked(fetchArticleContent);
 const fetchRssOrFallbackMock = vi.mocked(fetchRssOrFallback);
 const getVectorCollectionMock = vi.mocked(getVectorCollection);
 const chunkTextMock = vi.mocked(chunkText);
-const sleepMock = vi.mocked(sleep);
 const loggerMock = vi.mocked(logger);
 
 let testDb: Awaited<ReturnType<typeof createTestDatabase>>['db'];
@@ -104,7 +98,6 @@ describe('syncSite', () => {
     fetchRssOrFallbackMock.mockReset();
     getVectorCollectionMock.mockReset();
     chunkTextMock.mockReset();
-    sleepMock.mockReset();
     loggerMock.info.mockReset();
     loggerMock.warn.mockReset();
   });
@@ -129,7 +122,7 @@ describe('syncSite', () => {
     ]);
     getVectorCollectionMock.mockResolvedValue({ add: vectorAddMock } as never);
 
-    await syncSite(siteUrl);
+    await expect(syncSite(siteUrl)).resolves.toBe(1);
 
     const savedArticles = await testDb.select().from(articles);
     const savedBookmarks = await testDb.select().from(hatenaBookmarks);
@@ -172,7 +165,6 @@ describe('syncSite', () => {
     expect(generateArticleSummaryMock).toHaveBeenCalledWith(article.title, '', expect.any(Object));
     expect(generateHatenaSummaryMock).toHaveBeenCalledWith(bookmarks, expect.any(Object));
     expect(generateEmbeddingsMock).toHaveBeenCalledTimes(1);
-    expect(sleepMock).toHaveBeenCalledTimes(1);
     expect(loggerMock.info).toHaveBeenCalledWith('記事の同期処理を実行します。', {
       title: article.title,
       url: article.url,
@@ -310,7 +302,10 @@ describe('syncSite', () => {
     expect(generateHatenaSummaryMock).not.toHaveBeenCalled();
     expect(generateEmbeddingsMock).not.toHaveBeenCalled();
     expect(vectorAddMock).not.toHaveBeenCalled();
-    expect(sleepMock).not.toHaveBeenCalled();
+    expect(loggerMock.info).not.toHaveBeenCalledWith('記事の同期処理を実行します。', {
+      title: article.title,
+      url: article.url,
+    });
 
     const savedArticles = await testDb.select().from(articles);
     const savedBookmarks = await testDb.select().from(hatenaBookmarks);
@@ -331,7 +326,7 @@ describe('syncSite', () => {
     });
   });
 
-  it('stops after processing three new articles', async () => {
+  it('stops after processing one new article', async () => {
     const vectorAddMock = vi.fn().mockResolvedValue(1);
     const { syncSite } = await import('./sync.js');
 
@@ -350,16 +345,6 @@ describe('syncSite', () => {
         title: '記事2',
         pubDate: new Date('2024-01-03T00:00:00.000Z'),
         url: 'https://example.com/articles/2',
-      },
-      {
-        title: '記事3',
-        pubDate: new Date('2024-01-04T00:00:00.000Z'),
-        url: 'https://example.com/articles/3',
-      },
-      {
-        title: '記事4',
-        pubDate: new Date('2024-01-05T00:00:00.000Z'),
-        url: 'https://example.com/articles/4',
       },
     ];
 
@@ -382,23 +367,30 @@ describe('syncSite', () => {
     generateEmbeddingsMock.mockResolvedValue([[0.1, 0.2]]);
     getVectorCollectionMock.mockResolvedValue({ add: vectorAddMock } as never);
 
-    await syncSite(siteUrl);
+    await expect(syncSite(siteUrl)).resolves.toBe(1);
 
-    expect(fetchArticleContentMock).toHaveBeenCalledTimes(3);
-    expect(generateArticleSummaryMock).toHaveBeenCalledTimes(3);
-    expect(vectorAddMock).toHaveBeenCalledTimes(3);
+    expect(fetchArticleContentMock).toHaveBeenCalledTimes(1);
+    expect(generateArticleSummaryMock).toHaveBeenCalledTimes(1);
+    expect(vectorAddMock).toHaveBeenCalledTimes(1);
     expect(loggerMock.info).toHaveBeenCalledWith('タイムアウト防止のため、記事の同期を中断して次回に回します。');
-    expect(fetchArticleContentMock).not.toHaveBeenCalledWith(limitedArticles[4]!.url);
+    expect(fetchArticleContentMock).not.toHaveBeenCalledWith(limitedArticles[2]!.url);
 
     const savedArticles = await testDb.select().from(articles);
-    expect(savedArticles).toHaveLength(4);
-    expect(savedArticles.some((savedArticle) => savedArticle.url === limitedArticles[4]!.url)).toBe(false);
+    expect(savedArticles).toHaveLength(2);
+    expect(savedArticles.some((savedArticle) => savedArticle.url === limitedArticles[2]!.url)).toBe(false);
   });
 
   it('limits subscription sync to two sites per run', async () => {
     const { syncAllSubscriptions } = await import('./sync.js');
 
-    fetchRssOrFallbackMock.mockResolvedValue([]);
+    fetchRssOrFallbackMock
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([article]);
+    fetchArticleContentMock.mockResolvedValue('本文の内容です。');
+    generateArticleSummaryMock.mockResolvedValue('要約文');
+    generateEmbeddingsMock.mockResolvedValue([[0.1, 0.2]]);
+    fetchHatenaBookmarksMock.mockResolvedValue([]);
+    chunkTextMock.mockReturnValue(['chunk-1']);
     getVectorCollectionMock.mockResolvedValue({ add: vi.fn().mockResolvedValue(1) } as never);
 
     await testDb.insert(subscriptions).values([
@@ -423,6 +415,7 @@ describe('syncSite', () => {
 
     expect(fetchRssOrFallbackMock).toHaveBeenCalledTimes(2);
     expect(getVectorCollectionMock).toHaveBeenCalledTimes(2);
-    expect(sleepMock).toHaveBeenCalledTimes(1);
+    expect(fetchArticleContentMock).toHaveBeenCalledTimes(1);
+    expect(generateArticleSummaryMock).toHaveBeenCalledTimes(1);
   });
 });
