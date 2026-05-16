@@ -11,6 +11,7 @@ import { logger } from '../utils/logger.js';
 import { chunkText } from '../utils/chunking.js';
 
 const articleChunkSize = 1_500;
+const bookmarkChunkSize = 20;
 const maxProcessPerSync = 1;
 
 function shouldFetchHatenaBookmarks(siteUrl: string): boolean {
@@ -98,14 +99,21 @@ export async function syncSite(
         }).run();
 
         if (bookmarks.length > 0) {
-          await database.insert(hatenaBookmarks).values(
-            bookmarks.map((bookmark) => ({
-              id: crypto.randomUUID(),
-              articleId,
-              user: bookmark.user,
-              comment: bookmark.comment,
-            })),
-          ).run();
+          for (let index = 0; index < bookmarks.length; index += bookmarkChunkSize) {
+            const chunk = bookmarks.slice(index, index + bookmarkChunkSize);
+            await database
+              .insert(hatenaBookmarks)
+              .values(
+                chunk.map((bookmark) => ({
+                  id: crypto.randomUUID(),
+                  articleId,
+                  user: bookmark.user,
+                  comment: bookmark.comment,
+                })),
+              )
+              .onConflictDoNothing()
+              .run();
+          }
         }
 
         const chunks = buildArticleChunks(article.title, content);
