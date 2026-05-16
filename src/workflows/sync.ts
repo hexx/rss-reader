@@ -80,7 +80,18 @@ export async function syncSite(
 
         logger.info('記事の同期処理を実行します。', { title: article.title, url: article.url });
 
-        const content = await fetchArticleContent(article.url);
+        let content = '';
+        try {
+          content = await fetchArticleContent(article.url);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          logger.warn('本文の取得に失敗したため、本文なしで処理を継続します。', {
+            articleUrl: article.url,
+            siteUrl,
+            title: article.title,
+            error: message,
+          });
+        }
         const bookmarks = shouldFetchHatenaBookmarks(siteUrl) ? await fetchHatenaBookmarks(article.url) : [];
         const summary = await generateArticleSummary(article.title, content, env);
         const hatenaSummary = bookmarks.length > 0 ? await generateHatenaSummary(bookmarks, env) : null;

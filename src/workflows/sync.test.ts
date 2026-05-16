@@ -72,12 +72,6 @@ const article = {
   url: 'https://example.com/articles/1',
 };
 
-const nextArticle = {
-  title: '次の記事',
-  pubDate: new Date('2024-01-02T00:00:00.000Z'),
-  url: 'https://example.com/articles/2',
-};
-
 const bookmarks = [
   {
     comment: '参考になる',
@@ -202,41 +196,38 @@ describe('syncSite', () => {
     expect(vectorAddMock).toHaveBeenCalledTimes(1);
   });
 
-  it('continues processing later articles when one article fails', async () => {
+  it('falls back to empty content when article fetch fails', async () => {
     const vectorAddMock = vi.fn().mockResolvedValue(1);
     const { syncSite } = await import('./sync.js');
 
-    fetchRssOrFallbackMock.mockResolvedValue([article, nextArticle]);
+    fetchRssOrFallbackMock.mockResolvedValue([article]);
     fetchArticleContentMock.mockRejectedValueOnce(new Error('scrape failed'));
-    fetchArticleContentMock.mockResolvedValueOnce('次の記事本文');
     fetchHatenaBookmarksMock.mockResolvedValue([{ user: 'bob', comment: '面白い' }]);
-    generateArticleSummaryMock.mockResolvedValue('次の記事の要約');
+    generateArticleSummaryMock.mockResolvedValue('要約文');
     generateHatenaSummaryMock.mockResolvedValue('反応の要約');
-    chunkTextMock.mockReturnValue(['chunk-1', 'chunk-2']);
-    generateEmbeddingsMock.mockResolvedValue([
-      [0.1, 0.2],
-      [0.3, 0.4],
-    ]);
+    chunkTextMock.mockReturnValue(['chunk-1']);
+    generateEmbeddingsMock.mockResolvedValue([[0.1, 0.2]]);
     getVectorCollectionMock.mockResolvedValue({ add: vectorAddMock } as never);
 
-    await syncSite(siteUrl);
+    await expect(syncSite(siteUrl)).resolves.toBe(1);
 
     const savedArticles = await testDb.select().from(articles);
     expect(savedArticles).toHaveLength(1);
     expect(savedArticles[0]).toMatchObject({
-      content: '次の記事本文',
+      content: '',
       hatenaSummary: '反応の要約',
-      summary: '次の記事の要約',
+      summary: '要約文',
       siteUrl,
-      title: nextArticle.title,
-      url: nextArticle.url,
+      title: article.title,
+      url: article.url,
     });
-    expect(fetchHatenaBookmarksMock).toHaveBeenCalledTimes(1);
-    expect(generateArticleSummaryMock).toHaveBeenCalledTimes(1);
-    expect(generateHatenaSummaryMock).toHaveBeenCalledTimes(1);
+    expect(fetchArticleContentMock).toHaveBeenCalledWith(article.url);
+    expect(fetchHatenaBookmarksMock).toHaveBeenCalledWith(article.url);
+    expect(generateArticleSummaryMock).toHaveBeenCalledWith(article.title, '', expect.any(Object));
+    expect(generateHatenaSummaryMock).toHaveBeenCalledWith([{ user: 'bob', comment: '面白い' }], expect.any(Object));
     expect(generateEmbeddingsMock).toHaveBeenCalledTimes(1);
     expect(loggerMock.warn).toHaveBeenCalledWith(
-      '記事の同期に失敗しました。',
+      '本文の取得に失敗したため、本文なしで処理を継続します。',
       expect.objectContaining({
         articleUrl: article.url,
         siteUrl,
@@ -252,18 +243,18 @@ describe('syncSite', () => {
     const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
 
     fetchRssOrFallbackMock.mockResolvedValue([article]);
-    fetchArticleContentMock.mockRejectedValue(new Error('scrape failed'));
+    fetchArticleContentMock.mockResolvedValue('本文の内容です。');
+    generateArticleSummaryMock.mockRejectedValue(new Error('summary failed'));
     getVectorCollectionMock.mockResolvedValue({ add: vectorAddMock } as never);
 
-    await expect(syncSite(siteUrl, true)).rejects.toThrow('scrape failed');
+    await expect(syncSite(siteUrl, true)).rejects.toThrow('summary failed');
 
-    expect(fetchHatenaBookmarksMock).not.toHaveBeenCalled();
-    expect(generateArticleSummaryMock).not.toHaveBeenCalled();
+    expect(fetchHatenaBookmarksMock).toHaveBeenCalledWith(article.url);
     expect(generateHatenaSummaryMock).not.toHaveBeenCalled();
     expect(generateEmbeddingsMock).not.toHaveBeenCalled();
     expect(vectorAddMock).not.toHaveBeenCalled();
     expect(loggerMock.warn).not.toHaveBeenCalled();
-    expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining('scrape failed'));
+    expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining('summary failed'));
 
     consoleErrorSpy.mockRestore();
     expect(await testDb.select().from(articles)).toHaveLength(0);
