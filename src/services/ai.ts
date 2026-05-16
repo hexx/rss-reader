@@ -7,6 +7,8 @@ import type { HatenaBookmarkComment } from './hatena.js';
 import type { SearchArticleResult } from './search.js';
 
 const defaultModelId = 'opencode-go';
+const articleContentLimit = 20_000;
+const articleContentTruncationSuffix = '\n...（以下省略）';
 
 type AiEnv = Pick<
   RuntimeEnv,
@@ -31,6 +33,14 @@ function buildArticleSummaryPrompt(title: string, content: string): string {
     '',
     `本文: ${content}`,
   ].join('\n');
+}
+
+function truncateArticleContent(content: string): string {
+  if (content.length <= articleContentLimit) {
+    return content;
+  }
+
+  return `${content.slice(0, articleContentLimit)}${articleContentTruncationSuffix}`;
 }
 
 function buildHatenaSummaryPrompt(comments: HatenaBookmarkComment[]): string {
@@ -98,11 +108,12 @@ export async function generateArticleSummary(
   content: string,
   env: AiEnv = process.env,
 ): Promise<string> {
+  const truncatedContent = truncateArticleContent(content);
   const result = await generateText({
     model: getOpenCodeGoChatModel(env),
     system:
       'あなたは日本語の要約アシスタントです。与えられた記事を簡潔に要約してください。記事本文が空で提供される場合もあります。その場合は、タイトルから推測できる範囲で要約を作成してください。出力は段落(<p>)やリスト(<ul>,<li>)、強調(<strong>)などのHTMLタグを用いて、見やすく構造化されたHTMLスニペットにしてください。',
-    prompt: buildArticleSummaryPrompt(title, content),
+    prompt: buildArticleSummaryPrompt(title, truncatedContent),
   });
 
   return result.text.trim();

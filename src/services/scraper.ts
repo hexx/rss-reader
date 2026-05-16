@@ -40,6 +40,9 @@ export const browserRequestHeaders = {
   'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
 } as const;
 
+const nonHtmlFileExtensionPattern =
+  /\.(?:pdf|zip|exe|mp4|png|jpe?g|gif|webp|avif|svg|bmp|ico|webm|mov|avi|mkv|mp3|wav|ogg|docx?|xlsx?|pptx?|tar|tgz|gz|bz2|7z|rar)$/i;
+
 function normalizeText(value: string): string {
   return value.replace(/\s+/g, ' ').trim();
 }
@@ -66,6 +69,14 @@ function resolveUrl(rawUrl: string, baseUrl: string): string | null {
     return resolvedUrl.toString();
   } catch {
     return null;
+  }
+}
+
+function shouldSkipNonHtmlUrl(url: string): boolean {
+  try {
+    return nonHtmlFileExtensionPattern.test(new URL(url).pathname);
+  } catch {
+    return false;
   }
 }
 
@@ -147,6 +158,10 @@ function extractFallbackLinks(html: string, baseUrl: string): ScrapedLink[] {
       return;
     }
 
+    if (shouldSkipNonHtmlUrl(resolvedUrl)) {
+      return;
+    }
+
     const title = extractLinkTitle($, node);
     if (title.length === 0 || seenUrls.has(resolvedUrl)) {
       return;
@@ -177,6 +192,10 @@ export async function fetchRssOrFallback(siteUrl: string): Promise<ScrapedLink[]
       .map((item): ScrapedLink | null => {
         const url = item.link ?? item.guid ?? null;
         if (!url) {
+          return null;
+        }
+
+        if (shouldSkipNonHtmlUrl(url)) {
           return null;
         }
 

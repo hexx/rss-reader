@@ -23,6 +23,8 @@ const feedUrl = 'https://example.com/feed.xml';
 const fallbackUrl = 'https://example.com/';
 const articleOneUrl = 'https://example.com/posts/one';
 const articleTwoUrl = 'https://example.com/posts/two';
+const pdfUrl = 'https://example.com/files/report.pdf';
+const imageUrl = 'https://example.com/images/photo.png';
 const browserHeaders = {
   accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
   'accept-language': 'ja,en-US;q=0.9,en;q=0.8',
@@ -72,6 +74,19 @@ const fallbackHtml = `<!doctype html>
     <footer>
       <a href="/privacy">Privacy</a>
     </footer>
+  </body>
+</html>`;
+
+const assetFallbackHtml = `<!doctype html>
+<html>
+  <body>
+    <main>
+      <article>
+        <a href="${pdfUrl}">PDF</a>
+        <a href="${imageUrl}" title="Image"></a>
+        <a href="/posts/one">First article</a>
+      </article>
+    </main>
   </body>
 </html>`;
 
@@ -164,6 +179,51 @@ describe('scraper service', () => {
     ]);
 
     expect(parseURLMock).not.toHaveBeenCalled();
+  });
+
+  it('skips non-HTML asset links from RSS and fallback HTML', async () => {
+    server.use(
+      http.get(feedUrl, ({ request }) => {
+        expect(request.headers.get('accept')).toBe(browserHeaders.accept);
+        return HttpResponse.text(feedXml, { headers: { 'Content-Type': 'application/rss+xml' } });
+      }),
+      http.get(fallbackUrl, ({ request }) => {
+        expect(request.headers.get('accept')).toBe(browserHeaders.accept);
+        return HttpResponse.text(assetFallbackHtml, { headers: { 'Content-Type': 'text/html' } });
+      }),
+    );
+
+    parseStringMock.mockResolvedValueOnce({
+      items: [
+        {
+          link: pdfUrl,
+          title: 'PDF article',
+        },
+        {
+          link: articleOneUrl,
+          title: 'First article',
+        },
+      ],
+    });
+    parseStringMock.mockResolvedValueOnce({
+      items: [],
+    });
+
+    await expect(fetchRssOrFallback(feedUrl)).resolves.toEqual([
+      {
+        pubDate: null,
+        title: 'First article',
+        url: articleOneUrl,
+      },
+    ]);
+
+    await expect(fetchRssOrFallback(fallbackUrl)).resolves.toEqual([
+      {
+        pubDate: null,
+        title: 'First article',
+        url: articleOneUrl,
+      },
+    ]);
   });
 
   it('paces article fetches while collecting site articles', async () => {

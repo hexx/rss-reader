@@ -71,6 +71,19 @@ describe('generateArticleSummary', () => {
     expect(callArgs?.prompt).not.toContain('参考になる');
   });
 
+  it('truncates overly long article content before generating a summary', async () => {
+    generateTextMock.mockResolvedValue({ text: '要約文' } as never);
+
+    const longContent = `${'あ'.repeat(20_000)}__TAIL__`;
+
+    await expect(generateArticleSummary('記事タイトル', longContent)).resolves.toBe('要約文');
+
+    const callArgs = generateTextMock.mock.calls[0]?.[0];
+    expect(callArgs).toBeDefined();
+    expect(callArgs?.prompt).toContain('...（以下省略）');
+    expect(callArgs?.prompt).not.toContain('__TAIL__');
+  });
+
   it('builds the OpenCode Go chat model from env bindings', () => {
     const chatModelMock = vi.fn().mockReturnValue('chat-model');
     createOpenAICompatibleMock.mockReturnValue({
