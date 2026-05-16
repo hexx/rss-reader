@@ -81,6 +81,7 @@ type BookmarkRow = {
 };
 
 const app = new Hono<{ Bindings: Bindings }>();
+const bookmarkArticleIdChunkSize = 50;
 
 function formatDate(value: Date | string | number | null | undefined): string {
   if (value instanceof Date) {
@@ -268,7 +269,7 @@ async function fetchArticles(
   return await filteredQuery.orderBy(asc(sql`coalesce(${articles.publishedAt}, ${articles.createdAt})`));
 }
 
-async function fetchBookmarksByArticleIds(
+export async function fetchBookmarksByArticleIds(
   database: ReturnType<typeof getDb>,
   articleIds: string[],
 ): Promise<BookmarkRow[]> {
@@ -276,16 +277,25 @@ async function fetchBookmarksByArticleIds(
     return [];
   }
 
-  return database
-    .select({
-      articleId: hatenaBookmarks.articleId,
-      comment: hatenaBookmarks.comment,
-      createdAt: hatenaBookmarks.createdAt,
-      id: hatenaBookmarks.id,
-      user: hatenaBookmarks.user,
-    })
-    .from(hatenaBookmarks)
-    .where(inArray(hatenaBookmarks.articleId, articleIds));
+  const bookmarkRows: BookmarkRow[] = [];
+
+  for (let index = 0; index < articleIds.length; index += bookmarkArticleIdChunkSize) {
+    const chunk = articleIds.slice(index, index + bookmarkArticleIdChunkSize);
+    const rows = await database
+      .select({
+        articleId: hatenaBookmarks.articleId,
+        comment: hatenaBookmarks.comment,
+        createdAt: hatenaBookmarks.createdAt,
+        id: hatenaBookmarks.id,
+        user: hatenaBookmarks.user,
+      })
+      .from(hatenaBookmarks)
+      .where(inArray(hatenaBookmarks.articleId, chunk));
+
+    bookmarkRows.push(...rows);
+  }
+
+  return bookmarkRows;
 }
 
 app.use('*', async (c, next) => {
