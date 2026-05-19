@@ -121,13 +121,20 @@ export function App() {
   const handleLocalSearch = useCallback(
     async (event: FormEvent<HTMLFormElement>) => {
       event.preventDefault();
-      try {
-        await loadArticles(showUnreadOnly, selectedSourceUrl);
-      } catch (error) {
-        setStatus(normalizeError(error, '記事の読み込みに失敗しました。'));
+      setAiAnswer('');
+
+      if (searchQuery.trim().length === 0) {
+        try {
+          await loadArticles(showUnreadOnly, selectedSourceUrl);
+        } catch (error) {
+          setStatus(normalizeError(error, '記事の読み込みに失敗しました。'));
+        }
+        return;
       }
+
+      setStatus('ローカル絞り込みを表示しています。');
     },
-    [loadArticles, selectedSourceUrl, showUnreadOnly],
+    [loadArticles, searchQuery, selectedSourceUrl, showUnreadOnly],
   );
 
   const handleAiSearch = useCallback(async () => {

@@ -142,6 +142,19 @@ describe('worker app', () => {
       url: 'https://example.com/articles/1',
     });
 
+    const sourceResponse = await app.fetch(
+      new Request('http://localhost/api/articles?source=https://example.com/other.xml&unread_only=false'),
+    );
+    const sourcePayload = (await sourceResponse.json()) as {
+      articles: Array<{ title: string; url: string }>;
+    };
+    expect(sourceResponse.ok).toBe(true);
+    expect(sourcePayload.articles).toHaveLength(1);
+    expect(sourcePayload.articles[0]).toMatchObject({
+      title: '別の記事',
+      url: 'https://example.com/articles/3',
+    });
+
     const sourcesResponse = await app.fetch(new Request('http://localhost/api/sources'));
     const sourcesPayload = (await sourcesResponse.json()) as {
       sources: Array<{
