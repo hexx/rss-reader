@@ -76,6 +76,10 @@ button:disabled {
   align-items: stretch;
 }
 
+.source-row--all {
+  display: block;
+}
+
 .source-item {
   width: 100%;
   padding: 0.75rem 0.85rem;
@@ -401,7 +405,12 @@ button:disabled {
     flex-direction: column;
   }
 
+  .workspace {
+    order: 1;
+  }
+
   .sidebar {
+    order: 2;
     width: 100%;
     border-right: 0;
     border-bottom: 1px solid rgba(148, 163, 184, 0.2);

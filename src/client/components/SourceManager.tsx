@@ -81,7 +81,7 @@ export function SourceManager({
 
       <nav aria-label="RSS sources">
         <ul className="sources-list">
-          <li>
+          <li className="source-row source-row--all">
             <button
               type="button"
               className={`source-item ${selectedSourceUrl === undefined ? 'is-active' : ''}`}
@@ -96,25 +96,23 @@ export function SourceManager({
             </li>
           ) : (
             sources.map((source) => (
-              <li key={source.id}>
-                <div className="source-row">
-                  <button
-                    type="button"
-                    className={`source-item ${selectedSourceUrl === source.siteUrl ? 'is-active' : ''}`}
-                    title={source.siteUrl}
-                    onClick={() => onSelectSource(source.siteUrl)}
-                  >
-                    {source.displayTitle} ({source.unreadCount}/{source.articleCount})
-                  </button>
-                  <button
-                    type="button"
-                    className="source-remove"
-                    title={source.siteUrl}
-                    onClick={() => void handleRemove(source.siteUrl)}
-                  >
-                    解除
-                  </button>
-                </div>
+              <li key={source.id} className="source-row">
+                <button
+                  type="button"
+                  className={`source-item ${selectedSourceUrl === source.siteUrl ? 'is-active' : ''}`}
+                  title={source.siteUrl}
+                  onClick={() => onSelectSource(source.siteUrl)}
+                >
+                  {source.displayTitle} ({source.unreadCount}/{source.articleCount})
+                </button>
+                <button
+                  type="button"
+                  className="source-remove"
+                  title={source.siteUrl}
+                  onClick={() => void handleRemove(source.siteUrl)}
+                >
+                  解除
+                </button>
               </li>
             ))
           )}
