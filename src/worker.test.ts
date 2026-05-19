@@ -251,6 +251,42 @@ describe('worker app', () => {
     });
   });
 
+  it('updates article read state through the article route', async () => {
+    await testDb.insert(articles).values({
+      id: 'article-1',
+      siteUrl: 'https://example.com/feed.xml',
+      url: 'https://example.com/articles/1',
+      title: '最初の記事',
+      content: '本文',
+      summary: '本文要約',
+      hatenaSummary: null,
+      isRead: false,
+      publishedAt: new Date('2024-01-01T00:00:00.000Z'),
+    });
+
+    const response = await app.fetch(
+      new Request('http://localhost/api/articles/article-1', {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ isRead: true }),
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      id: 'article-1',
+      isRead: true,
+    });
+
+    const savedArticles = await testDb.select().from(articles);
+    expect(savedArticles[0]).toMatchObject({
+      id: 'article-1',
+      isRead: true,
+    });
+  });
+
   it('threads env bindings into search and sync routes', async () => {
     const env = {
       OPENCODE_GO_API_KEY: 'test-api-key',
