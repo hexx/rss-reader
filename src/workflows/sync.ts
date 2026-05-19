@@ -49,6 +49,16 @@ function buildArticleChunks(title: string, content: string): string[] {
   return chunkText(buildArticleChunkSource(title, content), articleChunkSize);
 }
 
+/**
+ * 1つの購読サイトを同期し、記事本文・要約・はてブコメント・埋め込みを保存します。
+ * 既存記事は重複登録せず、手動実行では1回あたりの処理件数を抑えてタイムアウトを避けます。
+ *
+ * @param siteUrl 同期対象の購読サイトURL。
+ * @param debug 失敗時に例外を再送出してデバッグしやすくするかどうか。
+ * @param env DB、Vector、AI の各環境バインディング。
+ * @param isCron Cron 実行かどうか。Cron の場合は1回あたりの処理上限が増えます。
+ * @returns 今回処理できた記事数。
+ */
 export async function syncSite(
   siteUrl: string,
   debug = false,
@@ -170,6 +180,15 @@ export async function syncSite(
   }
 }
 
+/**
+ * 購読済みサイトを順番に同期します。
+ * 手動実行では全体の処理件数が2件に達したところで止め、Cron ではより多く処理します。
+ *
+ * @param debug 失敗時に例外を再送出してデバッグしやすくするかどうか。
+ * @param env DB、Vector、AI の各環境バインディング。
+ * @param isCron Cron 実行かどうか。Cron の場合は各サイトの処理上限も増えます。
+ * @returns 何も返しません。
+ */
 export async function syncAllSubscriptions(
   debug = false,
   env: RuntimeEnv = process.env,

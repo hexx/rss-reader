@@ -103,6 +103,15 @@ function getEmbeddingModel(env: AiEnv) {
   return openai.embedding('text-embedding-3-small');
 }
 
+/**
+ * 記事本文を OpenCode Go で日本語要約し、表示用のHTMLスニペットとして返します。
+ * 本文が長い場合は内部で 2万文字まで切り詰めます。
+ *
+ * @param title 要約の前提にする記事タイトル。
+ * @param content 要約対象の記事本文。
+ * @param env OpenCode Go と OpenAI の設定を読む環境バインディング。
+ * @returns 生成された要約HTML。
+ */
 export async function generateArticleSummary(
   title: string,
   content: string,
@@ -119,6 +128,14 @@ export async function generateArticleSummary(
   return result.text.trim();
 }
 
+/**
+ * はてなブックマークのコメント群を OpenCode Go で日本語要約し、表示用のHTMLスニペットとして返します。
+ * コメントが1件もない場合は空文字を返します。
+ *
+ * @param comments 要約対象のはてなブックマークコメント一覧。
+ * @param env OpenCode Go と OpenAI の設定を読む環境バインディング。
+ * @returns 生成された要約HTML。コメントがない場合は空文字。
+ */
 export async function generateHatenaSummary(
   comments: HatenaBookmarkComment[],
   env: AiEnv = process.env,
@@ -137,6 +154,16 @@ export async function generateHatenaSummary(
   return result.text.trim();
 }
 
+/**
+ * RAG の検索結果コンテキストだけを使って、日本語で回答文と参照一覧を生成します。
+ * 根拠が足りない場合は推測せず、わからないと返すようにしています。
+ *
+ * @param query 回答したい質問文。
+ * @param contexts 回答の根拠にするコンテキスト文字列。
+ * @param references 回答末尾に対応表を付けるための記事参照一覧。
+ * @param env OpenCode Go と OpenAI の設定を読む環境バインディング。
+ * @returns 参照番号付きの回答文。
+ */
 export async function generateRagAnswer(
   query: string,
   contexts: string[],
@@ -158,6 +185,13 @@ export async function generateRagAnswer(
   return result.text.trim();
 }
 
+/**
+ * 単一テキストをベクトル化して、検索用の埋め込みベクトルを返します。
+ *
+ * @param text ベクトル化したい文字列。
+ * @param env OpenAI の埋め込みモデル設定を読む環境バインディング。
+ * @returns 生成された埋め込みベクトル。
+ */
 export async function generateEmbedding(text: string, env: AiEnv = process.env): Promise<number[]> {
   const result = await embed({
     model: getEmbeddingModel(env),
@@ -167,6 +201,14 @@ export async function generateEmbedding(text: string, env: AiEnv = process.env):
   return result.embedding;
 }
 
+/**
+ * 複数テキストをまとめてベクトル化し、入力順の埋め込みベクトルを返します。
+ * 入力が空配列なら、処理せず空配列を返します。
+ *
+ * @param texts ベクトル化したい文字列の配列。
+ * @param env OpenAI の埋め込みモデル設定を読む環境バインディング。
+ * @returns 入力順に対応した埋め込みベクトル配列。
+ */
 export async function generateEmbeddings(
   texts: string[],
   env: AiEnv = process.env,
