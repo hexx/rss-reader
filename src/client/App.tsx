@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react
 import { applyReadStateChange } from './articleState.js';
 import { ArticleCard } from './components/ArticleCard.js';
 import { SourceManager } from './components/SourceManager.js';
+import { SourceSwitcher } from './components/SourceSwitcher.js';
 import type { Article, Source } from './types.js';
 
 type ArticlesResponse = {
@@ -267,8 +268,6 @@ export function App() {
         <SourceManager
           onAddSubscription={handleAddSubscription}
           onRemoveSubscription={handleRemoveSubscription}
-          onSelectSource={handleSelectSource}
-          selectedSourceUrl={selectedSourceUrl}
           sources={sources}
         />
       </aside>
@@ -313,6 +312,12 @@ export function App() {
             </button>
           </div>
         </header>
+
+        <SourceSwitcher
+          onSelectSource={handleSelectSource}
+          selectedSourceUrl={selectedSourceUrl}
+          sources={sources}
+        />
 
         <main className="layout">
           <section className="panel">

@@ -5,8 +5,6 @@ import type { Source } from '../types.js';
 type SourceManagerProps = {
   onAddSubscription: (siteUrl: string) => Promise<void>;
   onRemoveSubscription: (siteUrl: string) => Promise<void>;
-  onSelectSource: (siteUrl?: string) => void;
-  selectedSourceUrl: string | undefined;
   sources: Source[];
 };
 
@@ -17,8 +15,6 @@ function normalizeError(error: unknown, fallback: string): string {
 export function SourceManager({
   onAddSubscription,
   onRemoveSubscription,
-  onSelectSource,
-  selectedSourceUrl,
   sources,
 }: SourceManagerProps) {
   const [siteUrl, setSiteUrl] = useState('');
@@ -81,15 +77,6 @@ export function SourceManager({
 
       <nav aria-label="RSS sources">
         <ul className="sources-list">
-          <li className="source-row source-row--all">
-            <button
-              type="button"
-              className={`source-item ${selectedSourceUrl === undefined ? 'is-active' : ''}`}
-              onClick={() => onSelectSource(undefined)}
-            >
-              すべての記事
-            </button>
-          </li>
           {sources.length === 0 ? (
             <li>
               <p className="empty">購読ソースがまだありません。</p>
@@ -97,14 +84,12 @@ export function SourceManager({
           ) : (
             sources.map((source) => (
               <li key={source.id} className="source-row">
-                <button
-                  type="button"
-                  className={`source-item ${selectedSourceUrl === source.siteUrl ? 'is-active' : ''}`}
-                  title={source.siteUrl}
-                  onClick={() => onSelectSource(source.siteUrl)}
-                >
-                  {source.displayTitle} ({source.unreadCount}/{source.articleCount})
-                </button>
+                <div className="source-item source-item--static" title={source.siteUrl}>
+                  <span className="source-item__title">{source.displayTitle}</span>
+                  <span className="source-item__count">
+                    ({source.unreadCount}/{source.articleCount})
+                  </span>
+                </div>
                 <button
                   type="button"
                   className="source-remove"
