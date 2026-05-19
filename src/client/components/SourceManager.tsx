@@ -53,13 +53,13 @@ export function SourceManager({
   );
 
   return (
-    <div className="source-manager">
+    <div className="source-manager" style={{ minWidth: 0 }}>
       <div className="sidebar__header">
         <h2>購読設定</h2>
         <p>RSSソースを追加・解除します。</p>
       </div>
 
-      <form className="search-form subscription-form" onSubmit={handleSubmit}>
+      <form className="search-form subscription-form" style={{ minWidth: 0 }} onSubmit={handleSubmit}>
         <input
           id="subscription-input"
           name="siteUrl"
@@ -69,6 +69,7 @@ export function SourceManager({
           required
           value={siteUrl}
           onChange={(event) => setSiteUrl(event.target.value)}
+          style={{ minWidth: 0, flex: 1 }}
         />
         <button type="submit">追加</button>
       </form>
@@ -76,15 +77,15 @@ export function SourceManager({
       <p className="status">{status}</p>
 
       <nav aria-label="RSS sources">
-        <ul className="sources-list">
+        <ul className="sources-list" style={{ minWidth: 0 }}>
           {sources.length === 0 ? (
             <li>
               <p className="empty">購読ソースがまだありません。</p>
             </li>
           ) : (
             sources.map((source) => (
-              <li key={source.id} className="source-row">
-                <div className="source-item source-item--static" title={source.siteUrl}>
+              <li key={source.id} className="source-row" style={{ minWidth: 0 }}>
+                <div className="source-item source-item--static" title={source.siteUrl} style={{ minWidth: 0, flex: 1 }}>
                   <span className="source-item__title">{source.displayTitle}</span>
                   <span className="source-item__count">
                     ({source.unreadCount}/{source.articleCount})
