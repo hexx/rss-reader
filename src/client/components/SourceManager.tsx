@@ -1,52 +1,28 @@
-import { useCallback, useEffect, useState, type FormEvent } from 'react';
+import { useCallback, useState, type FormEvent } from 'react';
 
 import type { Source } from '../types.js';
 
 type SourceManagerProps = {
-  onChange?: () => Promise<void> | void;
-};
-
-type SourcesResponse = {
-  sources?: Source[];
-};
-
-type MutationResponse = {
-  error?: string;
+  onAddSubscription: (siteUrl: string) => Promise<void>;
+  onRemoveSubscription: (siteUrl: string) => Promise<void>;
+  onSelectSource: (siteUrl?: string) => void;
+  selectedSourceUrl: string | undefined;
+  sources: Source[];
 };
 
 function normalizeError(error: unknown, fallback: string): string {
   return error instanceof Error ? error.message : fallback;
 }
 
-export function SourceManager({ onChange }: SourceManagerProps) {
-  const [sources, setSources] = useState<Source[]>([]);
+export function SourceManager({
+  onAddSubscription,
+  onRemoveSubscription,
+  onSelectSource,
+  selectedSourceUrl,
+  sources,
+}: SourceManagerProps) {
   const [siteUrl, setSiteUrl] = useState('');
-  const [status, setStatus] = useState('購読ソースを読み込み中...');
-
-  const loadSources = useCallback(async () => {
-    setStatus('購読ソースを読み込み中...');
-
-    const response = await fetch('/api/sources');
-    if (!response.ok) {
-      throw new Error('購読ソースの読み込みに失敗しました。');
-    }
-
-    const payload = (await response.json()) as SourcesResponse;
-    const nextSources = Array.isArray(payload.sources) ? payload.sources : [];
-    setSources(nextSources);
-    setStatus(nextSources.length === 0 ? '購読ソースがまだありません。' : '購読ソースを表示しています。');
-  }, []);
-
-  useEffect(() => {
-    void loadSources().catch((error: unknown) => {
-      setStatus(normalizeError(error, '購読ソースの読み込みに失敗しました。'));
-    });
-  }, [loadSources]);
-
-  const refresh = useCallback(async () => {
-    await loadSources();
-    await onChange?.();
-  }, [loadSources, onChange]);
+  const [status, setStatus] = useState('購読ソースを表示しています。');
 
   const handleSubmit = useCallback(
     async (event: FormEvent<HTMLFormElement>) => {
@@ -58,54 +34,30 @@ export function SourceManager({ onChange }: SourceManagerProps) {
       }
 
       try {
-        const response = await fetch('/api/subscriptions', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ siteUrl: normalizedSiteUrl }),
-        });
-        const payload = (await response.json().catch(() => ({}))) as MutationResponse;
-        if (!response.ok) {
-          throw new Error(payload.error || '購読の追加に失敗しました。');
-        }
-
+        await onAddSubscription(normalizedSiteUrl);
         setSiteUrl('');
         setStatus('購読を追加しました。');
-        await refresh();
       } catch (error) {
         setStatus(normalizeError(error, '購読の追加に失敗しました。'));
       }
     },
-    [refresh, siteUrl],
+    [onAddSubscription, siteUrl],
   );
 
   const handleRemove = useCallback(
     async (targetSiteUrl: string) => {
       try {
-        const response = await fetch('/api/subscriptions', {
-          method: 'DELETE',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ siteUrl: targetSiteUrl }),
-        });
-        const payload = (await response.json().catch(() => ({}))) as MutationResponse;
-        if (!response.ok) {
-          throw new Error(payload.error || '購読解除に失敗しました。');
-        }
-
+        await onRemoveSubscription(targetSiteUrl);
         setStatus('購読を解除しました。');
-        await refresh();
       } catch (error) {
         setStatus(normalizeError(error, '購読解除に失敗しました。'));
       }
     },
-    [refresh],
+    [onRemoveSubscription],
   );
 
   return (
-    <section className="panel source-manager">
+    <div className="source-manager">
       <div className="sidebar__header">
         <h2>購読設定</h2>
         <p>RSSソースを追加・解除します。</p>
@@ -129,6 +81,15 @@ export function SourceManager({ onChange }: SourceManagerProps) {
 
       <nav aria-label="RSS sources">
         <ul className="sources-list">
+          <li>
+            <button
+              type="button"
+              className={`source-item ${selectedSourceUrl === undefined ? 'is-active' : ''}`}
+              onClick={() => onSelectSource(undefined)}
+            >
+              すべての記事
+            </button>
+          </li>
           {sources.length === 0 ? (
             <li>
               <p className="empty">購読ソースがまだありません。</p>
@@ -139,11 +100,11 @@ export function SourceManager({ onChange }: SourceManagerProps) {
                 <div className="source-row">
                   <button
                     type="button"
-                    className="source-item"
+                    className={`source-item ${selectedSourceUrl === source.siteUrl ? 'is-active' : ''}`}
                     title={source.siteUrl}
-                    onClick={() => setSiteUrl(source.siteUrl)}
+                    onClick={() => onSelectSource(source.siteUrl)}
                   >
-                    {source.displayTitle} ({source.unreadCount} / {source.articleCount})
+                    {source.displayTitle} ({source.unreadCount}/{source.articleCount})
                   </button>
                   <button
                     type="button"
@@ -159,6 +120,6 @@ export function SourceManager({ onChange }: SourceManagerProps) {
           )}
         </ul>
       </nav>
-    </section>
+    </div>
   );
 }

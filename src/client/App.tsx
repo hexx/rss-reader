@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react
 
 import { ArticleCard } from './components/ArticleCard.js';
 import { SourceManager } from './components/SourceManager.js';
-import type { Article } from './types.js';
+import type { Article, Source } from './types.js';
 
 type ArticlesResponse = {
   articles?: Article[];
@@ -14,7 +14,9 @@ type SearchResponse = {
   results?: Article[];
 };
 
-type Tab = 'articles' | 'sources';
+type SourcesResponse = {
+  sources?: Source[];
+};
 
 function includesQuery(value: string | null | undefined, query: string): boolean {
   return value?.toLowerCase().includes(query) ?? false;
@@ -40,43 +42,76 @@ function normalizeError(error: unknown, fallback: string): string {
   return error instanceof Error ? error.message : fallback;
 }
 
+function buildArticlesUrl(unreadOnly: boolean, sourceUrl?: string): string {
+  const params = new URLSearchParams();
+  params.set('unread_only', String(unreadOnly));
+  if (sourceUrl) {
+    params.set('source', sourceUrl);
+  }
+
+  const query = params.toString();
+  return query.length > 0 ? `/api/articles?${query}` : '/api/articles';
+}
+
 export function App() {
   const [articles, setArticles] = useState<Article[]>([]);
+  const [sources, setSources] = useState<Source[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [showUnreadOnly, setShowUnreadOnly] = useState(true);
+  const [selectedSourceUrl, setSelectedSourceUrl] = useState<string | undefined>(undefined);
   const [isSyncing, setIsSyncing] = useState(false);
   const [status, setStatus] = useState('読み込み中...');
   const [aiAnswer, setAiAnswer] = useState('');
-  const [activeTab, setActiveTab] = useState<Tab>('articles');
 
-  const loadArticles = useCallback(async (unreadOnly: boolean) => {
-    setAiAnswer('');
-    setStatus(unreadOnly ? '未読記事を読み込み中...' : '記事を読み込み中...');
-
-    const response = await fetch(`/api/articles?unread_only=${unreadOnly ? 'true' : 'false'}`);
+  const loadSources = useCallback(async () => {
+    const response = await fetch('/api/sources');
     if (!response.ok) {
-      throw new Error('記事の読み込みに失敗しました。');
+      throw new Error('購読ソースの読み込みに失敗しました。');
     }
 
-    const payload = (await response.json()) as ArticlesResponse;
-    const nextArticles = Array.isArray(payload.articles) ? payload.articles : [];
-    setArticles(nextArticles);
-    setStatus(
-      nextArticles.length === 0
-        ? unreadOnly
-          ? '未読記事がありません。'
-          : '記事がまだありません。'
-        : unreadOnly
-          ? '未読記事を表示しています。'
-          : '最新記事を表示しています。',
-    );
+    const payload = (await response.json()) as SourcesResponse;
+    setSources(Array.isArray(payload.sources) ? payload.sources : []);
   }, []);
 
+  const loadArticles = useCallback(
+    async (unreadOnly: boolean, sourceUrl?: string) => {
+      setAiAnswer('');
+      setStatus(unreadOnly ? '未読記事を読み込み中...' : '記事を読み込み中...');
+
+      const response = await fetch(buildArticlesUrl(unreadOnly, sourceUrl));
+      if (!response.ok) {
+        throw new Error('記事の読み込みに失敗しました。');
+      }
+
+      const payload = (await response.json()) as ArticlesResponse;
+      const nextArticles = Array.isArray(payload.articles) ? payload.articles : [];
+      setArticles(nextArticles);
+      setStatus(
+        nextArticles.length === 0
+          ? unreadOnly
+            ? '未読記事がありません。'
+            : '記事がまだありません。'
+          : unreadOnly
+            ? '未読記事を表示しています。'
+            : sourceUrl
+              ? '選択したソースの記事を表示しています。'
+              : '最新記事を表示しています。',
+      );
+    },
+    [],
+  );
+
   useEffect(() => {
-    void loadArticles(showUnreadOnly).catch((error: unknown) => {
+    void loadSources().catch((error: unknown) => {
+      setStatus(normalizeError(error, '購読ソースの読み込みに失敗しました。'));
+    });
+  }, [loadSources]);
+
+  useEffect(() => {
+    void loadArticles(showUnreadOnly, selectedSourceUrl).catch((error: unknown) => {
       setStatus(normalizeError(error, '記事の読み込みに失敗しました。'));
     });
-  }, [loadArticles, showUnreadOnly]);
+  }, [loadArticles, selectedSourceUrl, showUnreadOnly]);
 
   const filteredArticles = useMemo(() => {
     const normalizedQuery = searchQuery.trim().toLowerCase();
@@ -87,18 +122,18 @@ export function App() {
     async (event: FormEvent<HTMLFormElement>) => {
       event.preventDefault();
       try {
-        await loadArticles(showUnreadOnly);
+        await loadArticles(showUnreadOnly, selectedSourceUrl);
       } catch (error) {
         setStatus(normalizeError(error, '記事の読み込みに失敗しました。'));
       }
     },
-    [loadArticles, showUnreadOnly],
+    [loadArticles, selectedSourceUrl, showUnreadOnly],
   );
 
   const handleAiSearch = useCallback(async () => {
     const query = searchQuery.trim();
     if (query.length === 0) {
-      await loadArticles(showUnreadOnly).catch((error: unknown) => {
+      await loadArticles(showUnreadOnly, selectedSourceUrl).catch((error: unknown) => {
         setStatus(normalizeError(error, '記事の読み込みに失敗しました。'));
       });
       return;
@@ -121,7 +156,7 @@ export function App() {
       setAiAnswer('');
       setStatus(normalizeError(error, '検索に失敗しました。'));
     }
-  }, [loadArticles, searchQuery, showUnreadOnly]);
+  }, [loadArticles, searchQuery, selectedSourceUrl, showUnreadOnly]);
 
   const handleMarkAsRead = useCallback(async (articleId: string) => {
     try {
@@ -161,112 +196,146 @@ export function App() {
 
       setStatus('同期を開始しました。完了後に再読み込みします。');
       await new Promise((resolve) => window.setTimeout(resolve, 4000));
-      await loadArticles(showUnreadOnly);
+      await loadArticles(showUnreadOnly, selectedSourceUrl);
     } catch (error) {
       setStatus(normalizeError(error, '同期の開始に失敗しました。'));
     } finally {
       setIsSyncing(false);
     }
-  }, [loadArticles, showUnreadOnly]);
+  }, [loadArticles, selectedSourceUrl, showUnreadOnly]);
 
-  const refreshArticles = useCallback(async () => {
-    await loadArticles(showUnreadOnly);
-  }, [loadArticles, showUnreadOnly]);
+  const handleAddSubscription = useCallback(
+    async (siteUrl: string) => {
+      const response = await fetch('/api/subscriptions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ siteUrl }),
+      });
+      const payload = (await response.json().catch(() => ({}))) as { error?: string };
+      if (!response.ok) {
+        throw new Error(payload.error || '購読の追加に失敗しました。');
+      }
+
+      await loadSources();
+      await loadArticles(showUnreadOnly, selectedSourceUrl);
+    },
+    [loadArticles, loadSources, selectedSourceUrl, showUnreadOnly],
+  );
+
+  const handleRemoveSubscription = useCallback(
+    async (siteUrl: string) => {
+      const response = await fetch('/api/subscriptions', {
+        method: 'DELETE',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ siteUrl }),
+      });
+      const payload = (await response.json().catch(() => ({}))) as { error?: string };
+      if (!response.ok) {
+        throw new Error(payload.error || '購読解除に失敗しました。');
+      }
+
+      const nextSelectedSourceUrl = selectedSourceUrl === siteUrl ? undefined : selectedSourceUrl;
+      if (nextSelectedSourceUrl !== selectedSourceUrl) {
+        setSelectedSourceUrl(nextSelectedSourceUrl);
+      }
+
+      await loadSources();
+      await loadArticles(showUnreadOnly, nextSelectedSourceUrl);
+    },
+    [loadArticles, loadSources, selectedSourceUrl, showUnreadOnly],
+  );
+
+  const handleSelectSource = useCallback((siteUrl?: string) => {
+    setSelectedSourceUrl(siteUrl);
+  }, []);
+
+  const showAllSelected = selectedSourceUrl === undefined;
 
   return (
     <div className="app-shell">
+      <aside className="sidebar">
+        <SourceManager
+          onAddSubscription={handleAddSubscription}
+          onRemoveSubscription={handleRemoveSubscription}
+          onSelectSource={handleSelectSource}
+          selectedSourceUrl={selectedSourceUrl}
+          sources={sources}
+        />
+      </aside>
+
       <div className="workspace">
         <header className="topbar">
-          <div className="topbar__main">
-            <div>
-              <h1>RSS Reader</h1>
-              <p>React コンポーネントで記事、要約、はてブコメントを表示します。</p>
-            </div>
-
-            <div className="tabs" role="tablist" aria-label="画面切り替え">
-              <button
-                type="button"
-                className={`tab-button ${activeTab === 'articles' ? 'is-active' : ''}`}
-                aria-pressed={activeTab === 'articles'}
-                onClick={() => setActiveTab('articles')}
-              >
-                記事一覧
-              </button>
-              <button
-                type="button"
-                className={`tab-button ${activeTab === 'sources' ? 'is-active' : ''}`}
-                aria-pressed={activeTab === 'sources'}
-                onClick={() => setActiveTab('sources')}
-              >
-                購読設定
-              </button>
-            </div>
+          <div>
+            <h1>RSS Reader</h1>
+            <p>React コンポーネントで記事、要約、はてブコメントを表示します。</p>
           </div>
 
-          {activeTab === 'articles' ? (
-            <div className="topbar__actions">
-              <div className="search-toolbar">
-                <form className="search-form" onSubmit={handleLocalSearch}>
-                  <input
-                    id="search-input"
-                    name="query"
-                    type="search"
-                    placeholder="記事を絞り込み"
-                    autoComplete="off"
-                    value={searchQuery}
-                    onChange={(event) => setSearchQuery(event.target.value)}
-                  />
-                  <button type="submit">Search</button>
-                  <button type="button" onClick={() => void handleAiSearch()}>
-                    AIで検索
-                  </button>
-                </form>
-                <label className="search-filter">
-                  <input
-                    id="unread-only-toggle"
-                    type="checkbox"
-                    checked={showUnreadOnly}
-                    onChange={(event) => setShowUnreadOnly(event.target.checked)}
-                  />
-                  未読のみ表示
-                </label>
-              </div>
-
-              <button id="sync-button" type="button" onClick={() => void handleSync()} disabled={isSyncing}>
-                {isSyncing ? 'Syncing...' : 'Sync'}
-              </button>
+          <div className="topbar__actions">
+            <div className="search-toolbar">
+              <form className="search-form" onSubmit={handleLocalSearch}>
+                <input
+                  id="search-input"
+                  name="query"
+                  type="search"
+                  placeholder="記事を絞り込み"
+                  autoComplete="off"
+                  value={searchQuery}
+                  onChange={(event) => setSearchQuery(event.target.value)}
+                />
+                <button type="submit">Search</button>
+                <button type="button" onClick={() => void handleAiSearch()}>
+                  AIで検索
+                </button>
+              </form>
+              <label className="search-filter">
+                <input
+                  id="unread-only-toggle"
+                  type="checkbox"
+                  checked={showUnreadOnly}
+                  onChange={(event) => setShowUnreadOnly(event.target.checked)}
+                />
+                未読のみ表示
+              </label>
             </div>
-          ) : null}
+
+            <button id="sync-button" type="button" onClick={() => void handleSync()} disabled={isSyncing}>
+              {isSyncing ? 'Syncing...' : 'Sync'}
+            </button>
+          </div>
         </header>
 
         <main className="layout">
-          {activeTab === 'articles' ? (
-            <section className="panel">
-              <p id="status" className="status">
-                {status}
-              </p>
+          <section className="panel">
+            <p id="status" className="status">
+              {status}
+            </p>
 
-              {aiAnswer.trim().length > 0 ? (
-                <div className="ai-answer">
-                  <div className="ai-answer__text">{aiAnswer}</div>
-                </div>
-              ) : null}
-
-              <div id="articles" className="cards">
-                {filteredArticles.length === 0 ? (
-                  <p className="empty">
-                    {searchQuery.trim().length > 0 ? '検索条件に一致する記事がありません。' : '記事がまだありません。'}
-                  </p>
-                ) : (
-                  filteredArticles.map((article) => (
-                    <ArticleCard key={article.id} article={article} onMarkAsRead={handleMarkAsRead} />
-                  ))
-                )}
+            {aiAnswer.trim().length > 0 ? (
+              <div className="ai-answer">
+                <div className="ai-answer__text">{aiAnswer}</div>
               </div>
-            </section>
-          ) : (
-            <SourceManager onChange={refreshArticles} />
-          )}
+            ) : null}
+
+            <div id="articles" className="cards">
+              {filteredArticles.length === 0 ? (
+                <p className="empty">
+                  {searchQuery.trim().length > 0
+                    ? '検索条件に一致する記事がありません。'
+                    : showAllSelected
+                      ? '記事がまだありません。'
+                      : '選択したソースの記事がまだありません。'}
+                </p>
+              ) : (
+                filteredArticles.map((article) => (
+                  <ArticleCard key={article.id} article={article} onMarkAsRead={handleMarkAsRead} />
+                ))
+              )}
+            </div>
+          </section>
         </main>
       </div>
     </div>
