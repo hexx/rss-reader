@@ -25,11 +25,6 @@ function sourceLabel(siteUrl: string): string {
   }
 }
 
-function summaryText(value: string, fallback: string): string {
-  const trimmed = value.trim();
-  return trimmed.length > 0 ? trimmed : fallback;
-}
-
 export function ArticleCard({ article, onMarkAsRead }: ArticleCardProps) {
   return (
     <article className={`card ${article.isRead ? 'is-read' : 'is-unread'}`} id={`article-${article.id}`} data-article-id={article.id}>
@@ -51,14 +46,20 @@ export function ArticleCard({ article, onMarkAsRead }: ArticleCardProps) {
 
       <section className="card__summary-section">
         <h3>記事の要約</h3>
-        <div className="card__article-summary">{summaryText(article.summary, '記事の要約はまだありません。')}</div>
+        {article.summary.trim().length > 0 ? (
+          <div className="card__article-summary" dangerouslySetInnerHTML={{ __html: article.summary }} />
+        ) : (
+          <div className="card__article-summary">記事の要約はまだありません。</div>
+        )}
       </section>
 
       <section className="card__summary-section card__summary-section--hatena">
         <h3>はてブの反応</h3>
-        <div className="card__hatena-summary">
-          {summaryText(article.hatenaSummary, 'はてブの反応要約はまだありません。')}
-        </div>
+        {article.hatenaSummary.trim().length > 0 ? (
+          <div className="card__hatena-summary" dangerouslySetInnerHTML={{ __html: article.hatenaSummary }} />
+        ) : (
+          <div className="card__hatena-summary">はてブの反応要約はまだありません。</div>
+        )}
       </section>
 
       <a className="card__article-link" href={article.url} target="_blank" rel="noreferrer noopener">

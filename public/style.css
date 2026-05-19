@@ -172,6 +172,11 @@ button:disabled {
   color: #fff;
 }
 
+.source-manager {
+  display: grid;
+  gap: 1rem;
+}
+
 .layout {
   flex: 1;
   padding: 2rem;
