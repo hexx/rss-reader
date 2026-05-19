@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react';
 
+import { applyReadStateChange } from './articleState.js';
 import { ArticleCard } from './components/ArticleCard.js';
 import { SourceManager } from './components/SourceManager.js';
 import type { Article, Source } from './types.js';
@@ -181,15 +182,13 @@ export function App() {
 
       const payload = (await response.json()) as { id?: string; isRead?: boolean };
       setArticles((currentArticles) =>
-        currentArticles.map((article) =>
-          article.id === articleId ? { ...article, isRead: payload.isRead ?? true } : article,
-        ),
+        applyReadStateChange(currentArticles, articleId, payload.isRead ?? true, showUnreadOnly),
       );
       setStatus('既読にしました。');
     } catch (error) {
       setStatus(normalizeError(error, '既読状態の更新に失敗しました。'));
     }
-  }, []);
+  }, [showUnreadOnly]);
 
   const handleSync = useCallback(async () => {
     setIsSyncing(true);
