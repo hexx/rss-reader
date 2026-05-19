@@ -474,7 +474,7 @@ app.get('/api/search', async (c) => {
   return c.json({ aiAnswer, references, results });
 });
 
-app.patch('/api/articles/:id/read', async (c) => {
+async function updateArticleReadState(c: any) {
   const articleId = c.req.param('id');
   const database = getDb(c.env);
   const existingArticle = await database
@@ -492,7 +492,10 @@ app.patch('/api/articles/:id/read', async (c) => {
   await database.update(articles).set({ isRead }).where(eq(articles.id, articleId)).run();
 
   return c.json({ id: articleId, isRead });
-});
+}
+
+app.patch('/api/articles/:id', updateArticleReadState);
+app.patch('/api/articles/:id/read', updateArticleReadState);
 
 app.post('/api/sync', (c) => {
   const syncTask = syncAllSubscriptions(false, c.env, false).catch((error: unknown) => {
