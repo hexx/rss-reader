@@ -82,6 +82,7 @@ type BookmarkRow = {
 
 const app = new Hono<{ Bindings: Bindings }>();
 const bookmarkArticleIdChunkSize = 50;
+const articlePageSize = 50;
 
 function formatDate(value: Date | string | number | null | undefined): string {
   if (value instanceof Date) {
@@ -235,10 +236,25 @@ function createBasicAuthMiddleware(env: Bindings | undefined) {
   };
 }
 
+function parsePaginationParam(value: string | undefined, fallback: number, minimum: number): number {
+  if (value === undefined) {
+    return fallback;
+  }
+
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isFinite(parsed) || Number.isNaN(parsed) || parsed < minimum) {
+    return fallback;
+  }
+
+  return parsed;
+}
+
 async function fetchArticles(
   database: ReturnType<typeof getDb>,
   sourceUrl?: string,
   unreadOnly = true,
+  limit = articlePageSize,
+  offset = 0,
 ): Promise<ArticleRow[]> {
   const query = database
     .select({
@@ -266,7 +282,10 @@ async function fetchArticles(
 
   const filteredQuery = filters.length > 0 ? query.where(and(...filters)) : query;
 
-  return await filteredQuery.orderBy(asc(sql`coalesce(${articles.publishedAt}, ${articles.createdAt})`));
+  return await filteredQuery
+    .orderBy(asc(sql`coalesce(${articles.publishedAt}, ${articles.createdAt})`))
+    .limit(limit)
+    .offset(offset);
 }
 
 export async function fetchBookmarksByArticleIds(
@@ -318,9 +337,11 @@ app.get('/health', (c) => c.text('ok'));
 app.get('/api/articles', async (c) => {
   const sourceUrl = c.req.query('source')?.trim() || undefined;
   const unreadOnly = c.req.query('unread_only') === undefined ? true : c.req.query('unread_only') === 'true';
+  const limit = parsePaginationParam(c.req.query('limit'), articlePageSize, 1);
+  const offset = parsePaginationParam(c.req.query('offset'), 0, 0);
   const database = getDb(c.env);
 
-  const articleRows = await fetchArticles(database, sourceUrl, unreadOnly);
+  const articleRows = await fetchArticles(database, sourceUrl, unreadOnly, limit, offset);
   const bookmarkRows = await fetchBookmarksByArticleIds(database, articleRows.map((article) => article.id));
 
   const bookmarksByArticleId = new Map<string, BookmarkRow[]>();

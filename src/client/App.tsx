@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 
 import { applyReadStateChange } from './articleState.js';
+import { ARTICLE_PAGE_SIZE, buildArticlesUrl, mergeLoadedArticles, shouldShowLoadMore } from './articlePagination.js';
 import { ArticleCard } from './components/ArticleCard.js';
 import { SourceManager } from './components/SourceManager.js';
 import { SourceSwitcher } from './components/SourceSwitcher.js';
@@ -44,26 +45,27 @@ function normalizeError(error: unknown, fallback: string): string {
   return error instanceof Error ? error.message : fallback;
 }
 
-function buildArticlesUrl(unreadOnly: boolean, sourceUrl?: string): string {
-  const params = new URLSearchParams();
-  params.set('unread_only', String(unreadOnly));
-  if (sourceUrl) {
-    params.set('source', sourceUrl);
-  }
-
-  const query = params.toString();
-  return query.length > 0 ? `/api/articles?${query}` : '/api/articles';
-}
-
 export function App() {
   const [articles, setArticles] = useState<Article[]>([]);
   const [sources, setSources] = useState<Source[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [showUnreadOnly, setShowUnreadOnly] = useState(true);
   const [selectedSourceUrl, setSelectedSourceUrl] = useState<string | undefined>(undefined);
+  const [offset, setOffset] = useState(0);
+  const [reloadToken, setReloadToken] = useState(0);
+  const [hasMore, setHasMore] = useState(true);
+  const [isLoadingArticles, setIsLoadingArticles] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
   const [status, setStatus] = useState('読み込み中...');
   const [aiAnswer, setAiAnswer] = useState('');
+  const articleRequestId = useRef(0);
+
+  const refreshArticles = useCallback(() => {
+    setOffset(0);
+    setHasMore(true);
+    setAiAnswer('');
+    setReloadToken((currentToken) => currentToken + 1);
+  }, []);
 
   const loadSources = useCallback(async () => {
     const response = await fetch('/api/sources');
@@ -76,29 +78,60 @@ export function App() {
   }, []);
 
   const loadArticles = useCallback(
-    async (unreadOnly: boolean, sourceUrl?: string) => {
+    async (unreadOnly: boolean, sourceUrl?: string, nextOffset = 0) => {
+      const requestId = articleRequestId.current + 1;
+      articleRequestId.current = requestId;
+      setIsLoadingArticles(true);
       setAiAnswer('');
-      setStatus(unreadOnly ? '未読記事を読み込み中...' : '記事を読み込み中...');
-
-      const response = await fetch(buildArticlesUrl(unreadOnly, sourceUrl));
-      if (!response.ok) {
-        throw new Error('記事の読み込みに失敗しました。');
-      }
-
-      const payload = (await response.json()) as ArticlesResponse;
-      const nextArticles = Array.isArray(payload.articles) ? payload.articles : [];
-      setArticles(nextArticles);
       setStatus(
-        nextArticles.length === 0
-          ? unreadOnly
-            ? '未読記事がありません。'
-            : '記事がまだありません。'
+        nextOffset > 0
+          ? 'さらに記事を読み込み中...'
           : unreadOnly
-            ? '未読記事を表示しています。'
-            : sourceUrl
-              ? '選択したソースの記事を表示しています。'
-              : '最新記事を表示しています。',
+            ? '未読記事を読み込み中...'
+            : '記事を読み込み中...',
       );
+
+      try {
+        const response = await fetch(
+          buildArticlesUrl({
+            unreadOnly,
+            sourceUrl,
+            limit: ARTICLE_PAGE_SIZE,
+            offset: nextOffset,
+          }),
+        );
+        if (!response.ok) {
+          throw new Error('記事の読み込みに失敗しました。');
+        }
+
+        const payload = (await response.json()) as ArticlesResponse;
+        const nextArticles = Array.isArray(payload.articles) ? payload.articles : [];
+        if (articleRequestId.current !== requestId) {
+          return;
+        }
+
+        setArticles((currentArticles) => mergeLoadedArticles(currentArticles, nextArticles, nextOffset));
+        setHasMore(nextArticles.length === ARTICLE_PAGE_SIZE);
+        setStatus(
+          nextArticles.length === 0
+            ? nextOffset > 0
+              ? 'これ以上の記事はありません。'
+              : unreadOnly
+                ? '未読記事がありません。'
+                : '記事がまだありません。'
+            : nextOffset > 0
+              ? 'さらに記事を読み込みました。'
+              : unreadOnly
+                ? '未読記事を表示しています。'
+                : sourceUrl
+                  ? '選択したソースの記事を表示しています。'
+                  : '最新記事を表示しています。',
+        );
+      } finally {
+        if (articleRequestId.current === requestId) {
+          setIsLoadingArticles(false);
+        }
+      }
     },
     [],
   );
@@ -110,10 +143,10 @@ export function App() {
   }, [loadSources]);
 
   useEffect(() => {
-    void loadArticles(showUnreadOnly, selectedSourceUrl).catch((error: unknown) => {
+    void loadArticles(showUnreadOnly, selectedSourceUrl, offset).catch((error: unknown) => {
       setStatus(normalizeError(error, '記事の読み込みに失敗しました。'));
     });
-  }, [loadArticles, selectedSourceUrl, showUnreadOnly]);
+  }, [loadArticles, offset, reloadToken, selectedSourceUrl, showUnreadOnly]);
 
   const filteredArticles = useMemo(() => {
     const normalizedQuery = searchQuery.trim().toLowerCase();
@@ -126,25 +159,19 @@ export function App() {
       setAiAnswer('');
 
       if (searchQuery.trim().length === 0) {
-        try {
-          await loadArticles(showUnreadOnly, selectedSourceUrl);
-        } catch (error) {
-          setStatus(normalizeError(error, '記事の読み込みに失敗しました。'));
-        }
+        refreshArticles();
         return;
       }
 
       setStatus('ローカル絞り込みを表示しています。');
     },
-    [loadArticles, searchQuery, selectedSourceUrl, showUnreadOnly],
+    [refreshArticles, searchQuery],
   );
 
   const handleAiSearch = useCallback(async () => {
     const query = searchQuery.trim();
     if (query.length === 0) {
-      await loadArticles(showUnreadOnly, selectedSourceUrl).catch((error: unknown) => {
-        setStatus(normalizeError(error, '記事の読み込みに失敗しました。'));
-      });
+      refreshArticles();
       return;
     }
 
@@ -165,31 +192,34 @@ export function App() {
       setAiAnswer('');
       setStatus(normalizeError(error, '検索に失敗しました。'));
     }
-  }, [loadArticles, searchQuery, selectedSourceUrl, showUnreadOnly]);
+  }, [refreshArticles, searchQuery]);
 
-  const handleMarkAsRead = useCallback(async (articleId: string) => {
-    try {
-      const response = await fetch(`/api/articles/${articleId}`, {
-        method: 'PATCH',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ isRead: true }),
-      });
+  const handleMarkAsRead = useCallback(
+    async (articleId: string) => {
+      try {
+        const response = await fetch(`/api/articles/${articleId}`, {
+          method: 'PATCH',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ isRead: true }),
+        });
 
-      if (!response.ok) {
-        throw new Error('既読状態の更新に失敗しました。');
+        if (!response.ok) {
+          throw new Error('既読状態の更新に失敗しました。');
+        }
+
+        const payload = (await response.json()) as { id?: string; isRead?: boolean };
+        setArticles((currentArticles) =>
+          applyReadStateChange(currentArticles, articleId, payload.isRead ?? true, showUnreadOnly),
+        );
+        setStatus('既読にしました。');
+      } catch (error) {
+        setStatus(normalizeError(error, '既読状態の更新に失敗しました。'));
       }
-
-      const payload = (await response.json()) as { id?: string; isRead?: boolean };
-      setArticles((currentArticles) =>
-        applyReadStateChange(currentArticles, articleId, payload.isRead ?? true, showUnreadOnly),
-      );
-      setStatus('既読にしました。');
-    } catch (error) {
-      setStatus(normalizeError(error, '既読状態の更新に失敗しました。'));
-    }
-  }, [showUnreadOnly]);
+    },
+    [showUnreadOnly],
+  );
 
   const handleSync = useCallback(async () => {
     setIsSyncing(true);
@@ -203,13 +233,13 @@ export function App() {
 
       setStatus('同期を開始しました。完了後に再読み込みします。');
       await new Promise((resolve) => window.setTimeout(resolve, 4000));
-      await loadArticles(showUnreadOnly, selectedSourceUrl);
+      refreshArticles();
     } catch (error) {
       setStatus(normalizeError(error, '同期の開始に失敗しました。'));
     } finally {
       setIsSyncing(false);
     }
-  }, [loadArticles, selectedSourceUrl, showUnreadOnly]);
+  }, [refreshArticles]);
 
   const handleAddSubscription = useCallback(
     async (siteUrl: string) => {
@@ -226,9 +256,9 @@ export function App() {
       }
 
       await loadSources();
-      await loadArticles(showUnreadOnly, selectedSourceUrl);
+      refreshArticles();
     },
-    [loadArticles, loadSources, selectedSourceUrl, showUnreadOnly],
+    [loadSources, refreshArticles],
   );
 
   const handleRemoveSubscription = useCallback(
@@ -251,16 +281,25 @@ export function App() {
       }
 
       await loadSources();
-      await loadArticles(showUnreadOnly, nextSelectedSourceUrl);
+      refreshArticles();
     },
-    [loadArticles, loadSources, selectedSourceUrl, showUnreadOnly],
+    [loadSources, refreshArticles, selectedSourceUrl],
   );
 
-  const handleSelectSource = useCallback((siteUrl?: string) => {
-    setSelectedSourceUrl(siteUrl);
+  const handleSelectSource = useCallback(
+    (siteUrl?: string) => {
+      setSelectedSourceUrl(siteUrl);
+      refreshArticles();
+    },
+    [refreshArticles],
+  );
+
+  const handleLoadMore = useCallback(() => {
+    setOffset((currentOffset) => currentOffset + ARTICLE_PAGE_SIZE);
   }, []);
 
   const showAllSelected = selectedSourceUrl === undefined;
+  const showLoadMoreButton = shouldShowLoadMore(hasMore, searchQuery, aiAnswer);
 
   return (
     <div className="app-shell">
@@ -301,7 +340,10 @@ export function App() {
                   id="unread-only-toggle"
                   type="checkbox"
                   checked={showUnreadOnly}
-                  onChange={(event) => setShowUnreadOnly(event.target.checked)}
+                  onChange={(event) => {
+                    setShowUnreadOnly(event.target.checked);
+                    refreshArticles();
+                  }}
                 />
                 未読のみ表示
               </label>
@@ -346,6 +388,14 @@ export function App() {
                 ))
               )}
             </div>
+
+            {showLoadMoreButton ? (
+              <div style={{ marginTop: '1.5rem', textAlign: 'center' }}>
+                <button type="button" onClick={() => void handleLoadMore()} disabled={isLoadingArticles}>
+                  {isLoadingArticles ? '読み込み中...' : 'さらに読み込む'}
+                </button>
+              </div>
+            ) : null}
           </section>
         </main>
       </div>
