@@ -155,6 +155,19 @@ describe('worker app', () => {
       url: 'https://example.com/articles/3',
     });
 
+    const pagedResponse = await app.fetch(
+      new Request('http://localhost/api/articles?unread_only=false&limit=1&offset=1'),
+    );
+    const pagedPayload = (await pagedResponse.json()) as {
+      articles: Array<{ title: string; url: string }>;
+    };
+    expect(pagedResponse.ok).toBe(true);
+    expect(pagedPayload.articles).toHaveLength(1);
+    expect(pagedPayload.articles[0]).toMatchObject({
+      title: '二番目の記事',
+      url: 'https://example.com/articles/2',
+    });
+
     const sourcesResponse = await app.fetch(new Request('http://localhost/api/sources'));
     const sourcesPayload = (await sourcesResponse.json()) as {
       sources: Array<{
