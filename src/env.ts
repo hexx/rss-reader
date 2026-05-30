@@ -8,8 +8,6 @@ export interface RuntimeEnv {
 }
 
 export interface Bindings extends RuntimeEnv {
-  ADMIN_PASSWORD?: string;
-  ADMIN_USERNAME?: string;
   ASSETS?: {
     fetch(request: Request): Promise<Response>;
   };

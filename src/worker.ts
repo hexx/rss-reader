@@ -196,46 +196,6 @@ function normalizeSiteUrl(siteUrl: string): string {
   return new URL(siteUrl).toString();
 }
 
-function createBasicAuthMiddleware(env: Bindings | undefined) {
-  const username = env?.ADMIN_USERNAME?.trim();
-  const password = env?.ADMIN_PASSWORD ?? '';
-
-  if (!username || password.length === 0) {
-    return undefined;
-  }
-
-  return async (c: any, next: any) => {
-    const authorization = c.req.header('authorization');
-    if (!authorization?.startsWith('Basic ')) {
-      return c.text('Unauthorized', 401, {
-        'WWW-Authenticate': 'Basic realm="RSS Reader"',
-      });
-    }
-
-    const encoded = authorization.slice('Basic '.length);
-    let decoded = '';
-    try {
-      decoded = atob(encoded);
-    } catch {
-      return c.text('Unauthorized', 401, {
-        'WWW-Authenticate': 'Basic realm="RSS Reader"',
-      });
-    }
-
-    const separatorIndex = decoded.indexOf(':');
-    const providedUsername = separatorIndex >= 0 ? decoded.slice(0, separatorIndex) : decoded;
-    const providedPassword = separatorIndex >= 0 ? decoded.slice(separatorIndex + 1) : '';
-
-    if (providedUsername !== username || providedPassword !== password) {
-      return c.text('Unauthorized', 401, {
-        'WWW-Authenticate': 'Basic realm="RSS Reader"',
-      });
-    }
-
-    await next();
-  };
-}
-
 function parsePaginationParam(value: string | undefined, fallback: number, minimum: number): number {
   if (value === undefined) {
     return fallback;
@@ -316,21 +276,6 @@ export async function fetchBookmarksByArticleIds(
 
   return bookmarkRows;
 }
-
-app.use('*', async (c, next) => {
-  if (c.req.path === '/health') {
-    await next();
-    return;
-  }
-
-  const basicAuthMiddleware = createBasicAuthMiddleware(c.env);
-  if (!basicAuthMiddleware) {
-    await next();
-    return;
-  }
-
-  return basicAuthMiddleware(c, next);
-});
 
 app.get('/health', (c) => c.text('ok'));
 
