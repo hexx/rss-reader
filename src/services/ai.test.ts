@@ -105,6 +105,24 @@ describe('generateArticleSummary', () => {
     expect(chatModelMock).toHaveBeenCalledWith('test-model');
   });
 
+  it('rejects when the OpenCode Go base URL is missing', async () => {
+    await expect(
+      generateArticleSummary('記事タイトル', '本文', {
+        OPENCODE_GO_API_KEY: 'test-api-key',
+        OPENAI_API_KEY: 'test-openai-api-key',
+      } as never),
+    ).rejects.toThrow('Missing required environment variable: OPENCODE_GO_BASE_URL');
+  });
+
+  it('rejects when the OpenCode Go API key is missing', async () => {
+    await expect(
+      generateArticleSummary('記事タイトル', '本文', {
+        OPENCODE_GO_BASE_URL: 'https://opencode.example/v1',
+        OPENAI_API_KEY: 'test-openai-api-key',
+      } as never),
+    ).rejects.toThrow('Missing required environment variable: OPENCODE_GO_API_KEY');
+  });
+
   it('summarizes Hatena reactions from comments only', async () => {
     generateTextMock.mockResolvedValue({ text: '反応の要約' } as never);
 
@@ -147,6 +165,16 @@ describe('generateArticleSummary', () => {
       model: 'embedding-model',
       value: 'embedding target',
     });
+  });
+
+  it('rejects when the OpenAI API key is missing', async () => {
+    await expect(
+      generateEmbedding('embedding target', {
+        OPENCODE_GO_BASE_URL: 'https://opencode.example/v1',
+        OPENCODE_GO_API_KEY: 'test-api-key',
+        OPENCODE_GO_MODEL: 'test-model',
+      } as never),
+    ).rejects.toThrow('Missing required environment variable: OPENAI_API_KEY');
   });
 
   it('returns many OpenAI embedding vectors', async () => {
