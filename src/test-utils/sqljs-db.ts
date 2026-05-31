@@ -20,37 +20,40 @@ async function loadSqlJs() {
   return sqlJsPromise;
 }
 
-export async function createTestDatabase() {
+export async function createTestDatabase(options: { initializeSchema?: boolean } = {}) {
+  const { initializeSchema = true } = options;
   const SQL = await loadSqlJs();
   const sqlite = new SQL.Database();
-  sqlite.exec(`
-    PRAGMA foreign_keys = ON;
-    CREATE TABLE articles (
-      id TEXT PRIMARY KEY,
-      url TEXT NOT NULL UNIQUE,
-      site_url TEXT NOT NULL DEFAULT '',
-      title TEXT NOT NULL,
-      content TEXT,
-      published_at INTEGER,
-      summary TEXT,
-      hatena_summary TEXT,
-      is_read INTEGER NOT NULL DEFAULT 0,
-      created_at INTEGER NOT NULL DEFAULT 0
-    );
-    CREATE TABLE hatena_bookmarks (
-      id TEXT PRIMARY KEY,
-      article_id TEXT NOT NULL REFERENCES articles(id) ON DELETE CASCADE,
-      user TEXT NOT NULL,
-      comment TEXT,
-      created_at INTEGER NOT NULL DEFAULT 0
-    );
-    CREATE TABLE subscriptions (
-      id TEXT PRIMARY KEY,
-      site_url TEXT NOT NULL UNIQUE,
-      title TEXT,
-      added_at INTEGER NOT NULL DEFAULT 0
-    );
-  `);
+  if (initializeSchema) {
+    sqlite.exec(`
+      PRAGMA foreign_keys = ON;
+      CREATE TABLE articles (
+        id TEXT PRIMARY KEY,
+        url TEXT NOT NULL UNIQUE,
+        site_url TEXT NOT NULL DEFAULT '',
+        title TEXT NOT NULL,
+        content TEXT,
+        published_at INTEGER,
+        summary TEXT,
+        hatena_summary TEXT,
+        is_read INTEGER NOT NULL DEFAULT 0,
+        created_at INTEGER NOT NULL DEFAULT 0
+      );
+      CREATE TABLE hatena_bookmarks (
+        id TEXT PRIMARY KEY,
+        article_id TEXT NOT NULL REFERENCES articles(id) ON DELETE CASCADE,
+        user TEXT NOT NULL,
+        comment TEXT,
+        created_at INTEGER NOT NULL DEFAULT 0
+      );
+      CREATE TABLE subscriptions (
+        id TEXT PRIMARY KEY,
+        site_url TEXT NOT NULL UNIQUE,
+        title TEXT,
+        added_at INTEGER NOT NULL DEFAULT 0
+      );
+    `);
+  }
 
   const db = drizzle(sqlite, { schema });
 

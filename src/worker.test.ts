@@ -47,6 +47,8 @@ async function loadWorkerApp() {
 beforeEach(async () => {
   vi.resetModules();
   testDb = (await createTestDatabase()).db;
+  getDbMock.mockReset();
+  getDbMock.mockImplementation(() => testDb);
   searchArticlesMock.mockReset();
   generateRagAnswerMock.mockReset();
   syncAllSubscriptionsMock.mockReset();
@@ -372,6 +374,26 @@ describe('worker app', () => {
     expect(syncResponse.status).toBe(202);
     expect(syncAllSubscriptionsMock).toHaveBeenCalledWith(false, env, false);
     expect(executionContext.waitUntil).toHaveBeenCalledTimes(1);
+  });
+
+  it('returns a search error when OpenCode Go env bindings are missing', async () => {
+    const response = await app.fetch(new Request('http://localhost/api/search?q=検索語'), {} as never);
+
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toMatchObject({
+      error: 'Search requires OPENCODE_GO_BASE_URL and OPENCODE_GO_API_KEY.',
+    });
+  });
+
+  it('surfaces missing-table failures from D1-backed article routes', async () => {
+    const blankDb = (await createTestDatabase({ initializeSchema: false })).db;
+    getDbMock.mockImplementation(() => blankDb);
+
+    const articlesResponse = await app.fetch(new Request('http://localhost/api/articles'));
+    const sourcesResponse = await app.fetch(new Request('http://localhost/api/sources'));
+
+    expect(articlesResponse.status).toBe(500);
+    expect(sourcesResponse.status).toBe(500);
   });
 
   it('uses cron mode for scheduled syncs', async () => {
