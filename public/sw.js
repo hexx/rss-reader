@@ -1,4 +1,4 @@
-const CACHE_NAME = 'rss-reader-v1';
+const CACHE_NAME = 'rss-reader-v2';
 // キャッシュする静的アセットのリスト
 const ASSETS_TO_CACHE = [
   '/',
@@ -36,11 +36,23 @@ self.addEventListener('activate', (event) => {
 
 // キャッシュ優先（Cache-First）でネットワーク通信を傍受
 self.addEventListener('fetch', (event) => {
-  // APIリクエスト（/api/）はキャッシュせず、常にネットワークから最新のものを取得
+  // 1. APIリクエストは常にネットワークから
   if (event.request.url.includes('/api/')) {
     return;
   }
 
+  // 2. 画面の遷移（HTML）はネットワーク優先
+  // 認証切れの際にCloudflare Accessのログイン画面へ正しくリダイレクトさせるため
+  if (event.request.mode === 'navigate') {
+    event.respondWith(
+      fetch(event.request).catch(() => {
+        return caches.match(event.request);
+      })
+    );
+    return;
+  }
+
+  // 3. その他の静的アセット（JS, CSS, 画像）はキャッシュ優先
   event.respondWith(
     caches.match(event.request).then((cachedResponse) => {
       if (cachedResponse) {
