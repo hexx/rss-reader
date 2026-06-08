@@ -58,11 +58,9 @@ function createVectorizeCollection(index: VectorizeIndex): VectorCollection {
                 topK: limit,
               });
 
-              return result.matches.map((match) => ({
-                ...(match.metadata !== undefined && typeof match.metadata.article_id === 'string'
+              return result.matches.map((match) => ((match.metadata !== undefined && typeof match.metadata.article_id === 'string'
                   ? { article_id: match.metadata.article_id }
-                  : {}),
-              }));
+                  : {})));
             },
           };
         },
