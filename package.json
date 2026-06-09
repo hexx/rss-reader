@@ -13,7 +13,7 @@
     "dev:server": "wrangler dev",
     "deploy": "wrangler deploy",
     "build": "npm run build:client && tsc -p tsconfig.json",
-    "build:client": "vite build",
+    "build:client": "vite build && tsc -p tsconfig.client.json --noEmit",
     "test": "vitest run",
     "test:e2e": "playwright test",
     "test:watch": "vitest",
