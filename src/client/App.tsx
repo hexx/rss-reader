@@ -1,3 +1,6 @@
+import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Input } from '@/components/ui/input';
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 
 import { applyReadStateChange } from './articleState.js';
@@ -302,8 +305,9 @@ export function App() {
   const showLoadMoreButton = shouldShowLoadMore(hasMore, searchQuery, aiAnswer);
 
   return (
-    <div className="app-shell">
-      <aside className="sidebar">
+    <div className="flex min-h-screen">
+      {/* Sidebar */}
+      <aside className="w-72 shrink-0 border-r bg-background/80 p-6 backdrop-blur-md overflow-y-auto">
         <SourceManager
           onAddSubscription={handleAddSubscription}
           onRemoveSubscription={handleRemoveSubscription}
@@ -311,17 +315,21 @@ export function App() {
         />
       </aside>
 
-      <div className="workspace">
-        <header className="topbar">
+      {/* Main workspace */}
+      <div className="flex flex-1 flex-col min-w-0">
+        {/* Topbar */}
+        <header className="flex items-center justify-between gap-4 border-b bg-background/80 px-8 py-6 backdrop-blur-md">
           <div>
-            <h1>RSS Reader</h1>
-            <p>React コンポーネントで記事、要約、はてブコメントを表示します。</p>
+            <h1 className="font-bold text-2xl">RSS Reader</h1>
+            <p className="mt-1 text-muted-foreground text-sm">
+              React コンポーネントで記事、要約、はてブコメントを表示します。
+            </p>
           </div>
 
-          <div className="topbar__actions">
-            <div className="search-toolbar">
-              <form className="search-form" onSubmit={handleLocalSearch}>
-                <input
+          <div className="flex flex-col gap-3">
+            <div className="flex flex-col gap-3">
+              <form className="flex gap-2" onSubmit={handleLocalSearch}>
+                <Input
                   id="search-input"
                   name="query"
                   type="search"
@@ -329,19 +337,21 @@ export function App() {
                   autoComplete="off"
                   value={searchQuery}
                   onChange={(event) => setSearchQuery(event.target.value)}
+                  className="flex-1 min-w-0"
                 />
-                <button type="submit">Search</button>
-                <button type="button" onClick={() => void handleAiSearch()}>
+                <Button type="submit" variant="secondary">
+                  Search
+                </Button>
+                <Button type="button" onClick={() => void handleAiSearch()}>
                   AIで検索
-                </button>
+                </Button>
               </form>
-              <label className="search-filter">
-                <input
+              <label className="inline-flex items-center gap-2 w-fit text-sm text-muted-foreground">
+                <Checkbox
                   id="unread-only-toggle"
-                  type="checkbox"
                   checked={showUnreadOnly}
-                  onChange={(event) => {
-                    setShowUnreadOnly(event.target.checked);
+                  onCheckedChange={(checked) => {
+                    setShowUnreadOnly(checked === true);
                     refreshArticles();
                   }}
                 />
@@ -349,9 +359,14 @@ export function App() {
               </label>
             </div>
 
-            <button id="sync-button" type="button" onClick={() => void handleSync()} disabled={isSyncing}>
+            <Button
+              id="sync-button"
+              variant="outline"
+              onClick={() => void handleSync()}
+              disabled={isSyncing}
+            >
               {isSyncing ? 'Syncing...' : 'Sync'}
-            </button>
+            </Button>
           </div>
         </header>
 
@@ -361,21 +376,23 @@ export function App() {
           sources={sources}
         />
 
-        <main className="layout">
-          <section className="panel">
-            <p id="status" className="status">
+        <main className="flex-1 p-8">
+          <section className="flex flex-col gap-4">
+            <p id="status" className="text-muted-foreground text-sm">
               {status}
             </p>
 
             {aiAnswer.trim().length > 0 ? (
-              <div className="ai-answer">
-                <div className="ai-answer__text">{aiAnswer}</div>
+              <div className="rounded-lg border border-sky-200 bg-sky-50 p-4 dark:border-sky-800 dark:bg-sky-950/20">
+                <div className="grid gap-3 leading-relaxed overflow-wrap-anywhere">
+                  {aiAnswer}
+                </div>
               </div>
             ) : null}
 
-            <div id="articles" className="cards">
+            <div id="articles" className="grid gap-4">
               {filteredArticles.length === 0 ? (
-                <p className="empty">
+                <p className="text-muted-foreground text-sm">
                   {searchQuery.trim().length > 0
                     ? '検索条件に一致する記事がありません。'
                     : showAllSelected
@@ -390,10 +407,14 @@ export function App() {
             </div>
 
             {showLoadMoreButton ? (
-              <div style={{ marginTop: '1.5rem', textAlign: 'center' }}>
-                <button type="button" onClick={() => void handleLoadMore()} disabled={isLoadingArticles}>
+              <div className="mt-6 text-center">
+                <Button
+                  variant="outline"
+                  onClick={() => void handleLoadMore()}
+                  disabled={isLoadingArticles}
+                >
                   {isLoadingArticles ? '読み込み中...' : 'さらに読み込む'}
-                </button>
+                </Button>
               </div>
             ) : null}
           </section>

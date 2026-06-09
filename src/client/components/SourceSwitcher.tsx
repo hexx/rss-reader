@@ -1,3 +1,5 @@
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import type { Source } from '../types.js';
 
 type SourceSwitcherProps = {
@@ -14,33 +16,39 @@ export function SourceSwitcher({
   const selectedValue = selectedSourceUrl ?? '';
 
   return (
-    <section className="source-switcher" aria-label="表示ソース">
-      <div className="source-switcher__desktop" role="toolbar" aria-label="記事の表示ソース">
-        <button
-          type="button"
-          className={`source-switcher__button ${selectedSourceUrl === undefined ? 'is-active' : ''}`}
+    <section className="flex flex-col gap-3 px-8 pt-4" aria-label="表示ソース">
+      {/* Desktop view */}
+      <div className="hidden flex-wrap gap-2 md:flex" role="toolbar" aria-label="記事の表示ソース">
+        <Button
+          variant={selectedSourceUrl === undefined ? 'default' : 'outline'}
+          size="sm"
           onClick={() => onSelectSource(undefined)}
         >
           すべての記事
-        </button>
+        </Button>
         {sources.map((source) => (
-          <button
+          <Button
             key={source.id}
-            type="button"
-            className={`source-switcher__button ${selectedSourceUrl === source.siteUrl ? 'is-active' : ''}`}
+            variant={selectedSourceUrl === source.siteUrl ? 'default' : 'outline'}
+            size="sm"
             title={source.siteUrl}
             onClick={() => onSelectSource(source.siteUrl)}
+            className="gap-2"
           >
-            {source.displayTitle} ({source.unreadCount}/{source.articleCount})
-          </button>
+            {source.displayTitle}
+            <Badge variant="secondary" className="ml-1">
+              {source.unreadCount}/{source.articleCount}
+            </Badge>
+          </Button>
         ))}
       </div>
 
-      <label className="source-switcher__mobile" htmlFor="source-switcher-select">
-        <span className="source-switcher__label">表示ソース</span>
+      {/* Mobile view */}
+      <label className="flex flex-col gap-1 md:hidden" htmlFor="source-switcher-select">
+        <span className="text-muted-foreground text-sm">表示ソース</span>
         <select
           id="source-switcher-select"
-          className="source-switcher__select"
+          className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
           value={selectedValue}
           onChange={(event) => onSelectSource(event.target.value.length > 0 ? event.target.value : undefined)}
         >

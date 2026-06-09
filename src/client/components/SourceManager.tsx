@@ -1,3 +1,8 @@
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { Separator } from '@/components/ui/separator';
 import { useCallback, useState, type FormEvent } from 'react';
 
 import type { Source } from '../types.js';
@@ -53,14 +58,16 @@ export function SourceManager({
   );
 
   return (
-    <div className="source-manager" style={{ minWidth: 0 }}>
-      <div className="sidebar__header">
-        <h2>購読設定</h2>
-        <p>RSSソースを追加・解除します。</p>
+    <div className="flex flex-col gap-4 min-w-0">
+      <div>
+        <h2 className="font-semibold text-lg">購読設定</h2>
+        <p className="mt-1 text-muted-foreground text-sm">
+          RSSソースを追加・解除します。
+        </p>
       </div>
 
-      <form className="search-form subscription-form" style={{ minWidth: 0 }} onSubmit={handleSubmit}>
-        <input
+      <form className="flex gap-2 min-w-0" onSubmit={handleSubmit}>
+        <Input
           id="subscription-input"
           name="siteUrl"
           type="url"
@@ -69,41 +76,50 @@ export function SourceManager({
           required
           value={siteUrl}
           onChange={(event) => setSiteUrl(event.target.value)}
-          style={{ minWidth: 0, flex: 1 }}
+          className="min-w-0 flex-1"
         />
-        <button type="submit">追加</button>
+        <Button type="submit">追加</Button>
       </form>
 
-      <p className="status">{status}</p>
+      <p className="text-muted-foreground text-sm">{status}</p>
 
-      <nav aria-label="RSS sources">
-        <ul className="sources-list" style={{ minWidth: 0 }}>
-          {sources.length === 0 ? (
-            <li>
-              <p className="empty">購読ソースがまだありません。</p>
-            </li>
-          ) : (
-            sources.map((source) => (
-              <li key={source.id} className="source-row" style={{ minWidth: 0 }}>
-                <div className="source-item source-item--static" title={source.siteUrl} style={{ minWidth: 0, flex: 1 }}>
-                  <span className="source-item__title">{source.displayTitle}</span>
-                  <span className="source-item__count">
-                    ({source.unreadCount}/{source.articleCount})
-                  </span>
-                </div>
-                <button
-                  type="button"
-                  className="source-remove"
-                  title={source.siteUrl}
-                  onClick={() => void handleRemove(source.siteUrl)}
-                >
-                  解除
-                </button>
+      <Separator />
+
+      <ScrollArea className="h-[calc(100vh-280px)]">
+        <nav aria-label="RSS sources">
+          <ul className="flex flex-col gap-2 min-w-0">
+            {sources.length === 0 ? (
+              <li>
+                <p className="text-muted-foreground text-sm">購読ソースがまだありません。</p>
               </li>
-            ))
-          )}
-        </ul>
-      </nav>
+            ) : (
+              sources.map((source) => (
+                <li key={source.id} className="flex items-center gap-2 min-w-0">
+                  <div
+                    className="flex flex-1 items-center gap-2 min-w-0 rounded-lg bg-muted/50 p-3"
+                    title={source.siteUrl}
+                  >
+                    <span className="truncate font-medium text-sm">
+                      {source.displayTitle}
+                    </span>
+                    <Badge variant="secondary" className="ml-auto shrink-0">
+                      {source.unreadCount}/{source.articleCount}
+                    </Badge>
+                  </div>
+                  <Button
+                    variant="destructive"
+                    size="sm"
+                    title={source.siteUrl}
+                    onClick={() => void handleRemove(source.siteUrl)}
+                  >
+                    解除
+                  </Button>
+                </li>
+              ))
+            )}
+          </ul>
+        </nav>
+      </ScrollArea>
     </div>
   );
 }
