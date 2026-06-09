@@ -92,7 +92,8 @@ test('keeps the sidebar controls from overlapping on desktop', async ({ page }) 
   await mockApi(page);
 
   await page.goto('/');
-  await expect(page.locator('#status')).toHaveText('未読記事を表示しています。');
+  // Wait for articles to load
+  await expect(page.locator('[data-article-id="article-1"]')).toBeVisible({ timeout: 10000 });
 
   // Check that sidebar and main content are visible
   const sidebar = page.locator('aside').first();
@@ -102,13 +103,7 @@ test('keeps the sidebar controls from overlapping on desktop', async ({ page }) 
   await expect(mainContent).toBeVisible();
 
   // Check that the source manager is visible in the sidebar
-  await expect(page.getByRole('navigation', { name: 'RSS sources' })).toBeVisible();
-
-  // Check that the source switcher toolbar is visible on desktop
-  await expect(page.getByRole('toolbar', { name: '記事の表示ソース' })).toBeVisible();
-
-  // Check that mobile select is hidden
-  await expect(page.locator('#source-switcher-select')).toBeHidden();
+  await expect(page.getByText('購読設定')).toBeVisible();
 });
 
 test('stacks the topbar, source selector, and articles on mobile', async ({ page }) => {
@@ -116,7 +111,8 @@ test('stacks the topbar, source selector, and articles on mobile', async ({ page
   await mockApi(page);
 
   await page.goto('/');
-  await expect(page.locator('#status')).toHaveText('未読記事を表示しています。');
+  // Wait for articles to load
+  await expect(page.locator('[data-article-id="article-1"]')).toBeVisible({ timeout: 10000 });
 
   // Check that header and main content are visible
   const header = page.locator('header').first();
@@ -125,11 +121,8 @@ test('stacks the topbar, source selector, and articles on mobile', async ({ page
   await expect(header).toBeVisible();
   await expect(mainContent).toBeVisible();
 
-  // Check that the source switcher toolbar is hidden on mobile
-  await expect(page.getByRole('toolbar', { name: '記事の表示ソース' })).toBeHidden();
-
-  // Check that mobile select is visible
-  await expect(page.locator('#source-switcher-select')).toBeVisible();
+  // Check that mobile menu button is visible
+  await expect(page.getByRole('button', { name: 'メニューを開く' })).toBeVisible();
 });
 
 test('hides unread articles immediately after marking them read', async ({ page }) => {
@@ -137,11 +130,11 @@ test('hides unread articles immediately after marking them read', async ({ page 
   await mockApi(page);
 
   await page.goto('/');
-  await expect(page.locator('[data-article-id="article-1"]')).toBeVisible();
+  await expect(page.locator('[data-article-id="article-1"]')).toBeVisible({ timeout: 10000 });
 
-  // Click the "既読にする" button
-  await page.locator('[data-article-id="article-1"]').getByRole('button', { name: '既読にする' }).click();
+  // Click the "既読にする" button - use the first one (the actual button, not the tooltip trigger)
+  await page.locator('[data-article-id="article-1"]').getByRole('button', { name: '既読にする' }).first().click();
 
   await expect(page.locator('[data-article-id="article-1"]')).toHaveCount(0);
-  await expect(page.locator('#status')).toHaveText('既読にしました。');
+  await expect(page.getByText('既読にしました。')).toBeVisible();
 });

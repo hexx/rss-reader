@@ -1,10 +1,31 @@
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
+import { Separator } from '@/components/ui/separator';
+import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet';
+import { Skeleton } from '@/components/ui/skeleton';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { TooltipProvider } from '@/components/ui/tooltip';
+import {
+  AlertCircle,
+  CheckCircle2,
+  Loader2,
+  Menu,
+  RefreshCw,
+  Search,
+  Sparkles,
+} from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 
 import { applyReadStateChange } from './articleState.js';
-import { ARTICLE_PAGE_SIZE, buildArticlesUrl, mergeLoadedArticles, shouldShowLoadMore } from './articlePagination.js';
+import {
+  ARTICLE_PAGE_SIZE,
+  buildArticlesUrl,
+  mergeLoadedArticles,
+  shouldShowLoadMore,
+} from './articlePagination.js';
 import { ArticleCard } from './components/ArticleCard.js';
 import { SourceManager } from './components/SourceManager.js';
 import { SourceSwitcher } from './components/SourceSwitcher.js';
@@ -40,12 +61,53 @@ function matchesSearch(article: Article, query: string): boolean {
     includesQuery(article.content, query) ||
     includesQuery(article.url, query) ||
     includesQuery(article.siteUrl, query) ||
-    article.bookmarks.some((bookmark) => includesQuery(bookmark.user, query) || includesQuery(bookmark.comment, query))
+    article.bookmarks.some(
+      (bookmark) => includesQuery(bookmark.user, query) || includesQuery(bookmark.comment, query),
+    )
   );
 }
 
 function normalizeError(error: unknown, fallback: string): string {
   return error instanceof Error ? error.message : fallback;
+}
+
+function ArticleCardSkeleton() {
+  return (
+    <div className="rounded-lg border p-6 space-y-4">
+      <div className="flex items-start justify-between gap-4">
+        <div className="space-y-2 flex-1">
+          <Skeleton className="h-6 w-3/4" />
+          <div className="flex gap-2">
+            <Skeleton className="h-5 w-20" />
+            <Skeleton className="h-5 w-24" />
+          </div>
+        </div>
+        <Skeleton className="h-9 w-20" />
+      </div>
+      <Skeleton className="h-20 w-full" />
+      <Skeleton className="h-20 w-full" />
+    </div>
+  );
+}
+
+function StatusAlert({ status }: { status: string }) {
+  if (!status) return null;
+
+  const isError = status.includes('失敗') || status.includes('エラー');
+  const isSuccess = status.includes('しました') || status.includes('表示しています');
+
+  return (
+    <Alert variant={isError ? 'destructive' : 'default'} className="mb-4">
+      {isError ? (
+        <AlertCircle className="size-4" />
+      ) : isSuccess ? (
+        <CheckCircle2 className="size-4" />
+      ) : (
+        <Loader2 className="size-4 animate-spin" />
+      )}
+      <AlertDescription>{status}</AlertDescription>
+    </Alert>
+  );
 }
 
 export function App() {
@@ -58,9 +120,11 @@ export function App() {
   const [reloadToken, setReloadToken] = useState(0);
   const [hasMore, setHasMore] = useState(true);
   const [isLoadingArticles, setIsLoadingArticles] = useState(false);
+  const [isLoadingSources, setIsLoadingSources] = useState(true);
   const [isSyncing, setIsSyncing] = useState(false);
-  const [status, setStatus] = useState('読み込み中...');
+  const [status, setStatus] = useState('');
   const [aiAnswer, setAiAnswer] = useState('');
+  const [sheetOpen, setSheetOpen] = useState(false);
   const articleRequestId = useRef(0);
 
   const refreshArticles = useCallback(() => {
@@ -71,13 +135,20 @@ export function App() {
   }, []);
 
   const loadSources = useCallback(async () => {
-    const response = await fetch('/api/sources');
-    if (!response.ok) {
-      throw new Error('購読ソースの読み込みに失敗しました。');
-    }
+    setIsLoadingSources(true);
+    try {
+      const response = await fetch('/api/sources');
+      if (!response.ok) {
+        throw new Error('購読ソースの読み込みに失敗しました。');
+      }
 
-    const payload = (await response.json()) as SourcesResponse;
-    setSources(Array.isArray(payload.sources) ? payload.sources : []);
+      const payload = (await response.json()) as SourcesResponse;
+      setSources(Array.isArray(payload.sources) ? payload.sources : []);
+    } catch (error) {
+      setStatus(normalizeError(error, '購読ソースの読み込みに失敗しました。'));
+    } finally {
+      setIsLoadingSources(false);
+    }
   }, []);
 
   const loadArticles = useCallback(
@@ -293,6 +364,7 @@ export function App() {
     (siteUrl?: string) => {
       setSelectedSourceUrl(siteUrl);
       refreshArticles();
+      setSheetOpen(false);
     },
     [refreshArticles],
   );
@@ -304,49 +376,73 @@ export function App() {
   const showAllSelected = selectedSourceUrl === undefined;
   const showLoadMoreButton = shouldShowLoadMore(hasMore, searchQuery, aiAnswer);
 
+  const totalUnreadCount = sources.reduce((sum, source) => sum + source.unreadCount, 0);
+
   return (
-    <div className="flex min-h-screen">
-      {/* Sidebar */}
-      <aside className="w-72 shrink-0 border-r bg-background/80 p-6 backdrop-blur-md overflow-y-auto">
-        <SourceManager
-          onAddSubscription={handleAddSubscription}
-          onRemoveSubscription={handleRemoveSubscription}
-          sources={sources}
-        />
-      </aside>
+    <TooltipProvider>
+      <div className="flex h-screen flex-col">
+        {/* Header */}
+        <header className="sticky top-0 z-50 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+          <div className="flex h-16 items-center gap-4 px-4 md:px-6">
+            {/* Mobile menu */}
+            <Sheet open={sheetOpen} onOpenChange={setSheetOpen}>
+              <SheetTrigger
+                render={
+                  <Button variant="ghost" size="icon" className="md:hidden" />
+                }
+              >
+                <Menu className="size-5" />
+                <span className="sr-only">メニューを開く</span>
+              </SheetTrigger>
+              <SheetContent side="left" className="w-80 p-0">
+                <SourceManager
+                  onAddSubscription={handleAddSubscription}
+                  onRemoveSubscription={handleRemoveSubscription}
+                  sources={sources}
+                  isLoading={isLoadingSources}
+                  onSelectSource={handleSelectSource}
+                  selectedSourceUrl={selectedSourceUrl}
+                />
+              </SheetContent>
+            </Sheet>
 
-      {/* Main workspace */}
-      <div className="flex flex-1 flex-col min-w-0">
-        {/* Topbar */}
-        <header className="flex items-center justify-between gap-4 border-b bg-background/80 px-8 py-6 backdrop-blur-md">
-          <div>
-            <h1 className="font-bold text-2xl">RSS Reader</h1>
-            <p className="mt-1 text-muted-foreground text-sm">
-              React コンポーネントで記事、要約、はてブコメントを表示します。
-            </p>
-          </div>
+            {/* Logo */}
+            <div className="flex items-center gap-2">
+              <h1 className="text-lg font-bold tracking-tight md:text-xl">RSS Reader</h1>
+              {totalUnreadCount > 0 && (
+                <Badge variant="secondary" className="hidden md:inline-flex">
+                  {totalUnreadCount} 未読
+                </Badge>
+              )}
+            </div>
 
-          <div className="flex flex-col gap-3">
-            <div className="flex flex-col gap-3">
-              <form className="flex gap-2" onSubmit={handleLocalSearch}>
+            {/* Search */}
+            <form className="flex-1 flex items-center gap-2 ml-auto" onSubmit={handleLocalSearch}>
+              <div className="relative flex-1 max-w-md">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
                 <Input
                   id="search-input"
                   name="query"
                   type="search"
-                  placeholder="記事を絞り込み"
+                  placeholder="記事を検索..."
                   autoComplete="off"
                   value={searchQuery}
                   onChange={(event) => setSearchQuery(event.target.value)}
-                  className="flex-1 min-w-0"
+                  className="pl-9"
                 />
-                <Button type="submit" variant="secondary">
-                  Search
-                </Button>
-                <Button type="button" onClick={() => void handleAiSearch()}>
-                  AIで検索
-                </Button>
-              </form>
-              <label className="inline-flex items-center gap-2 w-fit text-sm text-muted-foreground">
+              </div>
+              <Button type="submit" variant="secondary" size="sm">
+                検索
+              </Button>
+              <Button type="button" size="sm" onClick={() => void handleAiSearch()} className="hidden sm:inline-flex">
+                <Sparkles className="size-4 mr-1" />
+                AI検索
+              </Button>
+            </form>
+
+            {/* Actions */}
+            <div className="flex items-center gap-2">
+              <label className="hidden items-center gap-2 md:flex">
                 <Checkbox
                   id="unread-only-toggle"
                   checked={showUnreadOnly}
@@ -355,71 +451,118 @@ export function App() {
                     refreshArticles();
                   }}
                 />
-                未読のみ表示
+                <span className="text-sm text-muted-foreground">未読のみ</span>
               </label>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => void handleSync()}
+                disabled={isSyncing}
+              >
+                {isSyncing ? (
+                  <Loader2 className="size-4 animate-spin" />
+                ) : (
+                  <RefreshCw className="size-4" />
+                )}
+                <span className="hidden sm:inline ml-1">同期</span>
+              </Button>
             </div>
-
-            <Button
-              id="sync-button"
-              variant="outline"
-              onClick={() => void handleSync()}
-              disabled={isSyncing}
-            >
-              {isSyncing ? 'Syncing...' : 'Sync'}
-            </Button>
           </div>
         </header>
 
-        <SourceSwitcher
-          onSelectSource={handleSelectSource}
-          selectedSourceUrl={selectedSourceUrl}
-          sources={sources}
-        />
+        {/* Main content */}
+        <div className="flex flex-1 overflow-hidden">
+          {/* Desktop sidebar */}
+          <aside className="hidden w-80 border-r md:block">
+            <SourceManager
+              onAddSubscription={handleAddSubscription}
+              onRemoveSubscription={handleRemoveSubscription}
+              sources={sources}
+              isLoading={isLoadingSources}
+              onSelectSource={handleSelectSource}
+              selectedSourceUrl={selectedSourceUrl}
+            />
+          </aside>
 
-        <main className="flex-1 p-8">
-          <section className="flex flex-col gap-4">
-            <p id="status" className="text-muted-foreground text-sm">
-              {status}
-            </p>
+          {/* Content area */}
+          <main className="flex-1 overflow-y-auto">
+            <div className="p-4 md:p-6">
+              {/* Status */}
+              {status && <StatusAlert status={status} />}
 
-            {aiAnswer.trim().length > 0 ? (
-              <div className="rounded-lg border border-sky-200 bg-sky-50 p-4 dark:border-sky-800 dark:bg-sky-950/20">
-                <div className="grid gap-3 leading-relaxed overflow-wrap-anywhere">
-                  {aiAnswer}
-                </div>
+              {/* AI Answer */}
+              {aiAnswer.trim().length > 0 && (
+                <Alert className="mb-4 border-primary/50 bg-primary/5">
+                  <Sparkles className="size-4 text-primary" />
+                  <AlertDescription className="prose prose-sm max-w-none dark:prose-invert">
+                    {aiAnswer}
+                  </AlertDescription>
+                </Alert>
+              )}
+
+              {/* Source switcher for mobile */}
+              <div className="mb-4 md:hidden">
+                <SourceSwitcher
+                  onSelectSource={handleSelectSource}
+                  selectedSourceUrl={selectedSourceUrl}
+                  sources={sources}
+                />
               </div>
-            ) : null}
 
-            <div id="articles" className="grid gap-4">
-              {filteredArticles.length === 0 ? (
-                <p className="text-muted-foreground text-sm">
-                  {searchQuery.trim().length > 0
-                    ? '検索条件に一致する記事がありません。'
-                    : showAllSelected
-                      ? '記事がまだありません。'
-                      : '選択したソースの記事がまだありません。'}
-                </p>
-              ) : (
-                filteredArticles.map((article) => (
-                  <ArticleCard key={article.id} article={article} onMarkAsRead={handleMarkAsRead} />
-                ))
+              {/* Articles */}
+              <div className="grid gap-4">
+                {isLoadingArticles && articles.length === 0 ? (
+                  <>
+                    <ArticleCardSkeleton />
+                    <ArticleCardSkeleton />
+                    <ArticleCardSkeleton />
+                  </>
+                ) : filteredArticles.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center py-12 text-center">
+                    <Search className="size-12 text-muted-foreground/50 mb-4" />
+                    <p className="text-lg font-medium text-muted-foreground">
+                      {searchQuery.trim().length > 0
+                        ? '検索条件に一致する記事がありません'
+                        : showAllSelected
+                          ? '記事がまだありません'
+                          : '選択したソースの記事がありません'}
+                    </p>
+                    <p className="text-sm text-muted-foreground/70 mt-1">
+                      {searchQuery.trim().length > 0
+                        ? 'キーワードを変更して再度検索してください'
+                        : 'RSSフィードを追加して記事を取得しましょう'}
+                    </p>
+                  </div>
+                ) : (
+                  filteredArticles.map((article) => (
+                    <ArticleCard key={article.id} article={article} onMarkAsRead={handleMarkAsRead} />
+                  ))
+                )}
+              </div>
+
+              {/* Load more */}
+              {showLoadMoreButton && (
+                <div className="mt-6 flex justify-center">
+                  <Button
+                    variant="outline"
+                    onClick={() => void handleLoadMore()}
+                    disabled={isLoadingArticles}
+                  >
+                    {isLoadingArticles ? (
+                      <>
+                        <Loader2 className="size-4 animate-spin mr-1" />
+                        読み込み中...
+                      </>
+                    ) : (
+                      'さらに読み込む'
+                    )}
+                  </Button>
+                </div>
               )}
             </div>
-
-            {showLoadMoreButton ? (
-              <div className="mt-6 text-center">
-                <Button
-                  variant="outline"
-                  onClick={() => void handleLoadMore()}
-                  disabled={isLoadingArticles}
-                >
-                  {isLoadingArticles ? '読み込み中...' : 'さらに読み込む'}
-                </Button>
-              </div>
-            ) : null}
-          </section>
-        </main>
+          </main>
+        </div>
       </div>
-    </div>
+    </TooltipProvider>
   );
 }
