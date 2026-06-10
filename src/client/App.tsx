@@ -471,9 +471,9 @@ export function App() {
         </header>
 
         {/* Main content */}
-        <div className="flex flex-1 overflow-hidden">
-          {/* Desktop sidebar */}
-          <aside className="hidden w-80 border-r md:block">
+        <div className="flex flex-col md:flex-row flex-1 overflow-hidden">
+          {/* Sidebar - order-2 on mobile, order-1 on desktop */}
+          <aside className="order-2 md:order-1 w-full md:w-80 shrink-0 border-t md:border-t-0 md:border-r bg-background/80 backdrop-blur-md overflow-y-auto">
             <SourceManager
               onAddSubscription={handleAddSubscription}
               onRemoveSubscription={handleRemoveSubscription}
@@ -484,8 +484,8 @@ export function App() {
             />
           </aside>
 
-          {/* Content area */}
-          <main className="flex-1 overflow-y-auto">
+          {/* Content area - order-1 on mobile, order-2 on desktop */}
+          <main className="order-1 md:order-2 flex-1 overflow-y-auto">
             <div className="p-4 md:p-6">
               {/* Status */}
               {status && <StatusAlert status={status} />}
@@ -499,15 +499,6 @@ export function App() {
                   </AlertDescription>
                 </Alert>
               )}
-
-              {/* Source switcher for mobile */}
-              <div className="mb-4 md:hidden">
-                <SourceSwitcher
-                  onSelectSource={handleSelectSource}
-                  selectedSourceUrl={selectedSourceUrl}
-                  sources={sources}
-                />
-              </div>
 
               {/* Articles */}
               <div className="grid gap-4">
