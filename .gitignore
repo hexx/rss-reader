@@ -13,3 +13,7 @@ logs
 playwright-report/
 test-results/
 .DS_Store
+.pi/
+.agents/
+copilot-session*.md
+issues/
