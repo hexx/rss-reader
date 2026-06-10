@@ -89,7 +89,7 @@ export function SourceManager({
   );
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex flex-col h-full min-h-0">
       {/* Header */}
       <div className="p-4 pb-3">
         <div className="flex items-center gap-2 mb-1">
@@ -141,7 +141,7 @@ export function SourceManager({
       <Separator />
 
       {/* Source list */}
-      <ScrollArea className="flex-1">
+      <ScrollArea className="flex-1 min-h-0">
         <div className="p-4 pt-2 space-y-1">
           {isLoading ? (
             <>
