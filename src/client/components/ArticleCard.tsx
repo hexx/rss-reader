@@ -94,7 +94,7 @@ export function ArticleCard({ article, onMarkAsRead }: ArticleCardProps) {
                 <Button
                   variant="ghost"
                   size="icon"
-                  className="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"
+                  className="shrink-0 opacity-100 md:opacity-0 group-hover:opacity-100 transition-opacity size-10 md:size-8 bg-muted/50 md:bg-transparent"
                   onClick={() => void onMarkAsRead(article.id)}
                 >
                   <Check className="size-4" />
