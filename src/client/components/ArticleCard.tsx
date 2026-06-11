@@ -49,7 +49,7 @@ export function ArticleCard({ article, onMarkAsRead }: ArticleCardProps) {
       data-article-id={article.id}
     >
       <CardHeader className="pb-3">
-        <div className="flex items-start justify-between gap-4">
+        <div className="flex items-start justify-between gap-4 min-w-0">
           <div className="flex-1 min-w-0 space-y-2">
             {/* Title */}
             <a
