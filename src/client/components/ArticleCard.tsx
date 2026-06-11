@@ -7,7 +7,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from '@/components/ui/tooltip';
-import { Bookmark, Calendar, Check, ExternalLink, Globe, MessageSquare } from 'lucide-react';
+import { Bookmark, Calendar, Check, ExternalLink, Globe, Link, MessageSquare } from 'lucide-react';
 import type { Article } from '../types.js';
 
 type ArticleCardProps = {
@@ -85,6 +85,17 @@ export function ArticleCard({ article, onMarkAsRead }: ArticleCardProps) {
                 </Badge>
               )}
             </div>
+
+            {/* URL */}
+            <a
+              href={article.url}
+              target="_blank"
+              rel="noreferrer noopener"
+              className="flex items-center gap-1 text-xs text-muted-foreground hover:text-primary transition-colors truncate"
+            >
+              <Link className="size-3 shrink-0" />
+              <span className="truncate">{article.url}</span>
+            </a>
           </div>
 
           {/* Mark as read button */}
