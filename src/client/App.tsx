@@ -426,7 +426,7 @@ export function App() {
             </div>
 
             {/* Right side: Actions */}
-            <div className="flex items-center gap-2 md:order-last shrink-0">
+            <div className="flex flex-wrap items-center gap-2 md:order-last shrink-0">
               <label className="hidden items-center gap-2 md:flex">
                 <Checkbox
                   id="unread-only-toggle"
@@ -478,8 +478,8 @@ export function App() {
             </div>
 
             {/* Search - order-last on mobile */}
-            <form className="flex w-full md:flex-1 items-center gap-2 order-last md:order-none" onSubmit={handleLocalSearch}>
-              <div className="relative flex-1 max-w-md">
+            <form className="flex w-full md:flex-1 items-center gap-2 order-last md:order-none min-w-0" onSubmit={handleLocalSearch}>
+              <div className="relative flex-1 max-w-md min-w-0">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
                 <Input
                   id="search-input"
