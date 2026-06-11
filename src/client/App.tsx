@@ -9,10 +9,8 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Input } from '@/components/ui/input';
-import { Separator } from '@/components/ui/separator';
 import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import {
   AlertCircle,
@@ -35,7 +33,6 @@ import {
 } from './articlePagination.js';
 import { ArticleCard } from './components/ArticleCard.js';
 import { SourceManager } from './components/SourceManager.js';
-import { SourceSwitcher } from './components/SourceSwitcher.js';
 import type { Article, Source } from './types.js';
 
 type ArticlesResponse = {
@@ -389,44 +386,99 @@ export function App() {
 
   return (
     <TooltipProvider>
-      <div className="flex h-screen flex-col">
+      <div className="flex h-screen flex-col w-full overflow-x-hidden">
         {/* Header */}
         <header className="sticky top-0 z-50 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-          <div className="flex h-16 items-center gap-4 px-4 md:px-6">
-            {/* Mobile menu */}
-            <Sheet open={sheetOpen} onOpenChange={setSheetOpen}>
-              <SheetTrigger
-                render={
-                  <Button variant="ghost" size="icon" className="md:hidden" />
-                }
-              >
-                <Menu className="size-5" />
-                <span className="sr-only">メニューを開く</span>
-              </SheetTrigger>
-              <SheetContent side="left" className="w-80 p-0">
-                <SourceManager
-                  onAddSubscription={handleAddSubscription}
-                  onRemoveSubscription={handleRemoveSubscription}
-                  sources={sources}
-                  isLoading={isLoadingSources}
-                  onSelectSource={handleSelectSource}
-                  selectedSourceUrl={selectedSourceUrl}
-                />
-              </SheetContent>
-            </Sheet>
+          <div className="flex flex-wrap md:flex-nowrap items-center justify-between gap-3 md:gap-4 px-4 py-3 md:h-16 md:py-0 md:px-6">
+            {/* Left side: Mobile menu + Logo */}
+            <div className="flex items-center gap-2 md:gap-4">
+              {/* Mobile menu */}
+              <Sheet open={sheetOpen} onOpenChange={setSheetOpen}>
+                <SheetTrigger
+                  render={
+                    <Button variant="ghost" size="icon" className="md:hidden" />
+                  }
+                >
+                  <Menu className="size-5" />
+                  <span className="sr-only">メニューを開く</span>
+                </SheetTrigger>
+                <SheetContent side="left" className="w-80 p-0">
+                  <SourceManager
+                    onAddSubscription={handleAddSubscription}
+                    onRemoveSubscription={handleRemoveSubscription}
+                    sources={sources}
+                    isLoading={isLoadingSources}
+                    onSelectSource={handleSelectSource}
+                    selectedSourceUrl={selectedSourceUrl}
+                  />
+                </SheetContent>
+              </Sheet>
 
-            {/* Logo */}
-            <div className="flex items-center gap-2">
-              <h1 className="text-lg font-bold tracking-tight md:text-xl">RSS Reader</h1>
-              {totalUnreadCount > 0 && (
-                <Badge variant="secondary" className="hidden md:inline-flex">
-                  {totalUnreadCount} 未読
-                </Badge>
-              )}
+              {/* Logo */}
+              <div className="flex items-center gap-2">
+                <h1 className="text-lg font-bold tracking-tight md:text-xl">RSS Reader</h1>
+                {totalUnreadCount > 0 && (
+                  <Badge variant="secondary" className="hidden md:inline-flex">
+                    {totalUnreadCount} 未読
+                  </Badge>
+                )}
+              </div>
             </div>
 
-            {/* Search */}
-            <form className="flex-1 flex items-center gap-2 ml-auto" onSubmit={handleLocalSearch}>
+            {/* Right side: Actions */}
+            <div className="flex items-center gap-2 md:order-last shrink-0">
+              <label className="hidden items-center gap-2 md:flex">
+                <Checkbox
+                  id="unread-only-toggle"
+                  checked={showUnreadOnly}
+                  onCheckedChange={(checked) => {
+                    setShowUnreadOnly(checked === true);
+                    refreshArticles();
+                  }}
+                />
+                <span className="text-sm text-muted-foreground">未読のみ</span>
+              </label>
+              <DropdownMenu>
+                <DropdownMenuTrigger
+                  render={
+                    <Button variant="outline" size="sm" />
+                  }
+                >
+                  <ArrowUpDown className="size-4" />
+                  <span className="hidden sm:inline ml-1">{sortOrder === 'asc' ? '古い順' : '新しい順'}</span>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent>
+                  <DropdownMenuItem onClick={() => {
+                    setSortOrder('asc');
+                    refreshArticles();
+                  }}>
+                    古い順
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => {
+                    setSortOrder('desc');
+                    refreshArticles();
+                  }}>
+                    新しい順
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => void handleSync()}
+                disabled={isSyncing}
+              >
+                {isSyncing ? (
+                  <Loader2 className="size-4 animate-spin" />
+                ) : (
+                  <RefreshCw className="size-4" />
+                )}
+                <span className="hidden sm:inline ml-1">同期</span>
+              </Button>
+            </div>
+
+            {/* Search - order-last on mobile */}
+            <form className="flex w-full md:flex-1 items-center gap-2 order-last md:order-none" onSubmit={handleLocalSearch}>
               <div className="relative flex-1 max-w-md">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
                 <Input
@@ -463,11 +515,13 @@ export function App() {
                 <span className="text-sm text-muted-foreground">未読のみ</span>
               </label>
               <DropdownMenu>
-                <DropdownMenuTrigger>
-                  <Button variant="outline" size="sm">
-                    <ArrowUpDown className="size-4" />
-                    <span className="hidden sm:inline ml-1">{sortOrder === 'asc' ? '古い順' : '新しい順'}</span>
-                  </Button>
+                <DropdownMenuTrigger
+                  render={
+                    <Button variant="outline" size="sm" />
+                  }
+                >
+                  <ArrowUpDown className="size-4" />
+                  <span className="hidden sm:inline ml-1">{sortOrder === 'asc' ? '古い順' : '新しい順'}</span>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent>
                   <DropdownMenuItem onClick={() => {
