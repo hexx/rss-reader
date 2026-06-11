@@ -91,7 +91,7 @@ export function ArticleCard({ article, onMarkAsRead }: ArticleCardProps) {
               href={article.url}
               target="_blank"
               rel="noreferrer noopener"
-              className="flex items-center gap-1 text-xs text-muted-foreground hover:text-primary transition-colors truncate"
+              className="flex items-center gap-1 text-xs text-muted-foreground hover:text-primary transition-colors min-w-0"
             >
               <Link className="size-3 shrink-0" />
               <span className="truncate">{article.url}</span>

@@ -389,68 +389,47 @@ export function App() {
 
   return (
     <TooltipProvider>
-      <div className="flex h-screen flex-col">
+      <div className="flex h-screen flex-col w-full overflow-x-hidden">
         {/* Header */}
         <header className="sticky top-0 z-50 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-          <div className="flex h-16 items-center gap-4 px-4 md:px-6">
-            {/* Mobile menu */}
-            <Sheet open={sheetOpen} onOpenChange={setSheetOpen}>
-              <SheetTrigger
-                render={
-                  <Button variant="ghost" size="icon" className="md:hidden" />
-                }
-              >
-                <Menu className="size-5" />
-                <span className="sr-only">メニューを開く</span>
-              </SheetTrigger>
-              <SheetContent side="left" className="w-80 p-0">
-                <SourceManager
-                  onAddSubscription={handleAddSubscription}
-                  onRemoveSubscription={handleRemoveSubscription}
-                  sources={sources}
-                  isLoading={isLoadingSources}
-                  onSelectSource={handleSelectSource}
-                  selectedSourceUrl={selectedSourceUrl}
-                />
-              </SheetContent>
-            </Sheet>
+          <div className="flex flex-wrap md:flex-nowrap items-center justify-between gap-3 md:gap-4 px-4 py-3 md:h-16 md:py-0 md:px-6">
+            {/* Left side: Mobile menu + Logo */}
+            <div className="flex items-center gap-2 md:gap-4">
+              {/* Mobile menu */}
+              <Sheet open={sheetOpen} onOpenChange={setSheetOpen}>
+                <SheetTrigger
+                  render={
+                    <Button variant="ghost" size="icon" className="md:hidden" />
+                  }
+                >
+                  <Menu className="size-5" />
+                  <span className="sr-only">メニューを開く</span>
+                </SheetTrigger>
+                <SheetContent side="left" className="w-80 p-0">
+                  <SourceManager
+                    onAddSubscription={handleAddSubscription}
+                    onRemoveSubscription={handleRemoveSubscription}
+                    sources={sources}
+                    isLoading={isLoadingSources}
+                    onSelectSource={handleSelectSource}
+                    selectedSourceUrl={selectedSourceUrl}
+                  />
+                </SheetContent>
+              </Sheet>
 
-            {/* Logo */}
-            <div className="flex items-center gap-2">
-              <h1 className="text-lg font-bold tracking-tight md:text-xl">RSS Reader</h1>
-              {totalUnreadCount > 0 && (
-                <Badge variant="secondary" className="hidden md:inline-flex">
-                  {totalUnreadCount} 未読
-                </Badge>
-              )}
+              {/* Logo */}
+              <div className="flex items-center gap-2">
+                <h1 className="text-lg font-bold tracking-tight md:text-xl">RSS Reader</h1>
+                {totalUnreadCount > 0 && (
+                  <Badge variant="secondary" className="hidden md:inline-flex">
+                    {totalUnreadCount} 未読
+                  </Badge>
+                )}
+              </div>
             </div>
 
-            {/* Search */}
-            <form className="flex-1 flex items-center gap-2 ml-auto" onSubmit={handleLocalSearch}>
-              <div className="relative flex-1 max-w-md">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
-                <Input
-                  id="search-input"
-                  name="query"
-                  type="search"
-                  placeholder="記事を検索..."
-                  autoComplete="off"
-                  value={searchQuery}
-                  onChange={(event) => setSearchQuery(event.target.value)}
-                  className="pl-9"
-                />
-              </div>
-              <Button type="submit" variant="secondary" size="sm">
-                検索
-              </Button>
-              <Button type="button" size="sm" onClick={() => void handleAiSearch()} className="hidden sm:inline-flex">
-                <Sparkles className="size-4 mr-1" />
-                AI検索
-              </Button>
-            </form>
-
-            {/* Actions */}
-            <div className="flex items-center gap-2">
+            {/* Right side: Actions */}
+            <div className="flex items-center gap-2 md:order-last shrink-0">
               <label className="hidden items-center gap-2 md:flex">
                 <Checkbox
                   id="unread-only-toggle"
@@ -498,6 +477,30 @@ export function App() {
                 <span className="hidden sm:inline ml-1">同期</span>
               </Button>
             </div>
+
+            {/* Search - order-last on mobile */}
+            <form className="flex w-full md:flex-1 items-center gap-2 order-last md:order-none" onSubmit={handleLocalSearch}>
+              <div className="relative flex-1 max-w-md">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
+                <Input
+                  id="search-input"
+                  name="query"
+                  type="search"
+                  placeholder="記事を検索..."
+                  autoComplete="off"
+                  value={searchQuery}
+                  onChange={(event) => setSearchQuery(event.target.value)}
+                  className="pl-9"
+                />
+              </div>
+              <Button type="submit" variant="secondary" size="sm">
+                検索
+              </Button>
+              <Button type="button" size="sm" onClick={() => void handleAiSearch()} className="hidden sm:inline-flex">
+                <Sparkles className="size-4 mr-1" />
+                AI検索
+              </Button>
+            </form>
           </div>
         </header>
 
