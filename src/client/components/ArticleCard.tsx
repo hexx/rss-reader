@@ -156,17 +156,12 @@ export function ArticleCard({ article, onMarkAsRead }: ArticleCardProps) {
                 コメント ({article.bookmarks.length})
               </h3>
               <ul className="space-y-1.5 text-sm">
-                {article.bookmarks.slice(0, 3).map((bookmark) => (
+                {article.bookmarks.map((bookmark) => (
                   <li key={bookmark.id} className="flex gap-2">
                     <span className="font-medium text-primary shrink-0">{bookmark.user}</span>
                     <span className="text-muted-foreground">{bookmark.comment}</span>
                   </li>
                 ))}
-                {article.bookmarks.length > 3 && (
-                  <li className="text-xs text-muted-foreground">
-                    他 {article.bookmarks.length - 3} 件のコメント...
-                  </li>
-                )}
               </ul>
             </div>
           </>
