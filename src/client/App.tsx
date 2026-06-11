@@ -442,11 +442,13 @@ export function App() {
                 <span className="text-sm text-muted-foreground">未読のみ</span>
               </label>
               <DropdownMenu>
-                <DropdownMenuTrigger>
-                  <Button variant="outline" size="sm">
-                    <ArrowUpDown className="size-4" />
-                    <span className="hidden sm:inline ml-1">{sortOrder === 'asc' ? '古い順' : '新しい順'}</span>
-                  </Button>
+                <DropdownMenuTrigger
+                  render={
+                    <Button variant="outline" size="sm" />
+                  }
+                >
+                  <ArrowUpDown className="size-4" />
+                  <span className="hidden sm:inline ml-1">{sortOrder === 'asc' ? '古い順' : '新しい順'}</span>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent>
                   <DropdownMenuItem onClick={() => {
