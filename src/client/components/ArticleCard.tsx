@@ -120,14 +120,14 @@ export function ArticleCard({ article, onMarkAsRead }: ArticleCardProps) {
 
       <CardContent className="space-y-4">
         {/* Summary sections */}
-        <div className="grid gap-3 sm:grid-cols-2">
+        <div className="grid gap-3 sm:grid-cols-2 min-w-0">
           {hasSummary && (
             <div className="rounded-lg bg-muted/50 p-3 space-y-2">
               <h3 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
                 記事の要約
               </h3>
               <div
-                className="text-sm leading-relaxed overflow-wrap-anywhere"
+                className="text-sm leading-relaxed overflow-wrap-anywhere overflow-x-auto min-w-0 w-full"
                 dangerouslySetInnerHTML={{ __html: article.summary }}
               />
             </div>
@@ -139,7 +139,7 @@ export function ArticleCard({ article, onMarkAsRead }: ArticleCardProps) {
                 はてブの反応
               </h3>
               <div
-                className="text-sm leading-relaxed overflow-wrap-anywhere"
+                className="text-sm leading-relaxed overflow-wrap-anywhere overflow-x-auto min-w-0 w-full"
                 dangerouslySetInnerHTML={{ __html: article.hatenaSummary }}
               />
             </div>
