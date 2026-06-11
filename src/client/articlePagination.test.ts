@@ -39,7 +39,7 @@ describe('articlePagination', () => {
         unreadOnly: true,
         sourceUrl: 'https://example.com/feed.xml',
       }),
-    ).toBe(`/api/articles?unread_only=true&limit=${ARTICLE_PAGE_SIZE}&offset=0&source=https%3A%2F%2Fexample.com%2Ffeed.xml`);
+    ).toBe(`/api/articles?unread_only=true&limit=${ARTICLE_PAGE_SIZE}&offset=0&sort=asc&source=https%3A%2F%2Fexample.com%2Ffeed.xml`);
   });
 
   it('appends later pages and replaces the first page', () => {
