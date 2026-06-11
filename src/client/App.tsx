@@ -470,10 +470,16 @@ export function App() {
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent>
-                  <DropdownMenuItem onClick={() => setSortOrder('asc')}>
+                  <DropdownMenuItem onClick={() => {
+                    setSortOrder('asc');
+                    refreshArticles();
+                  }}>
                     古い順
                   </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => setSortOrder('desc')}>
+                  <DropdownMenuItem onClick={() => {
+                    setSortOrder('desc');
+                    refreshArticles();
+                  }}>
                     新しい順
                   </DropdownMenuItem>
                 </DropdownMenuContent>
