@@ -215,6 +215,7 @@ async function fetchArticles(
   unreadOnly = true,
   limit = articlePageSize,
   offset = 0,
+  sortDirection: 'asc' | 'desc' = 'asc',
 ): Promise<ArticleRow[]> {
   const query = database
     .select({
@@ -242,8 +243,12 @@ async function fetchArticles(
 
   const filteredQuery = filters.length > 0 ? query.where(and(...filters)) : query;
 
+  const orderDirection = sortDirection === 'asc'
+    ? asc(sql`coalesce(${articles.publishedAt}, ${articles.createdAt})`)
+    : desc(sql`coalesce(${articles.publishedAt}, ${articles.createdAt})`);
+
   return await filteredQuery
-    .orderBy(asc(sql`coalesce(${articles.publishedAt}, ${articles.createdAt})`))
+    .orderBy(orderDirection)
     .limit(limit)
     .offset(offset);
 }
@@ -284,9 +289,11 @@ app.get('/api/articles', async (c) => {
   const unreadOnly = c.req.query('unread_only') === undefined ? true : c.req.query('unread_only') === 'true';
   const limit = parsePaginationParam(c.req.query('limit'), articlePageSize, 1);
   const offset = parsePaginationParam(c.req.query('offset'), 0, 0);
+  const sortParam = c.req.query('sort');
+  const sortDirection = sortParam === 'desc' ? 'desc' : 'asc';
   const database = getDb(c.env);
 
-  const articleRows = await fetchArticles(database, sourceUrl, unreadOnly, limit, offset);
+  const articleRows = await fetchArticles(database, sourceUrl, unreadOnly, limit, offset, sortDirection);
   const bookmarkRows = await fetchBookmarksByArticleIds(database, articleRows.map((article) => article.id));
 
   const bookmarksByArticleId = new Map<string, BookmarkRow[]>();

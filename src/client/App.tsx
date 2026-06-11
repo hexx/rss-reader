@@ -2,6 +2,12 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { Input } from '@/components/ui/input';
 import { Separator } from '@/components/ui/separator';
 import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet';
@@ -10,6 +16,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import {
   AlertCircle,
+  ArrowUpDown,
   CheckCircle2,
   Loader2,
   Menu,
@@ -125,6 +132,7 @@ export function App() {
   const [status, setStatus] = useState('');
   const [aiAnswer, setAiAnswer] = useState('');
   const [sheetOpen, setSheetOpen] = useState(false);
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
   const articleRequestId = useRef(0);
 
   const refreshArticles = useCallback(() => {
@@ -152,7 +160,7 @@ export function App() {
   }, []);
 
   const loadArticles = useCallback(
-    async (unreadOnly: boolean, sourceUrl?: string, nextOffset = 0) => {
+    async (unreadOnly: boolean, sourceUrl?: string, nextOffset = 0, sort: 'asc' | 'desc' = 'asc') => {
       const requestId = articleRequestId.current + 1;
       articleRequestId.current = requestId;
       setIsLoadingArticles(true);
@@ -172,6 +180,7 @@ export function App() {
             sourceUrl,
             limit: ARTICLE_PAGE_SIZE,
             offset: nextOffset,
+            sort,
           }),
         );
         if (!response.ok) {
@@ -217,10 +226,10 @@ export function App() {
   }, [loadSources]);
 
   useEffect(() => {
-    void loadArticles(showUnreadOnly, selectedSourceUrl, offset).catch((error: unknown) => {
+    void loadArticles(showUnreadOnly, selectedSourceUrl, offset, sortOrder).catch((error: unknown) => {
       setStatus(normalizeError(error, '記事の読み込みに失敗しました。'));
     });
-  }, [loadArticles, offset, reloadToken, selectedSourceUrl, showUnreadOnly]);
+  }, [loadArticles, offset, reloadToken, selectedSourceUrl, showUnreadOnly, sortOrder]);
 
   const filteredArticles = useMemo(() => {
     const normalizedQuery = searchQuery.trim().toLowerCase();
@@ -453,6 +462,22 @@ export function App() {
                 />
                 <span className="text-sm text-muted-foreground">未読のみ</span>
               </label>
+              <DropdownMenu>
+                <DropdownMenuTrigger>
+                  <Button variant="outline" size="sm">
+                    <ArrowUpDown className="size-4" />
+                    <span className="hidden sm:inline ml-1">{sortOrder === 'asc' ? '古い順' : '新しい順'}</span>
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent>
+                  <DropdownMenuItem onClick={() => setSortOrder('asc')}>
+                    古い順
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => setSortOrder('desc')}>
+                    新しい順
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
               <Button
                 variant="outline"
                 size="sm"
