@@ -503,6 +503,58 @@ export function App() {
                 AI検索
               </Button>
             </form>
+
+            {/* Actions */}
+            <div className="flex items-center gap-2">
+              <label className="hidden items-center gap-2 md:flex">
+                <Checkbox
+                  id="unread-only-toggle"
+                  checked={showUnreadOnly}
+                  onCheckedChange={(checked) => {
+                    setShowUnreadOnly(checked === true);
+                    refreshArticles();
+                  }}
+                />
+                <span className="text-sm text-muted-foreground">未読のみ</span>
+              </label>
+              <DropdownMenu>
+                <DropdownMenuTrigger
+                  render={
+                    <Button variant="outline" size="sm" />
+                  }
+                >
+                  <ArrowUpDown className="size-4" />
+                  <span className="hidden sm:inline ml-1">{sortOrder === 'asc' ? '古い順' : '新しい順'}</span>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent>
+                  <DropdownMenuItem onClick={() => {
+                    setSortOrder('asc');
+                    refreshArticles();
+                  }}>
+                    古い順
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => {
+                    setSortOrder('desc');
+                    refreshArticles();
+                  }}>
+                    新しい順
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => void handleSync()}
+                disabled={isSyncing}
+              >
+                {isSyncing ? (
+                  <Loader2 className="size-4 animate-spin" />
+                ) : (
+                  <RefreshCw className="size-4" />
+                )}
+                <span className="hidden sm:inline ml-1">同期</span>
+              </Button>
+            </div>
           </div>
         </header>
 
