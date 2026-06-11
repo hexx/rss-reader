@@ -386,7 +386,7 @@ export function App() {
 
   return (
     <TooltipProvider>
-      <div className="flex h-screen flex-col w-full overflow-x-hidden">
+      <div className="flex h-[100dvh] flex-col w-full overflow-x-hidden">
         {/* Header */}
         <header className="sticky top-0 z-50 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
           <div className="flex flex-wrap md:flex-nowrap items-center justify-between gap-3 md:gap-4 px-4 py-3 md:h-16 md:py-0 md:px-6">
