@@ -47,6 +47,7 @@ export function SourceManager({
   const [isAdding, setIsAdding] = useState(false);
   const [removingId, setRemovingId] = useState<string | null>(null);
   const [error, setError] = useState('');
+  const errorId = 'subscription-error';
 
   const handleSubmit = useCallback(
     async (event: FormEvent<HTMLFormElement>) => {
@@ -122,6 +123,8 @@ export function SourceManager({
               }}
               className="pl-9"
               disabled={isAdding}
+              aria-invalid={error ? 'true' : 'false'}
+              aria-describedby={error ? errorId : undefined}
             />
           </div>
           <Button type="submit" size="icon" disabled={isAdding}>
@@ -134,7 +137,9 @@ export function SourceManager({
           </Button>
         </div>
         {error && (
-          <p className="mt-2 text-xs text-destructive">{error}</p>
+          <p id={errorId} role="alert" className="mt-2 text-xs text-destructive">
+            {error}
+          </p>
         )}
       </form>
 

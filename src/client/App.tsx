@@ -101,7 +101,13 @@ function StatusAlert({ status }: { status: string }) {
   const isSuccess = status.includes('しました') || status.includes('表示しています');
 
   return (
-    <Alert variant={isError ? 'destructive' : 'default'} className="mb-4">
+    <Alert
+      variant={isError ? 'destructive' : 'default'}
+      className="mb-4"
+      role={isError ? 'alert' : 'status'}
+      aria-live={isError ? 'assertive' : 'polite'}
+      aria-atomic="true"
+    >
       {isError ? (
         <AlertCircle className="size-4" />
       ) : isSuccess ? (
@@ -518,7 +524,7 @@ export function App() {
           </aside>
 
           {/* Content area */}
-          <main className="flex-1 min-h-0 overflow-y-auto">
+          <main id="content" tabIndex={-1} className="flex-1 min-h-0 overflow-y-auto">
             <div className="p-4 md:p-6">
               {/* Status */}
               {status && <StatusAlert status={status} />}

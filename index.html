@@ -4,19 +4,36 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>RSS Reader Dashboard</title>
+    <meta name="description" content="AIとローカル絞り込みで記事を効率的に管理するRSSリーダー" />
     <meta name="theme-color" content="#4f46e5" />
     <meta name="application-name" content="理想のRSSリーダー" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="理想のRSSリーダー" />
     <meta name="mobile-web-app-capable" content="yes" />
+
+    <!-- OGP / Open Graph -->
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="RSS Reader Dashboard" />
+    <meta property="og:description" content="AIとローカル絞り込みで記事を効率的に管理するRSSリーダー" />
+    <meta property="og:site_name" content="RSS Reader" />
+    <meta property="og:locale" content="ja_JP" />
+
+    <!-- Twitter Card -->
+    <meta name="twitter:card" content="summary" />
+    <meta name="twitter:title" content="RSS Reader Dashboard" />
+    <meta name="twitter:description" content="AIとローカル絞り込みで記事を効率的に管理するRSSリーダー" />
+
+    <!-- LCP Font Preload -->
+    <link rel="preload" as="font" type="font/woff2" href="/src/client/index.css" crossorigin />
+
     <link rel="manifest" href="/manifest.json" />
     <link rel="icon" type="image/png" href="/icon-192.png" sizes="192x192" />
     <link rel="icon" type="image/x-icon" href="/favicon.ico" />
     <link rel="apple-touch-icon" href="/icon-192.png" />
-
   </head>
   <body>
+    <a href="#content" class="skip-link">メインコンテンツへスキップ</a>
     <div id="root"></div>
     <script type="module" src="/src/client/main.tsx"></script>
   </body>

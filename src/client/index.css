@@ -128,3 +128,33 @@
     @apply font-sans;
     }
 }
+
+/* Skip link styles - hidden by default, visible on focus */
+.skip-link {
+  position: absolute !important;
+  clip-path: inset(50%) !important;
+  overflow: hidden !important;
+  width: 1px !important;
+  height: 1px !important;
+  margin: -1px !important;
+  padding: 0 !important;
+  border: 0 !important;
+  white-space: nowrap !important;
+  z-index: 9999;
+}
+
+.skip-link:where(:focus-within, :focus, :active) {
+  position: fixed !important;
+  top: 1rem !important;
+  left: 1rem !important;
+  width: auto !important;
+  height: auto !important;
+  clip-path: none !important;
+  padding: 0.75rem 1.5rem !important;
+  background: var(--color-primary);
+  color: var(--color-primary-foreground);
+  border-radius: 0.5rem;
+  font-weight: 600;
+  text-decoration: none;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
