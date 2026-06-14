@@ -210,7 +210,7 @@ export function SourceManager({
                         <Button
                           variant="ghost"
                           size="icon"
-                          className="size-7 opacity-0 group-hover:opacity-100 transition-opacity"
+                          className="size-7 opacity-100 md:opacity-0 group-hover:opacity-100 transition-opacity"
                           onClick={(e) => {
                             e.stopPropagation();
                             void handleRemove(source.siteUrl);
