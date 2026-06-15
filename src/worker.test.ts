@@ -2,21 +2,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { createTestDatabase } from './test-utils/sqljs-db.js';
 
-vi.mock('./services/search.js', () => ({
-  searchArticles: vi.fn(),
-}));
-
 vi.mock('./workflows/sync.js', () => ({
   syncAllSubscriptions: vi.fn(),
 }));
-
-vi.mock('./services/ai.js', async () => {
-  const actual = await vi.importActual<typeof import('./services/ai.js')>('./services/ai.js');
-  return {
-    ...actual,
-    generateRagAnswer: vi.fn(),
-  };
-});
 
 let testDb: Awaited<ReturnType<typeof createTestDatabase>>['db'];
 
