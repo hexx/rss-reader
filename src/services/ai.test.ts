@@ -1,35 +1,19 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('ai', () => ({
-  embed: vi.fn(),
-  embedMany: vi.fn(),
   generateText: vi.fn(),
-}));
-
-vi.mock('@ai-sdk/openai', () => ({
-  createOpenAI: vi.fn(),
 }));
 
 vi.mock('@ai-sdk/openai-compatible', () => ({
   createOpenAICompatible: vi.fn(),
 }));
 
-import { embedMany, generateText } from 'ai';
-import { createOpenAI } from '@ai-sdk/openai';
+import { generateText } from 'ai';
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
 
-import {
-  generateArticleSummary,
-  generateEmbedding,
-  generateEmbeddings,
-  generateHatenaSummary,
-  generateRagAnswer,
-  getOpenCodeGoChatModel,
-} from './ai.js';
+import { generateArticleSummary, generateHatenaSummary, getOpenCodeGoChatModel } from './ai.js';
 
 const generateTextMock = vi.mocked(generateText);
-const embedManyMock = vi.mocked(embedMany);
-const createOpenAIMock = vi.mocked(createOpenAI);
 const createOpenAICompatibleMock = vi.mocked(createOpenAICompatible);
 
 describe('generateArticleSummary', () => {
@@ -37,14 +21,8 @@ describe('generateArticleSummary', () => {
     vi.stubEnv('OPENCODE_GO_BASE_URL', 'https://opencode.example/v1');
     vi.stubEnv('OPENCODE_GO_API_KEY', 'test-api-key');
     vi.stubEnv('OPENCODE_GO_MODEL', 'test-model');
-    vi.stubEnv('OPENAI_API_KEY', 'test-openai-api-key');
     generateTextMock.mockReset();
-    embedManyMock.mockReset();
-    createOpenAIMock.mockReset();
     createOpenAICompatibleMock.mockReset();
-    createOpenAIMock.mockReturnValue({
-      embedding: vi.fn().mockReturnValue('embedding-model'),
-    } as never);
     createOpenAICompatibleMock.mockReturnValue({
       chatModel: vi.fn().mockReturnValue('chat-model'),
     } as never);
@@ -109,7 +87,6 @@ describe('generateArticleSummary', () => {
     await expect(
       generateArticleSummary('記事タイトル', '本文', {
         OPENCODE_GO_API_KEY: 'test-api-key',
-        OPENAI_API_KEY: 'test-openai-api-key',
       } as never),
     ).rejects.toThrow('Missing required environment variable: OPENCODE_GO_BASE_URL');
   });
@@ -118,7 +95,6 @@ describe('generateArticleSummary', () => {
     await expect(
       generateArticleSummary('記事タイトル', '本文', {
         OPENCODE_GO_BASE_URL: 'https://opencode.example/v1',
-        OPENAI_API_KEY: 'test-openai-api-key',
       } as never),
     ).rejects.toThrow('Missing required environment variable: OPENCODE_GO_API_KEY');
   });
@@ -144,94 +120,5 @@ describe('generateArticleSummary', () => {
   it('returns an empty Hatena summary when there are no comments', async () => {
     await expect(generateHatenaSummary([])).resolves.toBe('');
     expect(generateTextMock).not.toHaveBeenCalled();
-  });
-
-  it('returns an OpenAI embedding vector', async () => {
-    const { embed } = await import('ai');
-    const embedMock = vi.mocked(embed);
-    embedMock.mockResolvedValue({ embedding: [0.1, 0.2, 0.3] } as never);
-    const embeddingModelMock = vi.fn().mockReturnValue('embedding-model');
-    createOpenAIMock.mockReturnValue({
-      embedding: embeddingModelMock,
-    } as never);
-
-    await expect(generateEmbedding('embedding target')).resolves.toEqual([0.1, 0.2, 0.3]);
-
-    expect(createOpenAIMock).toHaveBeenCalledWith({
-      apiKey: 'test-openai-api-key',
-    });
-    expect(embeddingModelMock).toHaveBeenCalledWith('text-embedding-3-small');
-    expect(embedMock).toHaveBeenCalledWith({
-      model: 'embedding-model',
-      value: 'embedding target',
-    });
-  });
-
-  it('rejects when the OpenAI API key is missing', async () => {
-    await expect(
-      generateEmbedding('embedding target', {
-        OPENCODE_GO_BASE_URL: 'https://opencode.example/v1',
-        OPENCODE_GO_API_KEY: 'test-api-key',
-        OPENCODE_GO_MODEL: 'test-model',
-      } as never),
-    ).rejects.toThrow('Missing required environment variable: OPENAI_API_KEY');
-  });
-
-  it('returns many OpenAI embedding vectors', async () => {
-    embedManyMock.mockResolvedValue({ embeddings: [[0.1, 0.2], [0.3, 0.4]] } as never);
-    const embeddingModelMock = vi.fn().mockReturnValue('embedding-model');
-    createOpenAIMock.mockReturnValue({
-      embedding: embeddingModelMock,
-    } as never);
-
-    await expect(generateEmbeddings(['first', 'second'])).resolves.toEqual([
-      [0.1, 0.2],
-      [0.3, 0.4],
-    ]);
-
-    expect(createOpenAIMock).toHaveBeenCalledWith({
-      apiKey: 'test-openai-api-key',
-    });
-    expect(embeddingModelMock).toHaveBeenCalledWith('text-embedding-3-small');
-    expect(embedManyMock).toHaveBeenCalledWith({
-      model: 'embedding-model',
-      values: ['first', 'second'],
-    });
-  });
-
-  it('generates a RAG answer from contexts', async () => {
-    generateTextMock.mockResolvedValue({ text: 'RAGの回答' } as never);
-
-    await expect(
-      generateRagAnswer(
-        '質問ですか？',
-        ['コンテキスト1', 'コンテキスト2'],
-        [
-          {
-            bookmarks: [],
-            createdAt: '1970-01-01T00:00:00.000Z',
-            id: 'article-1',
-            hatenaSummary: 'はてブ要約',
-            isRead: false,
-            siteUrl: 'https://example.com/',
-            summary: '記事の要約',
-            title: '検索対象の記事',
-            url: 'https://example.com/articles/1',
-          },
-        ],
-      ),
-    ).resolves.toBe('RAGの回答');
-
-    const callArgs = generateTextMock.mock.calls[0]?.[0];
-    expect(callArgs).toBeDefined();
-    expect(callArgs?.system).toContain('提供されたコンテキストのみを使って回答してください');
-    expect(callArgs?.system).toContain('情報が足りない場合は、推測せずにわからないと答えてください');
-    expect(callArgs?.system).toContain('必ず [1], [2] のような形式で参照番号を付けてください');
-    expect(callArgs?.system).toContain('Markdown 形式のリストで作成してください');
-    expect(callArgs?.prompt).toContain('質問: 質問ですか？');
-    expect(callArgs?.prompt).toContain('コンテキスト1');
-    expect(callArgs?.prompt).toContain('コンテキスト2');
-    expect(callArgs?.prompt).toContain('参照一覧:');
-    expect(callArgs?.prompt).toContain('[1] 検索対象の記事');
   });
 });

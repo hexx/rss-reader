@@ -20,7 +20,6 @@ import {
   Menu,
   RefreshCw,
   Search,
-  Sparkles,
 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 
@@ -37,12 +36,6 @@ import type { Article, Source } from './types.js';
 
 type ArticlesResponse = {
   articles?: Article[];
-};
-
-type SearchResponse = {
-  aiAnswer?: string;
-  error?: string;
-  results?: Article[];
 };
 
 type SourcesResponse = {
@@ -133,7 +126,6 @@ export function App() {
   const [isLoadingSources, setIsLoadingSources] = useState(true);
   const [isSyncing, setIsSyncing] = useState(false);
   const [status, setStatus] = useState('');
-  const [aiAnswer, setAiAnswer] = useState('');
   const [sheetOpen, setSheetOpen] = useState(false);
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
   const articleRequestId = useRef(0);
@@ -141,7 +133,6 @@ export function App() {
   const refreshArticles = useCallback(() => {
     setOffset(0);
     setHasMore(true);
-    setAiAnswer('');
     setReloadToken((currentToken) => currentToken + 1);
   }, []);
 
@@ -167,7 +158,6 @@ export function App() {
       const requestId = articleRequestId.current + 1;
       articleRequestId.current = requestId;
       setIsLoadingArticles(true);
-      setAiAnswer('');
       setStatus(
         nextOffset > 0
           ? 'さらに記事を読み込み中...'
@@ -242,7 +232,6 @@ export function App() {
   const handleLocalSearch = useCallback(
     async (event: FormEvent<HTMLFormElement>) => {
       event.preventDefault();
-      setAiAnswer('');
 
       if (searchQuery.trim().length === 0) {
         refreshArticles();
@@ -253,32 +242,6 @@ export function App() {
     },
     [refreshArticles, searchQuery],
   );
-
-  const handleAiSearch = useCallback(async () => {
-    const query = searchQuery.trim();
-    if (query.length === 0) {
-      refreshArticles();
-      return;
-    }
-
-    setStatus('AI検索中...');
-
-    try {
-      const response = await fetch(`/api/search?q=${encodeURIComponent(query)}`);
-      const payload = (await response.json().catch(() => ({}))) as SearchResponse;
-      if (!response.ok) {
-        throw new Error(payload.error || '検索に失敗しました。');
-      }
-
-      const nextArticles = Array.isArray(payload.results) ? payload.results : [];
-      setArticles(nextArticles);
-      setAiAnswer(typeof payload.aiAnswer === 'string' ? payload.aiAnswer : '');
-      setStatus(nextArticles.length === 0 ? '検索結果がありません。' : 'AI検索結果を表示しています。');
-    } catch (error) {
-      setAiAnswer('');
-      setStatus(normalizeError(error, '検索に失敗しました。'));
-    }
-  }, [refreshArticles, searchQuery]);
 
   const handleMarkAsRead = useCallback(
     async (articleId: string) => {
@@ -386,7 +349,7 @@ export function App() {
   }, []);
 
   const showAllSelected = selectedSourceUrl === undefined;
-  const showLoadMoreButton = shouldShowLoadMore(hasMore, searchQuery, aiAnswer);
+  const showLoadMoreButton = shouldShowLoadMore(hasMore, searchQuery);
 
   const totalUnreadCount = sources.reduce((sum, source) => sum + source.unreadCount, 0);
 
@@ -501,10 +464,6 @@ export function App() {
               <Button type="submit" variant="secondary" size="sm">
                 検索
               </Button>
-              <Button type="button" size="sm" onClick={() => void handleAiSearch()} className="hidden sm:inline-flex">
-                <Sparkles className="size-4 mr-1" />
-                AI検索
-              </Button>
             </form>
           </div>
         </header>
@@ -528,16 +487,6 @@ export function App() {
             <div className="p-4 md:p-6">
               {/* Status */}
               {status && <StatusAlert status={status} />}
-
-              {/* AI Answer */}
-              {aiAnswer.trim().length > 0 && (
-                <Alert className="mb-4 border-primary/50 bg-primary/5">
-                  <Sparkles className="size-4 text-primary" />
-                  <AlertDescription className="prose prose-sm max-w-none dark:prose-invert">
-                    {aiAnswer}
-                  </AlertDescription>
-                </Alert>
-              )}
 
               {/* Articles */}
               <div className="grid gap-4">

@@ -29,12 +29,8 @@ vi.mock('./db/index.js', () => ({
 }));
 
 import { articles, hatenaBookmarks, subscriptions } from './db/schema.js';
-import { generateRagAnswer } from './services/ai.js';
-import { searchArticles } from './services/search.js';
 import { syncAllSubscriptions } from './workflows/sync.js';
 
-const searchArticlesMock = vi.mocked(searchArticles);
-const generateRagAnswerMock = vi.mocked(generateRagAnswer);
 const syncAllSubscriptionsMock = vi.mocked(syncAllSubscriptions);
 
 let app: typeof import('./worker.js').app;
@@ -49,8 +45,6 @@ beforeEach(async () => {
   testDb = (await createTestDatabase()).db;
   getDbMock.mockReset();
   getDbMock.mockImplementation(() => testDb);
-  searchArticlesMock.mockReset();
-  generateRagAnswerMock.mockReset();
   syncAllSubscriptionsMock.mockReset();
   app = await loadWorkerApp();
 });
@@ -315,7 +309,7 @@ describe('worker app', () => {
     });
   });
 
-  it('threads env bindings into search and sync routes', async () => {
+  it('threads env bindings into sync routes', async () => {
     const env = {
       OPENCODE_GO_API_KEY: 'test-api-key',
       OPENCODE_GO_BASE_URL: 'https://opencode.example/v1',
@@ -325,46 +319,7 @@ describe('worker app', () => {
       waitUntil: vi.fn(),
     };
 
-    searchArticlesMock.mockResolvedValue([
-      {
-        bookmarks: [],
-        createdAt: '1970-01-01T00:00:00.000Z',
-        id: 'article-1',
-        hatenaSummary: 'はてブ要約',
-        isRead: false,
-        siteUrl: 'https://example.com/',
-        summary: '記事要約',
-        title: '検索対象の記事',
-        url: 'https://example.com/articles/1',
-      },
-    ]);
-    generateRagAnswerMock.mockResolvedValue('AIの回答');
     syncAllSubscriptionsMock.mockResolvedValue(undefined);
-
-    const searchResponse = await app.fetch(new Request('http://localhost/api/search?q=検索語'), env as never);
-    const searchPayload = (await searchResponse.json()) as { aiAnswer: string };
-
-    expect(searchResponse.ok).toBe(true);
-    expect(searchPayload.aiAnswer).toBe('AIの回答');
-    expect(searchArticlesMock).toHaveBeenCalledWith('検索語', env);
-    expect(generateRagAnswerMock).toHaveBeenCalledWith(
-      '検索語',
-      ['タイトル: 検索対象の記事\n記事要約: 記事要約\nはてブ要約: はてブ要約'],
-      [
-        {
-          bookmarks: [],
-          createdAt: '1970-01-01T00:00:00.000Z',
-          id: 'article-1',
-          hatenaSummary: 'はてブ要約',
-          isRead: false,
-          siteUrl: 'https://example.com/',
-          summary: '記事要約',
-          title: '検索対象の記事',
-          url: 'https://example.com/articles/1',
-        },
-      ],
-      env,
-    );
 
     const syncResponse = await app.fetch(
       new Request('http://localhost/api/sync', { method: 'POST' }),
@@ -374,15 +329,6 @@ describe('worker app', () => {
     expect(syncResponse.status).toBe(202);
     expect(syncAllSubscriptionsMock).toHaveBeenCalledWith(false, env, false);
     expect(executionContext.waitUntil).toHaveBeenCalledTimes(1);
-  });
-
-  it('returns a search error when OpenCode Go env bindings are missing', async () => {
-    const response = await app.fetch(new Request('http://localhost/api/search?q=検索語'), {} as never);
-
-    expect(response.status).toBe(503);
-    await expect(response.json()).resolves.toMatchObject({
-      error: 'Search requires OPENCODE_GO_BASE_URL and OPENCODE_GO_API_KEY.',
-    });
   });
 
   it('surfaces missing-table failures from D1-backed article routes', async () => {
