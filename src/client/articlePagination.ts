@@ -33,6 +33,6 @@ export function mergeLoadedArticles(articles: Article[], nextArticles: Article[]
   return offset === 0 ? nextArticles : [...articles, ...nextArticles];
 }
 
-export function shouldShowLoadMore(hasMore: boolean, searchQuery: string, aiAnswer: string): boolean {
-  return hasMore && searchQuery.trim().length === 0 && aiAnswer.trim().length === 0;
+export function shouldShowLoadMore(hasMore: boolean, searchQuery: string): boolean {
+  return hasMore && searchQuery.trim().length === 0;
 }

@@ -3,54 +3,19 @@ import { eq } from 'drizzle-orm';
 import type { RuntimeEnv } from '../env.js';
 import { getDb } from '../db/index.js';
 import { articles, hatenaBookmarks, subscriptions } from '../db/schema.js';
-import { getVectorCollection } from '../db/vector.js';
-import { generateArticleSummary, generateEmbeddings, generateHatenaSummary } from '../services/ai.js';
+import { generateArticleSummary, generateHatenaSummary } from '../services/ai.js';
 import { fetchHatenaBookmarks } from '../services/hatena.js';
 import { fetchArticleContent, fetchRssOrFallback } from '../services/scraper.js';
 import { logger } from '../utils/logger.js';
-import { chunkText } from '../utils/chunking.js';
 
-const articleChunkSize = 1_500;
 const bookmarkChunkSize = 20;
 
 function shouldFetchHatenaBookmarks(siteUrl: string): boolean {
   return siteUrl.includes('b.hatena.ne.jp');
 }
 
-function buildArticleChunkSource(title: string, content: string): string {
-  const parts = [`タイトル: ${title}`];
-  const body = content.trim();
-  parts.push(body.length > 0 ? `本文: ${body}` : '本文:');
-
-  return parts.join('\n\n');
-}
-
-function buildChunkRows(
-  articleId: string,
-  chunks: string[],
-  embeddings: number[][],
-): Array<{
-  article_id: string;
-  text: string;
-  vector: number[];
-}> {
-  if (chunks.length !== embeddings.length) {
-    throw new Error('Chunk and embedding counts do not match');
-  }
-
-  return chunks.map((chunk, index) => ({
-    article_id: articleId,
-    text: chunk,
-    vector: embeddings[index]!,
-  }));
-}
-
-function buildArticleChunks(title: string, content: string): string[] {
-  return chunkText(buildArticleChunkSource(title, content), articleChunkSize);
-}
-
 /**
- * 1つの購読サイトを同期し、記事本文・要約・はてブコメント・埋め込みを保存します。
+ * 1つの購読サイトを同期し、記事本文・要約・はてブコメントを保存します。
  * 既存記事は重複登録せず、手動実行では1回あたりの処理件数を抑えてタイムアウトを避けます。
  *
  * @param siteUrl 同期対象の購読サイトURL。
@@ -72,7 +37,6 @@ export async function syncSite(
     logger.info('サイト同期を開始します。', { siteUrl });
     const database = getDb(env);
     const siteArticles = await fetchRssOrFallback(siteUrl);
-    const vectorCollection = await getVectorCollection(env);
 
     for (const article of siteArticles) {
       try {
@@ -134,12 +98,6 @@ export async function syncSite(
               .onConflictDoNothing()
               .run();
           }
-        }
-
-        const chunks = buildArticleChunks(article.title, content);
-        if (chunks.length > 0) {
-          const embeddings = await generateEmbeddings(chunks, env);
-          await vectorCollection.add(buildChunkRows(articleId, chunks, embeddings));
         }
 
         processedCount += 1;

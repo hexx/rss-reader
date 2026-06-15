@@ -10,9 +10,5 @@ binding = "DB"
 database_name = "rss-reader"
 database_id = "DATABASE_ID_PLACEHOLDER"
 
-[[vectorize]]
-binding = "VECTORIZE_INDEX"
-index_name = "article-chunks"
-
 [triggers]
 crons = ["0 */3 * * *"]

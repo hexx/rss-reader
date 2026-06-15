@@ -73,10 +73,13 @@ export function ArticleCard({ article, onMarkAsRead }: ArticleCardProps) {
                 <TooltipContent>{article.siteUrl}</TooltipContent>
               </Tooltip>
 
-              <span className="flex items-center gap-1">
+              <time
+                dateTime={article.publishedAt || article.createdAt}
+                className="flex items-center gap-1"
+              >
                 <Calendar className="size-3" />
                 {formatDate(article.publishedAt || article.createdAt)}
-              </span>
+              </time>
 
               {hasBookmarks && (
                 <Badge variant="outline" className="gap-1">

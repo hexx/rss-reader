@@ -5,8 +5,6 @@ import { and, asc, desc, eq, inArray, sql } from 'drizzle-orm';
 import { articles, hatenaBookmarks, subscriptions } from './db/schema.js';
 import { getDb } from './db/index.js';
 import type { Bindings } from './env.js';
-import { generateRagAnswer } from './services/ai.js';
-import { searchArticles } from './services/search.js';
 import { syncAllSubscriptions } from './workflows/sync.js';
 
 type ArticleResponse = {
@@ -24,12 +22,6 @@ type ArticleResponse = {
   publishedAt: string;
   siteUrl: string;
   summary: string;
-  title: string;
-  url: string;
-};
-
-type SearchReferenceResponse = {
-  id: string;
   title: string;
   url: string;
 };
@@ -123,26 +115,6 @@ function createArticleResponse(article: ArticleRow, bookmarks: BookmarkRow[]): A
 
 function stripHtml(text: string): string {
   return text.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
-}
-
-function buildRagContexts(results: Array<{ hatenaSummary: string; summary: string; title: string }>): string[] {
-  return results.map((result) =>
-    [
-      `タイトル: ${result.title}`,
-      stripHtml(result.summary).length > 0 ? `記事要約: ${stripHtml(result.summary)}` : null,
-      stripHtml(result.hatenaSummary).length > 0 ? `はてブ要約: ${stripHtml(result.hatenaSummary)}` : null,
-    ]
-      .filter((line): line is string => line !== null)
-      .join('\n'),
-  );
-}
-
-function buildRagReferences(results: Array<{ id: string; title: string; url: string }>): SearchReferenceResponse[] {
-  return results.map((result) => ({
-    id: result.id,
-    title: result.title,
-    url: result.url,
-  }));
 }
 
 function sourceHostname(siteUrl: string): string {
@@ -423,28 +395,6 @@ app.post('/api/subscriptions', async (c) => {
     },
     201,
   );
-});
-
-app.get('/api/search', async (c) => {
-  const query = c.req.query('q')?.trim() || '';
-  if (query.length === 0) {
-    return c.json({ aiAnswer: '', results: [] });
-  }
-
-  if (c.env.OPENCODE_GO_BASE_URL === undefined || c.env.OPENCODE_GO_API_KEY === undefined) {
-    return c.json(
-      {
-        error: 'Search requires OPENCODE_GO_BASE_URL and OPENCODE_GO_API_KEY.',
-      },
-      503,
-    );
-  }
-
-  const results = await searchArticles(query, c.env);
-  const references = buildRagReferences(results);
-  const aiAnswer = await generateRagAnswer(query, buildRagContexts(results), results, c.env);
-
-  return c.json({ aiAnswer, references, results });
 });
 
 async function updateArticleReadState(c: any) {

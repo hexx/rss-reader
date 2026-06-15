@@ -48,9 +48,8 @@ describe('articlePagination', () => {
   });
 
   it('shows load more only in the normal browsing state', () => {
-    expect(shouldShowLoadMore(true, '', '')).toBe(true);
-    expect(shouldShowLoadMore(false, '', '')).toBe(false);
-    expect(shouldShowLoadMore(true, '検索', '')).toBe(false);
-    expect(shouldShowLoadMore(true, '', 'AI')).toBe(false);
+    expect(shouldShowLoadMore(true, '')).toBe(true);
+    expect(shouldShowLoadMore(false, '')).toBe(false);
+    expect(shouldShowLoadMore(true, '検索')).toBe(false);
   });
 });
