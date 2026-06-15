@@ -113,10 +113,6 @@ function createArticleResponse(article: ArticleRow, bookmarks: BookmarkRow[]): A
   };
 }
 
-function stripHtml(text: string): string {
-  return text.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
-}
-
 function sourceHostname(siteUrl: string): string {
   try {
     return new URL(siteUrl).hostname;
