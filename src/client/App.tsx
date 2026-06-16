@@ -277,7 +277,7 @@ export function App() {
         setStatus(normalizeError(error, '既読状態の更新に失敗しました。'));
       }
     },
-    [showUnreadOnly, articles],
+    [showUnreadOnly],
   );
 
   const handleSync = useCallback(async () => {
