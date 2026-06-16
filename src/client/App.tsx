@@ -259,9 +259,19 @@ export function App() {
         }
 
         const payload = (await response.json()) as { id?: string; isRead?: boolean };
-        setArticles((currentArticles) =>
-          applyReadStateChange(currentArticles, articleId, payload.isRead ?? true, showUnreadOnly),
-        );
+        setArticles((currentArticles) => {
+          const targetArticle = currentArticles.find((article) => article.id === articleId);
+          if (targetArticle) {
+            setSources((currentSources) =>
+              currentSources.map((source) =>
+                source.siteUrl === targetArticle.siteUrl
+                  ? { ...source, unreadCount: Math.max(0, source.unreadCount - 1) }
+                  : source,
+              ),
+            );
+          }
+          return applyReadStateChange(currentArticles, articleId, payload.isRead ?? true, showUnreadOnly);
+        });
         setStatus('既読にしました。');
       } catch (error) {
         setStatus(normalizeError(error, '既読状態の更新に失敗しました。'));
