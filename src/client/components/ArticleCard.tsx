@@ -10,6 +10,10 @@ import {
 import { Bookmark, Calendar, Check, ExternalLink, Globe, Link, MessageSquare } from 'lucide-react';
 import type { Article } from '../types.js';
 
+function getHatenaEntryUrl(url: string): string {
+  return `https://b.hatena.ne.jp/entry/${url.replace(/^https:\/\//, 's/').replace(/^http:\/\//, '')}`;
+}
+
 type ArticleCardProps = {
   article: Article;
   onMarkAsRead: (articleId: string) => void | Promise<void>;
@@ -171,7 +175,16 @@ export function ArticleCard({ article, onMarkAsRead }: ArticleCardProps) {
         )}
 
         {/* Read article link */}
-        <div className="flex justify-end">
+        <div className="flex justify-end gap-4">
+          <a
+            href={getHatenaEntryUrl(article.url)}
+            target="_blank"
+            rel="noreferrer noopener"
+            className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-primary hover:underline"
+          >
+            <MessageSquare className="size-4" />
+            コメントを読む
+          </a>
           <a
             href={article.url}
             target="_blank"
