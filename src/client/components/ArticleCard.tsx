@@ -7,6 +7,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from '@/components/ui/tooltip';
+import { cn } from '@/lib/utils';
 import { Bookmark, Calendar, Check, ExternalLink, Globe, Link, MessageSquare } from 'lucide-react';
 import type { Article } from '../types.js';
 
@@ -46,15 +47,16 @@ export function ArticleCard({ article, onMarkAsRead }: ArticleCardProps) {
 
   return (
     <Card
-      className={`group transition-all hover:shadow-md ${
-        article.isRead ? 'opacity-60' : 'border-l-4 border-l-primary'
-      }`}
+      className={cn(
+        'group transition-all hover:shadow-md',
+        article.isRead ? 'opacity-60' : 'border-l-4 border-l-primary',
+      )}
       id={`article-${article.id}`}
       data-article-id={article.id}
     >
       <CardHeader className="pb-3">
         <div className="flex items-start justify-between gap-4 min-w-0">
-          <div className="flex-1 min-w-0 space-y-2">
+          <div className="flex flex-1 flex-col gap-2 min-w-0">
             {/* Title */}
             <a
               href={article.url}
@@ -70,7 +72,7 @@ export function ArticleCard({ article, onMarkAsRead }: ArticleCardProps) {
               <Tooltip>
                 <TooltipTrigger>
                   <Badge variant="secondary" className="gap-1 cursor-help">
-                    <Globe className="size-3" />
+                    <Globe />
                     {sourceLabel(article.siteUrl)}
                   </Badge>
                 </TooltipTrigger>
@@ -81,13 +83,13 @@ export function ArticleCard({ article, onMarkAsRead }: ArticleCardProps) {
                 dateTime={article.publishedAt || article.createdAt}
                 className="flex items-center gap-1"
               >
-                <Calendar className="size-3" />
+                <Calendar />
                 {formatDate(article.publishedAt || article.createdAt)}
               </time>
 
               {hasBookmarks && (
                 <Badge variant="outline" className="gap-1">
-                  <Bookmark className="size-3" />
+                  <Bookmark />
                   {article.bookmarks.length}
                 </Badge>
               )}
@@ -100,7 +102,7 @@ export function ArticleCard({ article, onMarkAsRead }: ArticleCardProps) {
               rel="noreferrer noopener"
               className="flex items-center gap-1 text-xs text-muted-foreground hover:text-primary transition-colors min-w-0"
             >
-              <Link className="size-3 shrink-0" />
+              <Link className="shrink-0" />
               <span className="truncate">{article.url}</span>
             </a>
           </div>
@@ -115,7 +117,7 @@ export function ArticleCard({ article, onMarkAsRead }: ArticleCardProps) {
                   className="shrink-0 opacity-100 md:opacity-0 group-hover:opacity-100 transition-opacity size-10 md:size-8 bg-muted/50 md:bg-transparent"
                   onClick={() => void onMarkAsRead(article.id)}
                 >
-                  <Check className="size-4" />
+                  <Check />
                   <span className="sr-only">既読にする</span>
                 </Button>
               </TooltipTrigger>
@@ -125,11 +127,11 @@ export function ArticleCard({ article, onMarkAsRead }: ArticleCardProps) {
         </div>
       </CardHeader>
 
-      <CardContent className="space-y-4">
+      <CardContent className="flex flex-col gap-4">
         {/* Summary sections */}
         <div className="grid gap-3 sm:grid-cols-2 min-w-0">
           {hasSummary && (
-            <div className="rounded-lg bg-muted/50 p-3 space-y-2">
+            <div className="rounded-lg bg-muted/50 p-3 flex flex-col gap-2">
               <h3 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
                 記事の要約
               </h3>
@@ -141,7 +143,7 @@ export function ArticleCard({ article, onMarkAsRead }: ArticleCardProps) {
           )}
 
           {hasHatenaSummary && (
-            <div className="rounded-lg bg-amber-50/50 p-3 space-y-2 dark:bg-amber-950/20">
+            <div className="rounded-lg bg-muted/50 p-3 flex flex-col gap-2">
               <h3 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
                 はてブの反応
               </h3>
@@ -157,12 +159,12 @@ export function ArticleCard({ article, onMarkAsRead }: ArticleCardProps) {
         {hasBookmarks && (
           <>
             <Separator />
-            <div className="space-y-2">
+            <div className="flex flex-col gap-2">
               <h3 className="flex items-center gap-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                <MessageSquare className="size-3" />
+                <MessageSquare />
                 コメント ({article.bookmarks.length})
               </h3>
-              <ul className="space-y-1.5 text-sm">
+              <ul className="flex flex-col gap-1.5 text-sm">
                 {article.bookmarks.map((bookmark) => (
                   <li key={bookmark.id} className="flex gap-2">
                     <span className="font-medium text-primary shrink-0">{bookmark.user}</span>
@@ -182,7 +184,7 @@ export function ArticleCard({ article, onMarkAsRead }: ArticleCardProps) {
             rel="noreferrer noopener"
             className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-primary hover:underline"
           >
-            <MessageSquare className="size-4" />
+            <MessageSquare />
             コメントを読む
           </a>
           <a
@@ -191,7 +193,7 @@ export function ArticleCard({ article, onMarkAsRead }: ArticleCardProps) {
             rel="noreferrer noopener"
             className="inline-flex items-center gap-1 text-sm text-primary hover:underline"
           >
-            <ExternalLink className="size-4" />
+            <ExternalLink />
             記事を読む
           </a>
         </div>

@@ -1,10 +1,12 @@
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from '@/components/ui/empty';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { cn } from '@/lib/utils';
 import { Globe, Loader2, Plus, Rss, Trash2 } from 'lucide-react';
 import { useCallback, useState, type FormEvent } from 'react';
 
@@ -27,7 +29,7 @@ function SourceSkeleton() {
   return (
     <div className="flex items-center gap-2 p-3 rounded-lg">
       <Skeleton className="size-8 rounded-full" />
-      <div className="flex-1 space-y-1.5">
+      <div className="flex flex-1 flex-col gap-1.5">
         <Skeleton className="h-4 w-3/4" />
         <Skeleton className="h-3 w-1/2" />
       </div>
@@ -94,7 +96,7 @@ export function SourceManager({
       {/* Header */}
       <div className="p-4 pb-3">
         <div className="flex items-center gap-2 mb-1">
-          <Rss className="size-5 text-primary" />
+          <Rss />
           <h2 className="font-semibold">購読設定</h2>
         </div>
         <p className="text-xs text-muted-foreground">
@@ -108,7 +110,7 @@ export function SourceManager({
       <form className="p-4 pb-3" onSubmit={handleSubmit}>
         <div className="flex gap-2">
           <div className="relative flex-1">
-            <Globe className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
+            <Globe className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
             <Input
               id="subscription-input"
               name="siteUrl"
@@ -129,9 +131,9 @@ export function SourceManager({
           </div>
           <Button type="submit" size="icon" disabled={isAdding}>
             {isAdding ? (
-              <Loader2 className="size-4 animate-spin" />
+              <Loader2 data-icon="inline-start" className="animate-spin" />
             ) : (
-              <Plus className="size-4" />
+              <Plus data-icon="inline-start" />
             )}
             <span className="sr-only">追加</span>
           </Button>
@@ -147,7 +149,7 @@ export function SourceManager({
 
       {/* Source list */}
       <ScrollArea className="flex-1 min-h-0">
-        <div className="p-4 pt-2 space-y-1">
+        <div className="p-4 pt-2 flex flex-col gap-1">
           {isLoading ? (
             <>
               <SourceSkeleton />
@@ -155,15 +157,17 @@ export function SourceManager({
               <SourceSkeleton />
             </>
           ) : sources.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-8 text-center">
-              <Rss className="size-10 text-muted-foreground/30 mb-3" />
-              <p className="text-sm font-medium text-muted-foreground">
-                購読ソースがありません
-              </p>
-              <p className="text-xs text-muted-foreground/70 mt-1">
-                上のフォームからRSSフィードを追加してください
-              </p>
-            </div>
+            <Empty>
+              <EmptyHeader>
+                <EmptyMedia variant="icon">
+                  <Rss />
+                </EmptyMedia>
+                <EmptyTitle>購読ソースがありません</EmptyTitle>
+                <EmptyDescription>
+                  上のフォームからRSSフィードを追加してください
+                </EmptyDescription>
+              </EmptyHeader>
+            </Empty>
           ) : (
             sources.map((source) => {
               const isSelected = selectedSourceUrl === source.siteUrl;
@@ -172,9 +176,10 @@ export function SourceManager({
               return (
                 <div
                   key={source.id}
-                  className={`group flex items-center gap-2 rounded-lg p-2.5 transition-colors cursor-pointer hover:bg-muted/50 ${
-                    isSelected ? 'bg-primary/10 border border-primary/20' : ''
-                  }`}
+                  className={cn(
+                    'group flex items-center gap-2 rounded-lg p-2.5 transition-colors cursor-pointer hover:bg-muted/50',
+                    isSelected && 'bg-primary/10 border border-primary/20',
+                  )}
                   onClick={() => onSelectSource?.(isSelected ? undefined : source.siteUrl)}
                   role="button"
                   tabIndex={0}
@@ -186,7 +191,7 @@ export function SourceManager({
                   }}
                 >
                   <div className="flex size-8 items-center justify-center rounded-full bg-primary/10 text-primary">
-                    <Globe className="size-4" />
+                    <Globe />
                   </div>
 
                   <div className="flex-1 min-w-0">
@@ -218,9 +223,9 @@ export function SourceManager({
                           disabled={isRemoving}
                         >
                           {isRemoving ? (
-                            <Loader2 className="size-3 animate-spin" />
+                            <Loader2 className="animate-spin" />
                           ) : (
-                            <Trash2 className="size-3 text-destructive" />
+                            <Trash2 className="text-destructive" />
                           )}
                           <span className="sr-only">購読解除</span>
                         </Button>

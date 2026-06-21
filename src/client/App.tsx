@@ -5,11 +5,13 @@ import { Checkbox } from '@/components/ui/checkbox';
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from '@/components/ui/empty';
 import { Input } from '@/components/ui/input';
-import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet';
+import { Sheet, SheetContent, SheetTitle, SheetTrigger } from '@/components/ui/sheet';
 import { Skeleton } from '@/components/ui/skeleton';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import {
@@ -72,7 +74,7 @@ function ArticleCardSkeleton() {
   return (
     <div className="rounded-lg border p-6 space-y-4">
       <div className="flex items-start justify-between gap-4">
-        <div className="space-y-2 flex-1">
+        <div className="flex flex-1 flex-col gap-2">
           <Skeleton className="h-6 w-3/4" />
           <div className="flex gap-2">
             <Skeleton className="h-5 w-20" />
@@ -382,6 +384,7 @@ export function App() {
                   <span className="sr-only">メニューを開く</span>
                 </SheetTrigger>
                 <SheetContent side="left" className="w-80 p-0">
+                  <SheetTitle className="sr-only">購読設定</SheetTitle>
                   <SourceManager
                     onAddSubscription={handleAddSubscription}
                     onRemoveSubscription={handleRemoveSubscription}
@@ -427,18 +430,20 @@ export function App() {
                   <span className="hidden sm:inline ml-1">{sortOrder === 'asc' ? '古い順' : '新しい順'}</span>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent>
-                  <DropdownMenuItem onClick={() => {
-                    setSortOrder('asc');
-                    refreshArticles();
-                  }}>
-                    古い順
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => {
-                    setSortOrder('desc');
-                    refreshArticles();
-                  }}>
-                    新しい順
-                  </DropdownMenuItem>
+                  <DropdownMenuGroup>
+                    <DropdownMenuItem onClick={() => {
+                      setSortOrder('asc');
+                      refreshArticles();
+                    }}>
+                      古い順
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => {
+                      setSortOrder('desc');
+                      refreshArticles();
+                    }}>
+                      新しい順
+                    </DropdownMenuItem>
+                  </DropdownMenuGroup>
                 </DropdownMenuContent>
               </DropdownMenu>
               <Button
@@ -448,11 +453,11 @@ export function App() {
                 disabled={isSyncing}
               >
                 {isSyncing ? (
-                  <Loader2 className="size-4 animate-spin" />
+                  <Loader2 data-icon="inline-start" className="animate-spin" />
                 ) : (
-                  <RefreshCw className="size-4" />
+                  <RefreshCw data-icon="inline-start" />
                 )}
-                <span className="hidden sm:inline ml-1">同期</span>
+                <span className="hidden sm:inline">同期</span>
               </Button>
             </div>
 
@@ -507,21 +512,25 @@ export function App() {
                     <ArticleCardSkeleton />
                   </>
                 ) : filteredArticles.length === 0 ? (
-                  <div className="flex flex-col items-center justify-center py-12 text-center">
-                    <Search className="size-12 text-muted-foreground/50 mb-4" />
-                    <p className="text-lg font-medium text-muted-foreground">
-                      {searchQuery.trim().length > 0
-                        ? '検索条件に一致する記事がありません'
-                        : showAllSelected
-                          ? '記事がまだありません'
-                          : '選択したソースの記事がありません'}
-                    </p>
-                    <p className="text-sm text-muted-foreground/70 mt-1">
-                      {searchQuery.trim().length > 0
-                        ? 'キーワードを変更して再度検索してください'
-                        : 'RSSフィードを追加して記事を取得しましょう'}
-                    </p>
-                  </div>
+                  <Empty>
+                    <EmptyHeader>
+                      <EmptyMedia variant="icon">
+                        <Search />
+                      </EmptyMedia>
+                      <EmptyTitle>
+                        {searchQuery.trim().length > 0
+                          ? '検索条件に一致する記事がありません'
+                          : showAllSelected
+                            ? '記事がまだありません'
+                            : '選択したソースの記事がありません'}
+                      </EmptyTitle>
+                      <EmptyDescription>
+                        {searchQuery.trim().length > 0
+                          ? 'キーワードを変更して再度検索してください'
+                          : 'RSSフィードを追加して記事を取得しましょう'}
+                      </EmptyDescription>
+                    </EmptyHeader>
+                  </Empty>
                 ) : (
                   filteredArticles.map((article) => (
                     <ArticleCard key={article.id} article={article} onMarkAsRead={handleMarkAsRead} />
@@ -539,7 +548,7 @@ export function App() {
                   >
                     {isLoadingArticles ? (
                       <>
-                        <Loader2 className="size-4 animate-spin mr-1" />
+                        <Loader2 data-icon="inline-start" className="animate-spin" />
                         読み込み中...
                       </>
                     ) : (
