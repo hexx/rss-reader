@@ -282,6 +282,31 @@ export function App() {
     [showUnreadOnly],
   );
 
+  // キーボードショートカット: 'm'キーで最初の未読記事を既読にする
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      // テキスト入力中は発火しない
+      const target = event.target as HTMLElement;
+      if (
+        target.tagName === 'INPUT' ||
+        target.tagName === 'TEXTAREA' ||
+        target.isContentEditable
+      ) {
+        return;
+      }
+
+      if (event.key === 'm') {
+        const firstUnreadArticle = filteredArticles.find((article) => !article.isRead);
+        if (firstUnreadArticle) {
+          void handleMarkAsRead(firstUnreadArticle.id);
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [filteredArticles, handleMarkAsRead]);
+
   const handleSync = useCallback(async () => {
     setIsSyncing(true);
     setStatus('同期を開始しました。');
