@@ -10,10 +10,7 @@ import {
 import { cn } from '@/lib/utils';
 import { Bookmark, Calendar, Check, ExternalLink, Globe, Link, MessageSquare } from 'lucide-react';
 import type { Article } from '../types.js';
-
-function getHatenaEntryUrl(url: string): string {
-  return `https://b.hatena.ne.jp/entry/${url.replace(/^https:\/\//, 's/').replace(/^http:\/\//, '')}`;
-}
+import { getHatenaEntryUrl } from '../utils/hatena.js';
 
 type ArticleCardProps = {
   article: Article;

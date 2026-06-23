@@ -32,6 +32,7 @@ import {
   mergeLoadedArticles,
   shouldShowLoadMore,
 } from './articlePagination.js';
+import { getHatenaEntryUrl } from './utils/hatena.js';
 import { ArticleCard } from './components/ArticleCard.js';
 import { SourceManager } from './components/SourceManager.js';
 import type { Article, Source } from './types.js';
@@ -282,7 +283,7 @@ export function App() {
     [showUnreadOnly],
   );
 
-  // キーボードショートカット: 'm'キーで最初の未読記事を既読にする
+  // キーボードショートカット: 'm'で既読、'v'で記事を開く、'b'でコメントを開く
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       // テキスト入力中は発火しない
@@ -295,11 +296,17 @@ export function App() {
         return;
       }
 
+      const firstUnreadArticle = filteredArticles.find((article) => !article.isRead);
+      if (!firstUnreadArticle) {
+        return;
+      }
+
       if (event.key === 'm') {
-        const firstUnreadArticle = filteredArticles.find((article) => !article.isRead);
-        if (firstUnreadArticle) {
-          void handleMarkAsRead(firstUnreadArticle.id);
-        }
+        void handleMarkAsRead(firstUnreadArticle.id);
+      } else if (event.key === 'v') {
+        window.open(firstUnreadArticle.url, '_blank', 'noreferrer noopener');
+      } else if (event.key === 'b') {
+        window.open(getHatenaEntryUrl(firstUnreadArticle.url), '_blank', 'noreferrer noopener');
       }
     };
 
