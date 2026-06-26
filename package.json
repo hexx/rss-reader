@@ -31,7 +31,7 @@
   },
   "homepage": "https://github.com/hexx/rss-reader#readme",
   "dependencies": {
-    "@ai-sdk/openai": "^3.0.63",
+    "@ai-sdk/openai": "^4.0.0",
     "@ai-sdk/openai-compatible": "^2.0.47",
     "@base-ui/react": "^1.5.0",
     "@fontsource-variable/geist": "^5.2.9",
