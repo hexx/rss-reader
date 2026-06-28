@@ -2,16 +2,10 @@ import { load, type CheerioAPI } from 'cheerio';
 import { isTag, type Element } from 'domhandler';
 import Parser from 'rss-parser';
 
-import { sleep } from '../utils/sleep.js';
-
 export interface ScrapedLink {
   pubDate: Date | null;
   title: string;
   url: string;
-}
-
-export interface ScrapedArticle extends ScrapedLink {
-  content: string;
 }
 
 const rssParser = new Parser({
@@ -31,8 +25,6 @@ const linkSelectors = [
   'h3 a[href]',
 ];
 
-const minimumSleepMs = 1_000;
-const maximumSleepMs = 3_000;
 export const browserRequestHeaders = {
   'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
   'accept-language': 'ja,en-US;q=0.9,en;q=0.8',
@@ -45,10 +37,6 @@ const nonHtmlFileExtensionPattern =
 
 function normalizeText(value: string): string {
   return value.replace(/\s+/g, ' ').trim();
-}
-
-function randomSleepMs(): number {
-  return Math.floor(Math.random() * (maximumSleepMs - minimumSleepMs + 1)) + minimumSleepMs;
 }
 
 function parsePubDate(value: string | undefined): Date | null {
@@ -216,20 +204,4 @@ export async function fetchRssOrFallback(siteUrl: string): Promise<ScrapedLink[]
   }
 
   return extractFallbackLinks(htmlOrXml, siteUrl);
-}
-
-export async function getSiteArticles(siteUrl: string): Promise<ScrapedArticle[]> {
-  const links = await fetchRssOrFallback(siteUrl);
-  const articles: ScrapedArticle[] = [];
-
-  for (const link of links) {
-    await sleep(randomSleepMs());
-    const content = await fetchArticleContent(link.url);
-    articles.push({
-      ...link,
-      content,
-    });
-  }
-
-  return articles;
 }

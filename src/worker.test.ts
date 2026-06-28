@@ -219,6 +219,17 @@ describe('worker app', () => {
       },
     ];
 
+    const expected = new Map<string, Array<{ id: string; user: string; comment: string; createdAt: string }>>();
+    expected.set('article-1', [
+      { id: 'bookmark-1', user: 'alice', comment: 'first', createdAt: '2024-01-01T00:00:00.000Z' },
+    ]);
+    expected.set('article-51', [
+      { id: 'bookmark-2', user: 'bob', comment: 'second', createdAt: '2024-01-02T00:00:00.000Z' },
+    ]);
+    expected.set('article-101', [
+      { id: 'bookmark-3', user: 'carol', comment: 'third', createdAt: '2024-01-03T00:00:00.000Z' },
+    ]);
+
     const whereMock = vi
       .fn()
       .mockResolvedValueOnce([bookmarkRows[0]])
@@ -233,7 +244,7 @@ describe('worker app', () => {
 
     expect(selectMock).toHaveBeenCalledTimes(3);
     expect(whereMock).toHaveBeenCalledTimes(3);
-    expect(results).toEqual(bookmarkRows);
+    expect(results).toEqual(expected);
   });
 
   it('creates subscriptions through the worker API', async () => {

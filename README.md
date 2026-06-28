@@ -1,20 +1,19 @@
 # RSS Reader
 
-Cloudflare Workers、D1、Vectorize を使う RSS リーダーです。
+Cloudflare Workers と D1 を使う RSS リーダーです。
 
 ## プロジェクト概要
 
 - RSS フィードや HTML から記事を取得します。
 - 各記事に対してはてなブックマークコメントを集めます。
 - OpenCode Go 互換の AI で日本語要約を生成します。
-- 要約と本文をベクトル化して Cloudflare Vectorize に保存し、横断検索できます。
 - Cloudflare Workers で同期と配信を行います。
 
 ## 前提条件
 
 - Node.js 24 以上
 - OpenCode Go 互換 API のベース URL と API キー
-- Cloudflare の D1 / Vectorize / Workers バインディング
+- Cloudflare の D1 / Workers バインディング
 
 ## セットアップ
 

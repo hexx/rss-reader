@@ -2,6 +2,7 @@ import { generateText } from 'ai';
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
 
 import type { RuntimeEnv } from '../env.js';
+import { sanitizeSummaryHtml } from '../utils/sanitizeHtml.js';
 import type { HatenaBookmarkComment } from './hatena.js';
 
 const defaultModelId = 'opencode-go';
@@ -90,7 +91,8 @@ export async function generateArticleSummary(
     prompt: buildArticleSummaryPrompt(title, truncatedContent),
   });
 
-  return result.text.trim();
+  // AI 出力は信頼できないので、保存前に許可タグ・許可属性のみにサニタイズする。
+  return sanitizeSummaryHtml(result.text.trim());
 }
 
 /**
@@ -116,5 +118,5 @@ export async function generateHatenaSummary(
     prompt: buildHatenaSummaryPrompt(comments),
   });
 
-  return result.text.trim();
+  return sanitizeSummaryHtml(result.text.trim());
 }
