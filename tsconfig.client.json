@@ -19,6 +19,6 @@
       "@/*": ["./src/*"]
     }
   },
-  "include": ["src/client/**/*", "src/components/**/*", "src/lib/**/*"],
+  "include": ["src/client/**/*", "src/components/**/*", "src/lib/**/*", "src/shared/**/*"],
   "exclude": ["node_modules"]
 }

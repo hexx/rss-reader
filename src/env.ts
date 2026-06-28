@@ -4,7 +4,6 @@ export interface RuntimeEnv {
   OPENCODE_GO_API_KEY?: string;
   OPENCODE_GO_BASE_URL?: string;
   OPENCODE_GO_MODEL?: string;
-  OPENAI_API_KEY?: string;
 }
 
 export interface Bindings extends RuntimeEnv {

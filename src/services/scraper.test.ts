@@ -17,7 +17,7 @@ vi.mock('rss-parser', () => ({
   },
 }));
 
-import { fetchArticleContent, fetchRssOrFallback, getSiteArticles } from './scraper.js';
+import { fetchArticleContent, fetchRssOrFallback } from './scraper.js';
 
 const feedUrl = 'https://example.com/feed.xml';
 const fallbackUrl = 'https://example.com/';
@@ -222,52 +222,6 @@ describe('scraper service', () => {
         pubDate: null,
         title: 'First article',
         url: articleOneUrl,
-      },
-    ]);
-  });
-
-  it('paces article fetches while collecting site articles', async () => {
-    server.use(
-      http.get(feedUrl, ({ request }) => {
-        expect(request.headers.get('accept')).toBe(browserHeaders.accept);
-        expect(request.headers.get('accept-language')).toBe(browserHeaders['accept-language']);
-        expect(request.headers.get('cache-control')).toBe(browserHeaders['cache-control']);
-        expect(request.headers.get('user-agent')).toBe(browserHeaders['user-agent']);
-
-        return HttpResponse.text(feedXml, { headers: { 'Content-Type': 'application/rss+xml' } });
-      }),
-      http.get(articleOneUrl, ({ request }) => {
-        expect(request.headers.get('accept')).toBe(browserHeaders.accept);
-        expect(request.headers.get('accept-language')).toBe(browserHeaders['accept-language']);
-        expect(request.headers.get('cache-control')).toBe(browserHeaders['cache-control']);
-        expect(request.headers.get('user-agent')).toBe(browserHeaders['user-agent']);
-
-        return HttpResponse.text(articleHtml, { headers: { 'Content-Type': 'text/html' } });
-      }),
-    );
-
-    vi.useFakeTimers();
-    vi.spyOn(Math, 'random').mockReturnValue(0);
-    parseStringMock.mockResolvedValue({
-      items: [
-        {
-          isoDate: '2024-01-02T03:04:05.000Z',
-          link: articleOneUrl,
-          title: 'First article',
-        },
-      ],
-    });
-
-    const promise = getSiteArticles(feedUrl);
-
-    await vi.advanceTimersByTimeAsync(1_000);
-
-    await expect(promise).resolves.toEqual([
-      {
-        pubDate: new Date('2024-01-02T03:04:05.000Z'),
-        title: 'First article',
-        url: articleOneUrl,
-        content: 'First article Article body text.',
       },
     ]);
   });

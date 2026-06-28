@@ -9,8 +9,11 @@ import {
 } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 import { Bookmark, Calendar, Check, ExternalLink, Globe, Link, MessageSquare } from 'lucide-react';
+import { useMemo } from 'react';
+
 import type { Article } from '../types.js';
 import { getHatenaEntryUrl } from '../utils/hatena.js';
+import { sanitizeClientHtml } from '../utils/sanitizeClientHtml.js';
 
 type ArticleCardProps = {
   article: Article;
@@ -41,6 +44,14 @@ export function ArticleCard({ article, onMarkAsRead }: ArticleCardProps) {
   const hasBookmarks = article.bookmarks.length > 0;
   const hasSummary = article.summary.trim().length > 0;
   const hasHatenaSummary = article.hatenaSummary.trim().length > 0;
+
+  // サーバー側でサニタイズ済みだが、クライアント側の二重防御として
+  // DOMParser で再度許可タグだけに絞り込む。
+  const safeSummary = useMemo(() => sanitizeClientHtml(article.summary), [article.summary]);
+  const safeHatenaSummary = useMemo(
+    () => sanitizeClientHtml(article.hatenaSummary),
+    [article.hatenaSummary],
+  );
 
   return (
     <Card
@@ -134,7 +145,7 @@ export function ArticleCard({ article, onMarkAsRead }: ArticleCardProps) {
               </h3>
               <div
                 className="text-sm leading-relaxed overflow-wrap-anywhere overflow-x-auto min-w-0 w-full"
-                dangerouslySetInnerHTML={{ __html: article.summary }}
+                dangerouslySetInnerHTML={{ __html: safeSummary }}
               />
             </div>
           )}
@@ -146,7 +157,7 @@ export function ArticleCard({ article, onMarkAsRead }: ArticleCardProps) {
               </h3>
               <div
                 className="text-sm leading-relaxed overflow-wrap-anywhere overflow-x-auto min-w-0 w-full"
-                dangerouslySetInnerHTML={{ __html: article.hatenaSummary }}
+                dangerouslySetInnerHTML={{ __html: safeHatenaSummary }}
               />
             </div>
           )}

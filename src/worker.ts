@@ -1,35 +1,26 @@
 import { Hono } from 'hono';
+import type { Context } from 'hono';
 
 import { and, asc, desc, eq, inArray, sql } from 'drizzle-orm';
 
 import { articles, hatenaBookmarks, subscriptions } from './db/schema.js';
 import { getDb } from './db/index.js';
 import type { Bindings } from './env.js';
+import type {
+  Article,
+  ArticleReadStateResponse,
+  ArticleSortDirection,
+  Bookmark,
+  Source,
+  SubscriptionMutationResponse,
+  SyncAcceptedResponse,
+} from './shared/types.js';
 import { syncAllSubscriptions } from './workflows/sync.js';
-
-type ArticleResponse = {
-  bookmarks: Array<{
-    comment: string;
-    createdAt: string;
-    id: string;
-    user: string;
-  }>;
-  createdAt: string;
-  content: string;
-  id: string;
-  hatenaSummary: string;
-  isRead: boolean;
-  publishedAt: string;
-  siteUrl: string;
-  summary: string;
-  title: string;
-  url: string;
-};
 
 type SourceRow = {
   articleId: string | null;
   id: string;
-  isRead: boolean | number | null;
+  isRead: boolean | null;
   siteUrl: string;
   title: string | null;
 };
@@ -42,22 +33,13 @@ type SourceAggregate = {
   unreadCount: number;
 };
 
-type SourceResponse = {
-  articleCount: number;
-  displayTitle: string;
-  id: string;
-  siteUrl: string;
-  title: string;
-  unreadCount: number;
-};
-
 type ArticleRow = {
   content: string | null;
-  createdAt: Date | string | number | null;
+  createdAt: Date | string | null;
   id: string;
   hatenaSummary: string | null;
-  isRead: boolean | number | null;
-  publishedAt: Date | string | number | null;
+  isRead: boolean | null;
+  publishedAt: Date | string | null;
   siteUrl: string;
   summary: string | null;
   title: string;
@@ -76,27 +58,31 @@ const app = new Hono<{ Bindings: Bindings }>();
 const bookmarkArticleIdChunkSize = 50;
 const articlePageSize = 50;
 
-function formatDate(value: Date | string | number | null | undefined): string {
+function formatDate(value: Date | string | null | undefined): string {
   if (value instanceof Date) {
     return value.toISOString();
   }
 
-  if (typeof value === 'number') {
-    return new Date(value).toISOString();
-  }
-
   if (typeof value === 'string') {
-    return new Date(value).toISOString();
+    const parsed = new Date(value);
+    if (!Number.isNaN(parsed.getTime())) {
+      return parsed.toISOString();
+    }
+    console.warn('formatDate: invalid date string encountered', value);
+  } else if (value === null || value === undefined) {
+    console.warn('formatDate: null/undefined date encountered');
   }
 
   return new Date().toISOString();
 }
 
-function createArticleResponse(article: ArticleRow, bookmarks: BookmarkRow[]): ArticleResponse {
+function createArticleResponse(article: ArticleRow, bookmarks: Bookmark[]): Article {
   return {
     bookmarks: bookmarks.map((bookmark) => ({
       comment: bookmark.comment ?? '',
-      createdAt: formatDate(bookmark.createdAt),
+      // fetchBookmarksByArticleIds で既に ISO 文字列にフォーマット済みのため、
+      // ここではそのまま使う（二重フォーマットを避ける）。
+      createdAt: bookmark.createdAt,
       id: bookmark.id,
       user: bookmark.user,
     })),
@@ -183,7 +169,7 @@ async function fetchArticles(
   unreadOnly = true,
   limit = articlePageSize,
   offset = 0,
-  sortDirection: 'asc' | 'desc' = 'asc',
+  sortDirection: ArticleSortDirection = 'asc',
 ): Promise<ArticleRow[]> {
   const query = database
     .select({
@@ -224,16 +210,15 @@ async function fetchArticles(
 export async function fetchBookmarksByArticleIds(
   database: ReturnType<typeof getDb>,
   articleIds: string[],
-): Promise<BookmarkRow[]> {
+): Promise<Map<string, Bookmark[]>> {
+  const result = new Map<string, Bookmark[]>();
   if (articleIds.length === 0) {
-    return [];
+    return result;
   }
-
-  const bookmarkRows: BookmarkRow[] = [];
 
   for (let index = 0; index < articleIds.length; index += bookmarkArticleIdChunkSize) {
     const chunk = articleIds.slice(index, index + bookmarkArticleIdChunkSize);
-    const rows = await database
+    const rows: BookmarkRow[] = await database
       .select({
         articleId: hatenaBookmarks.articleId,
         comment: hatenaBookmarks.comment,
@@ -244,10 +229,20 @@ export async function fetchBookmarksByArticleIds(
       .from(hatenaBookmarks)
       .where(inArray(hatenaBookmarks.articleId, chunk));
 
-    bookmarkRows.push(...rows);
+    for (const row of rows) {
+      const bookmark: Bookmark = {
+        comment: row.comment ?? '',
+        createdAt: formatDate(row.createdAt),
+        id: row.id,
+        user: row.user,
+      };
+      const items = result.get(row.articleId) ?? [];
+      items.push(bookmark);
+      result.set(row.articleId, items);
+    }
   }
 
-  return bookmarkRows;
+  return result;
 }
 
 app.get('/health', (c) => c.text('ok'));
@@ -258,22 +253,20 @@ app.get('/api/articles', async (c) => {
   const limit = parsePaginationParam(c.req.query('limit'), articlePageSize, 1);
   const offset = parsePaginationParam(c.req.query('offset'), 0, 0);
   const sortParam = c.req.query('sort');
-  const sortDirection = sortParam === 'desc' ? 'desc' : 'asc';
+  const sortDirection: ArticleSortDirection = sortParam === 'desc' ? 'desc' : 'asc';
   const database = getDb(c.env);
 
   const articleRows = await fetchArticles(database, sourceUrl, unreadOnly, limit, offset, sortDirection);
-  const bookmarkRows = await fetchBookmarksByArticleIds(database, articleRows.map((article) => article.id));
+  const bookmarksByArticleId = await fetchBookmarksByArticleIds(
+    database,
+    articleRows.map((article) => article.id),
+  );
 
-  const bookmarksByArticleId = new Map<string, BookmarkRow[]>();
-  for (const bookmark of bookmarkRows) {
-    const items = bookmarksByArticleId.get(bookmark.articleId) ?? [];
-    items.push(bookmark);
-    bookmarksByArticleId.set(bookmark.articleId, items);
-  }
+  const articles: Article[] = articleRows.map((article) =>
+    createArticleResponse(article, bookmarksByArticleId.get(article.id) ?? []),
+  );
 
-  return c.json({
-    articles: articleRows.map((article) => createArticleResponse(article, bookmarksByArticleId.get(article.id) ?? [])),
-  });
+  return c.json({ articles });
 });
 
 app.get('/api/sources', async (c) => {
@@ -320,16 +313,16 @@ app.get('/api/sources', async (c) => {
     titleCounts.set(base, (titleCounts.get(base) ?? 0) + 1);
   }
 
-  return c.json({
-    sources: groupedSources.map((source): SourceResponse => ({
-      articleCount: source.articleCount,
-      displayTitle: sourceDisplayTitle(source, titleCounts),
-      id: source.id,
-      siteUrl: source.siteUrl,
-      title: sourceTitleBase(source),
-      unreadCount: source.unreadCount,
-    })),
-  });
+  const sources: Source[] = groupedSources.map((source) => ({
+    articleCount: source.articleCount,
+    displayTitle: sourceDisplayTitle(source, titleCounts),
+    id: source.id,
+    siteUrl: source.siteUrl,
+    title: sourceTitleBase(source),
+    unreadCount: source.unreadCount,
+  }));
+
+  return c.json({ sources });
 });
 
 app.delete('/api/subscriptions', async (c) => {
@@ -357,8 +350,8 @@ app.delete('/api/subscriptions', async (c) => {
 });
 
 app.post('/api/subscriptions', async (c) => {
-  const body = (await c.req.json().catch(() => ({}))) as { siteUrl?: unknown };
-  const siteUrl = typeof body.siteUrl === 'string' ? body.siteUrl : '';
+  const requestBody = (await c.req.json().catch(() => ({}))) as { siteUrl?: unknown };
+  const siteUrl = typeof requestBody.siteUrl === 'string' ? requestBody.siteUrl : '';
   if (siteUrl.trim().length === 0) {
     return c.json({ error: 'siteUrl is required.' }, 400);
   }
@@ -383,18 +376,22 @@ app.post('/api/subscriptions', async (c) => {
     title,
   }).run();
 
-  return c.json(
-    {
-      id,
-      siteUrl: normalizedSiteUrl,
-      title,
-    },
-    201,
-  );
+  const response: SubscriptionMutationResponse = {
+    id,
+    siteUrl: normalizedSiteUrl,
+    title,
+  };
+
+  return c.json(response, 201);
 });
 
-async function updateArticleReadState(c: any) {
+type ArticleContext = Context<{ Bindings: Bindings }>;
+
+async function updateArticleReadState(c: ArticleContext) {
   const articleId = c.req.param('id');
+  if (typeof articleId !== 'string' || articleId.length === 0) {
+    return c.json({ error: 'articleId is required.' }, 400);
+  }
   const database = getDb(c.env);
   const existingArticle = await database
     .select({ id: articles.id })
@@ -410,7 +407,8 @@ async function updateArticleReadState(c: any) {
   const isRead = typeof body.isRead === 'boolean' ? body.isRead : true;
   await database.update(articles).set({ isRead }).where(eq(articles.id, articleId)).run();
 
-  return c.json({ id: articleId, isRead });
+  const response: ArticleReadStateResponse = { id: articleId, isRead };
+  return c.json(response);
 }
 
 app.patch('/api/articles/:id', updateArticleReadState);
@@ -426,7 +424,8 @@ app.post('/api/sync', (c) => {
     void syncTask;
   }
 
-  return c.json({ status: 'accepted' }, 202);
+  const response: SyncAcceptedResponse = { status: 'accepted' };
+  return c.json(response, 202);
 });
 
 app.get('*', async (c) => {
@@ -442,8 +441,12 @@ app.get('*', async (c) => {
   return c.text('Cloudflare Worker scaffold is not fully wired yet.', 503);
 });
 
+type ScheduledContext = {
+  waitUntil: (promise: Promise<unknown>) => void;
+};
+
 function createScheduledHandler() {
-  return async (_event: unknown, env: Bindings, ctx: any) => {
+  return async (_event: unknown, env: Bindings, ctx: ScheduledContext) => {
     ctx.waitUntil(
       syncAllSubscriptions(false, env, true).catch((error: unknown) => {
         console.error('定期同期に失敗しました。', { error });
