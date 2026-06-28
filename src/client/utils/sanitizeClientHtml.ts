@@ -8,42 +8,11 @@
  * この関数は第二防御として、サーバー側を迂回した経路でも安全側に倒す目的で使う。
  */
 
-const ALLOWED_TAGS = new Set([
-  'A',
-  'B',
-  'BLOCKQUOTE',
-  'BR',
-  'CODE',
-  'EM',
-  'H1',
-  'H2',
-  'H3',
-  'H4',
-  'H5',
-  'H6',
-  'I',
-  'LI',
-  'OL',
-  'P',
-  'PRE',
-  'STRONG',
-  'UL',
-]);
-
-const REMOVE_CONTENT_TAGS = new Set([
-  'EMBED',
-  'IFRAME',
-  'NOSCRIPT',
-  'OBJECT',
-  'SCRIPT',
-  'STYLE',
-]);
-
-/**
- * 許可する URL スキーム。
- * 重要: 先頭の "/" の後に "/" を続けるプロトコル相対 URL (//evil.com 等) はブロックする。
- */
-const SAFE_URL_PATTERN = /^(?:https?:|mailto:|\/(?!\/)|#)/i;
+import {
+  ALLOWED_TAGS,
+  REMOVE_CONTENT_TAGS,
+  SAFE_URL_PATTERN,
+} from '../../shared/sanitize-constants.js';
 
 function isSafeHref(value: string): boolean {
   return SAFE_URL_PATTERN.test(value.trim());
@@ -52,7 +21,7 @@ function isSafeHref(value: string): boolean {
 function sanitizeElement(element: Element): Node | null {
   // 許可されていないタグや、内容ごと除去するタグはここで処理
   if (element instanceof HTMLElement) {
-    const tag = element.tagName.toUpperCase();
+    const tag = element.tagName.toLowerCase();
     if (REMOVE_CONTENT_TAGS.has(tag)) {
       return null;
     }

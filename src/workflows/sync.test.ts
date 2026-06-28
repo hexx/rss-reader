@@ -1,7 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import type { RuntimeEnv } from '../env.js';
 import { articles, hatenaBookmarks, subscriptions } from '../db/schema.js';
 import { createTestDatabase } from '../test-utils/sqljs-db.js';
+
+const testEnv = {} as RuntimeEnv;
 
 vi.mock('../services/scraper.js', () => ({
   fetchArticleContent: vi.fn(),
@@ -105,7 +108,7 @@ describe('syncSite', () => {
     generateArticleSummaryMock.mockResolvedValue('要約文');
     generateHatenaSummaryMock.mockResolvedValue('はてブ要約');
 
-    await expect(syncSite(siteUrl)).resolves.toBe(1);
+    await expect(syncSite(siteUrl, false, testEnv, false)).resolves.toBe(1);
 
     const savedArticles = await testDb.select().from(articles);
     const savedBookmarks = await testDb.select().from(hatenaBookmarks);
@@ -143,7 +146,7 @@ describe('syncSite', () => {
     fetchArticleContentMock.mockResolvedValue('本文の内容です。');
     generateArticleSummaryMock.mockResolvedValue('要約文');
 
-    await syncSite(nonHatenaSiteUrl);
+    await syncSite(nonHatenaSiteUrl, false, testEnv, false);
 
     expect(fetchHatenaBookmarksMock).not.toHaveBeenCalled();
     expect(generateHatenaSummaryMock).not.toHaveBeenCalled();
@@ -171,7 +174,7 @@ describe('syncSite', () => {
     generateArticleSummaryMock.mockResolvedValue('要約文');
     generateHatenaSummaryMock.mockResolvedValue('反応の要約');
 
-    await expect(syncSite(siteUrl)).resolves.toBe(1);
+    await expect(syncSite(siteUrl, false, testEnv, false)).resolves.toBe(1);
 
     const savedArticles = await testDb.select().from(articles);
     expect(savedArticles).toHaveLength(1);
@@ -206,7 +209,7 @@ describe('syncSite', () => {
     fetchArticleContentMock.mockResolvedValue('本文の内容です。');
     generateArticleSummaryMock.mockRejectedValue(new Error('summary failed'));
 
-    await expect(syncSite(siteUrl, true)).rejects.toThrow('summary failed');
+    await expect(syncSite(siteUrl, true, testEnv, false)).rejects.toThrow('summary failed');
 
     expect(fetchHatenaBookmarksMock).toHaveBeenCalledWith(article.url);
     expect(generateHatenaSummaryMock).not.toHaveBeenCalled();
@@ -227,7 +230,7 @@ describe('syncSite', () => {
       .mockResolvedValueOnce('2件目の要約');
     generateHatenaSummaryMock.mockResolvedValue('はてブ要約');
 
-    await expect(syncSite(siteUrl)).resolves.toBe(1);
+    await expect(syncSite(siteUrl, false, testEnv, false)).resolves.toBe(1);
 
     const savedArticles = await testDb.select().from(articles);
     expect(savedArticles).toHaveLength(1);
@@ -247,8 +250,8 @@ describe('syncSite', () => {
     generateArticleSummaryMock.mockResolvedValue('要約文');
     generateHatenaSummaryMock.mockResolvedValue('はてブ要約');
 
-    await syncSite(siteUrl);
-    await syncSite(siteUrl);
+    await syncSite(siteUrl, false, testEnv, false);
+    await syncSite(siteUrl, false, testEnv, false);
 
     const savedArticles = await testDb.select().from(articles);
     expect(savedArticles).toHaveLength(1);
@@ -264,7 +267,7 @@ describe('syncSite', () => {
     generateArticleSummaryMock.mockResolvedValue('要約文');
     generateHatenaSummaryMock.mockResolvedValue('はてブ要約');
 
-    await expect(syncSite(siteUrl, false, undefined, false)).resolves.toBe(2);
+    await expect(syncSite(siteUrl, false, testEnv, false)).resolves.toBe(2);
 
     const savedArticles = await testDb.select().from(articles);
     expect(savedArticles).toHaveLength(2);
@@ -280,7 +283,7 @@ describe('syncSite', () => {
     generateArticleSummaryMock.mockResolvedValue('要約文');
     generateHatenaSummaryMock.mockResolvedValue('はてブ要約');
 
-    await expect(syncSite(siteUrl, false, undefined, true)).resolves.toBe(3);
+    await expect(syncSite(siteUrl, false, testEnv, true)).resolves.toBe(3);
 
     const savedArticles = await testDb.select().from(articles);
     expect(savedArticles).toHaveLength(3);
@@ -308,7 +311,7 @@ describe('syncAllSubscriptions', () => {
   it('returns early when there are no subscriptions', async () => {
     const { syncAllSubscriptions } = await import('./sync.js');
 
-    await syncAllSubscriptions();
+    await syncAllSubscriptions(false, testEnv, false);
 
     expect(fetchRssOrFallbackMock).not.toHaveBeenCalled();
     expect(loggerMock.info).toHaveBeenCalledWith('購読サイトがありません。');
@@ -331,7 +334,7 @@ describe('syncAllSubscriptions', () => {
     generateHatenaSummaryMock.mockResolvedValue('はてブ要約');
 
     const { syncAllSubscriptions } = await import('./sync.js');
-    await syncAllSubscriptions();
+    await syncAllSubscriptions(false, testEnv, false);
 
     const savedBookmarks = await testDb.select().from(hatenaBookmarks);
     expect(savedBookmarks).toHaveLength(25);
@@ -352,7 +355,7 @@ describe('syncAllSubscriptions', () => {
     generateHatenaSummaryMock.mockResolvedValue('はてブ要約');
 
     const { syncAllSubscriptions } = await import('./sync.js');
-    await syncAllSubscriptions();
+    await syncAllSubscriptions(false, testEnv, true);
 
     const savedArticles = await testDb.select().from(articles);
     expect(savedArticles).toHaveLength(2);

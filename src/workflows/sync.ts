@@ -10,6 +10,13 @@ import { logger } from '../utils/logger.js';
 
 const bookmarkChunkSize = 20;
 
+/** 手動同期: 1 サイトあたりの記事処理上限 */
+const MANUAL_MAX_PER_SITE = 2;
+/** Cron 同期: 1 サイトあたりの記事処理上限 */
+const CRON_MAX_PER_SITE = 10;
+/** 手動同期: 全体の記事処理上限（全サイト合計） */
+const MANUAL_MAX_TOTAL = 2;
+
 function shouldFetchHatenaBookmarks(siteUrl: string): boolean {
   return siteUrl.includes('b.hatena.ne.jp');
 }
@@ -26,12 +33,12 @@ function shouldFetchHatenaBookmarks(siteUrl: string): boolean {
  */
 export async function syncSite(
   siteUrl: string,
-  debug = false,
-  env: RuntimeEnv = process.env,
-  isCron = false,
+  debug: boolean,
+  env: RuntimeEnv,
+  isCron: boolean,
 ): Promise<number> {
   let processedCount = 0;
-  const maxProcessPerSync = isCron ? 10 : 2;
+  const maxProcessPerSync = isCron ? CRON_MAX_PER_SITE : MANUAL_MAX_PER_SITE;
 
   try {
     logger.info('サイト同期を開始します。', { siteUrl });
@@ -148,9 +155,9 @@ export async function syncSite(
  * @returns 何も返しません。
  */
 export async function syncAllSubscriptions(
-  debug = false,
-  env: RuntimeEnv = process.env,
-  isCron = false,
+  debug: boolean,
+  env: RuntimeEnv,
+  isCron: boolean,
 ): Promise<void> {
   const database = getDb(env);
   const subscribedSites = await database
@@ -168,7 +175,7 @@ export async function syncAllSubscriptions(
 
   for (const subscription of subscribedSites) {
     totalProcessedCount += await syncSite(subscription.siteUrl, debug, env, isCron);
-    if (!isCron && totalProcessedCount >= 2) {
+    if (!isCron && totalProcessedCount >= MANUAL_MAX_TOTAL) {
       break;
     }
   }

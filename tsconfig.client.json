@@ -1,19 +1,9 @@
 {
+  "extends": "./tsconfig.base.json",
   "compilerOptions": {
-    "target": "ES2022",
     "module": "ESNext",
     "moduleResolution": "bundler",
-    "strict": true,
     "noEmit": true,
-    "esModuleInterop": true,
-    "allowSyntheticDefaultImports": true,
-    "jsx": "react-jsx",
-    "forceConsistentCasingInFileNames": true,
-    "skipLibCheck": true,
-    "noImplicitOverride": true,
-    "noUncheckedIndexedAccess": true,
-    "exactOptionalPropertyTypes": true,
-    "resolveJsonModule": true,
     "types": ["vite/client"],
     "paths": {
       "@/*": ["./src/*"]

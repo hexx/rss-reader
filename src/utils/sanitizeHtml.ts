@@ -1,6 +1,8 @@
 import { load, type CheerioAPI } from 'cheerio';
 import { isTag, type Element } from 'domhandler';
 
+import { ALLOWED_TAGS, REMOVE_CONTENT_TAGS, SAFE_URL_PATTERN } from '../shared/sanitize-constants.js';
+
 /**
  * AI 要約/はてなブックマーク要約のHTMLをサニタイズするユーティリティ。
  *
@@ -15,39 +17,6 @@ import { isTag, type Element } from 'domhandler';
  * 依存パッケージを最小限に抑えるため、cheerio だけで実装している
  * （dompurify は Cloudflare Workers 上で動かないため不採用）。
  */
-
-const ALLOWED_TAGS = new Set([
-  'a',
-  'b',
-  'blockquote',
-  'br',
-  'code',
-  'em',
-  'h1',
-  'h2',
-  'h3',
-  'h4',
-  'h5',
-  'h6',
-  'i',
-  'li',
-  'ol',
-  'p',
-  'pre',
-  'strong',
-  'ul',
-]);
-
-/** script, style, iframe など、内容ごと完全に削除するタグ */
-const REMOVE_CONTENT_TAGS = new Set(['script', 'style', 'iframe', 'object', 'embed', 'noscript']);
-
-/**
- * 許可する URL スキーム。
- *
- * 重要: 先頭の "/" の後に "/" を続けるプロトコル相対 URL (//evil.com 等) は
- * 別オリジンへの遷移を許してしまうため、明示的にブロックする。
- */
-const SAFE_URL_PATTERN = /^(?:https?:|mailto:|\/(?!\/)|#)/i;
 
 function isSafeHref(value: string): boolean {
   const trimmed = value.trim();

@@ -119,7 +119,7 @@ describe('worker app', () => {
       articles: Array<{ title: string; url: string; bookmarks: Array<{ comment: string }> }>;
     };
     expect(articlesResponse.ok).toBe(true);
-    expect(articlesPayload.articles).toHaveLength(1);
+    expect(articlesPayload.articles).toHaveLength(3);
     expect(articlesPayload.articles[0]).toMatchObject({
       bookmarks: [{ comment: '参考になる' }],
       title: '最初の記事',

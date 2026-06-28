@@ -69,11 +69,9 @@ function formatDate(value: Date | string | null | undefined): string {
       return parsed.toISOString();
     }
     console.warn('formatDate: invalid date string encountered', value);
-  } else if (value === null || value === undefined) {
-    console.warn('formatDate: null/undefined date encountered');
   }
 
-  return new Date().toISOString();
+  return '';
 }
 
 function createArticleResponse(article: ArticleRow, bookmarks: Bookmark[]): Article {
@@ -163,10 +161,12 @@ function parsePaginationParam(value: string | undefined, fallback: number, minim
   return parsed;
 }
 
+type AppDatabase = ReturnType<typeof getDb>;
+
 async function fetchArticles(
-  database: ReturnType<typeof getDb>,
+  database: AppDatabase,
   sourceUrl?: string,
-  unreadOnly = true,
+  unreadOnly = false,
   limit = articlePageSize,
   offset = 0,
   sortDirection: ArticleSortDirection = 'asc',
@@ -208,7 +208,7 @@ async function fetchArticles(
 }
 
 export async function fetchBookmarksByArticleIds(
-  database: ReturnType<typeof getDb>,
+  database: AppDatabase,
   articleIds: string[],
 ): Promise<Map<string, Bookmark[]>> {
   const result = new Map<string, Bookmark[]>();
@@ -249,7 +249,7 @@ app.get('/health', (c) => c.text('ok'));
 
 app.get('/api/articles', async (c) => {
   const sourceUrl = c.req.query('source')?.trim() || undefined;
-  const unreadOnly = c.req.query('unread_only') === undefined ? true : c.req.query('unread_only') === 'true';
+  const unreadOnly = c.req.query('unread_only') === 'true';
   const limit = parsePaginationParam(c.req.query('limit'), articlePageSize, 1);
   const offset = parsePaginationParam(c.req.query('offset'), 0, 0);
   const sortParam = c.req.query('sort');
@@ -326,8 +326,14 @@ app.get('/api/sources', async (c) => {
 });
 
 app.delete('/api/subscriptions', async (c) => {
-  const body = (await c.req.json().catch(() => ({}))) as { siteUrl?: unknown };
-  const siteUrl = typeof body.siteUrl === 'string' ? body.siteUrl : '';
+  let body: unknown;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: 'Invalid JSON in request body.' }, 400);
+  }
+  const parsed = body as { siteUrl?: unknown };
+  const siteUrl = typeof parsed.siteUrl === 'string' ? parsed.siteUrl : '';
   if (siteUrl.trim().length === 0) {
     return c.json({ error: 'siteUrl is required.' }, 400);
   }
@@ -350,8 +356,14 @@ app.delete('/api/subscriptions', async (c) => {
 });
 
 app.post('/api/subscriptions', async (c) => {
-  const requestBody = (await c.req.json().catch(() => ({}))) as { siteUrl?: unknown };
-  const siteUrl = typeof requestBody.siteUrl === 'string' ? requestBody.siteUrl : '';
+  let requestBody: unknown;
+  try {
+    requestBody = await c.req.json();
+  } catch {
+    return c.json({ error: 'Invalid JSON in request body.' }, 400);
+  }
+  const parsed = requestBody as { siteUrl?: unknown };
+  const siteUrl = typeof parsed.siteUrl === 'string' ? parsed.siteUrl : '';
   if (siteUrl.trim().length === 0) {
     return c.json({ error: 'siteUrl is required.' }, 400);
   }
@@ -403,8 +415,14 @@ async function updateArticleReadState(c: ArticleContext) {
     return c.json({ error: 'Article not found.' }, 404);
   }
 
-  const body = (await c.req.json().catch(() => ({}))) as { isRead?: unknown };
-  const isRead = typeof body.isRead === 'boolean' ? body.isRead : true;
+  let body: unknown;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: 'Invalid JSON in request body.' }, 400);
+  }
+  const parsed = body as { isRead?: unknown };
+  const isRead = typeof parsed.isRead === 'boolean' ? parsed.isRead : true;
   await database.update(articles).set({ isRead }).where(eq(articles.id, articleId)).run();
 
   const response: ArticleReadStateResponse = { id: articleId, isRead };
@@ -421,7 +439,9 @@ app.post('/api/sync', (c) => {
   if (c.executionCtx) {
     c.executionCtx.waitUntil(syncTask);
   } else {
-    void syncTask;
+    syncTask.catch((error: unknown) => {
+      console.error('同期APIの実行に失敗しました（executionCtx不在）。', { error });
+    });
   }
 
   const response: SyncAcceptedResponse = { status: 'accepted' };
