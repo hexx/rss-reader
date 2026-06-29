@@ -33,7 +33,7 @@ function sanitizeElement(element: Element): Node | null {
     // 許可タグでも属性は全削除
     const attrs = Array.from(element.attributes);
     for (const attr of attrs) {
-      const keep = tag === 'A' && attr.name === 'href' && isSafeHref(attr.value);
+      const keep = tag === 'a' && attr.name === 'href' && isSafeHref(attr.value);
       if (!keep) {
         element.removeAttribute(attr.name);
       }

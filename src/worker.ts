@@ -439,9 +439,8 @@ app.post('/api/sync', (c) => {
   if (c.executionCtx) {
     c.executionCtx.waitUntil(syncTask);
   } else {
-    syncTask.catch((error: unknown) => {
-      console.error('同期APIの実行に失敗しました（executionCtx不在）。', { error });
-    });
+    // syncTask は定義時に .catch() 済みのため、ここでは追加のエラーハンドリングは不要。
+    void syncTask;
   }
 
   const response: SyncAcceptedResponse = { status: 'accepted' };
