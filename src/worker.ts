@@ -332,6 +332,9 @@ app.delete('/api/subscriptions', async (c) => {
   } catch {
     return c.json({ error: 'Invalid JSON in request body.' }, 400);
   }
+  if (body === null || typeof body !== 'object') {
+    return c.json({ error: 'Request body must be a JSON object.' }, 400);
+  }
   const parsed = body as { siteUrl?: unknown };
   const siteUrl = typeof parsed.siteUrl === 'string' ? parsed.siteUrl : '';
   if (siteUrl.trim().length === 0) {
@@ -361,6 +364,9 @@ app.post('/api/subscriptions', async (c) => {
     requestBody = await c.req.json();
   } catch {
     return c.json({ error: 'Invalid JSON in request body.' }, 400);
+  }
+  if (requestBody === null || typeof requestBody !== 'object') {
+    return c.json({ error: 'Request body must be a JSON object.' }, 400);
   }
   const parsed = requestBody as { siteUrl?: unknown };
   const siteUrl = typeof parsed.siteUrl === 'string' ? parsed.siteUrl : '';
@@ -420,6 +426,9 @@ async function updateArticleReadState(c: ArticleContext) {
     body = await c.req.json();
   } catch {
     return c.json({ error: 'Invalid JSON in request body.' }, 400);
+  }
+  if (body === null || typeof body !== 'object') {
+    return c.json({ error: 'Request body must be a JSON object.' }, 400);
   }
   const parsed = body as { isRead?: unknown };
   const isRead = typeof parsed.isRead === 'boolean' ? parsed.isRead : true;
