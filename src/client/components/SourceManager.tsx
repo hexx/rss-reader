@@ -11,6 +11,7 @@ import { Globe, Loader2, Plus, Rss, Trash2 } from 'lucide-react';
 import { useCallback, useState, type FormEvent } from 'react';
 
 import type { Source } from '../types.js';
+import { normalizeError } from '../utils/status.js';
 
 type SourceManagerProps = {
   onAddSubscription: (siteUrl: string) => Promise<void>;
@@ -20,10 +21,6 @@ type SourceManagerProps = {
   onSelectSource?: (siteUrl?: string) => void;
   selectedSourceUrl?: string | undefined;
 };
-
-function normalizeError(error: unknown, fallback: string): string {
-  return error instanceof Error ? error.message : fallback;
-}
 
 function SourceSkeleton() {
   return (

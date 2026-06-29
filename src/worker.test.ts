@@ -308,6 +308,44 @@ describe('worker app', () => {
     });
   });
 
+  it('rejects non-object request bodies with 400', async () => {
+    await testDb.insert(articles).values({
+      id: 'article-1',
+      siteUrl: 'https://example.com/feed.xml',
+      url: 'https://example.com/articles/1',
+      title: '記事',
+      content: '本文',
+      summary: '要約',
+      hatenaSummary: null,
+      isRead: false,
+      publishedAt: new Date('2024-01-01T00:00:00.000Z'),
+    });
+
+    const cases: Array<{ method: 'POST' | 'DELETE' | 'PATCH'; pathname: string; body: string }> = [
+      { method: 'POST', pathname: '/api/subscriptions', body: 'null' },
+      { method: 'DELETE', pathname: '/api/subscriptions', body: 'null' },
+      { method: 'PATCH', pathname: '/api/articles/article-1', body: 'null' },
+    ];
+
+    for (const { method, pathname, body } of cases) {
+      const response = await app.fetch(
+        new Request(`http://localhost${pathname}`, {
+          method,
+          headers: { 'Content-Type': 'application/json' },
+          body,
+        }),
+      );
+      const status = response.status;
+      const responseBody = (await response.json()) as { error?: string };
+      expect({ method, pathname, status, error: responseBody.error }).toEqual({
+        method,
+        pathname,
+        status: 400,
+        error: 'Request body must be a JSON object.',
+      });
+    }
+  });
+
   it('threads env bindings into sync routes', async () => {
     const env = {
       OPENCODE_GO_API_KEY: 'test-api-key',
