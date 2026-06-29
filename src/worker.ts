@@ -166,7 +166,7 @@ type AppDatabase = ReturnType<typeof getDb>;
 async function fetchArticles(
   database: AppDatabase,
   sourceUrl?: string,
-  unreadOnly = false,
+  unreadOnly = true,
   limit = articlePageSize,
   offset = 0,
   sortDirection: ArticleSortDirection = 'asc',
@@ -249,7 +249,7 @@ app.get('/health', (c) => c.text('ok'));
 
 app.get('/api/articles', async (c) => {
   const sourceUrl = c.req.query('source')?.trim() || undefined;
-  const unreadOnly = c.req.query('unread_only') === 'true';
+  const unreadOnly = c.req.query('unread_only') === undefined ? true : c.req.query('unread_only') === 'true';
   const limit = parsePaginationParam(c.req.query('limit'), articlePageSize, 1);
   const offset = parsePaginationParam(c.req.query('offset'), 0, 0);
   const sortParam = c.req.query('sort');
