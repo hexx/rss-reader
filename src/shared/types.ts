@@ -41,6 +41,10 @@ export interface Source {
 
 /** 購読追加・削除のレスポンス（成功時）。 */
 export interface SubscriptionMutationResponse {
+  /** 入力 URL がそのままフィード URL として登録された場合は true。auto-discovery された場合は false。 */
+  alreadyAFeed?: boolean;
+  /** 検出されたフィードの種類。 */
+  feedType?: 'rss' | 'atom';
   id?: string;
   siteUrl: string;
   title?: string;

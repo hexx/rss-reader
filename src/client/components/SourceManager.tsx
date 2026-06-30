@@ -112,7 +112,7 @@ export function SourceManager({
               id="subscription-input"
               name="siteUrl"
               type="url"
-              placeholder="RSSフィードのURL"
+              placeholder="ブログ・サイトのURL (RSSを自動検出)"
               autoComplete="url"
               required
               value={siteUrl}
