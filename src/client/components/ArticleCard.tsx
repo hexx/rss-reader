@@ -42,6 +42,8 @@ function sourceLabel(siteUrl: string): string {
 
 export function ArticleCard({ article, onMarkAsRead }: ArticleCardProps) {
   const hasBookmarks = article.bookmarks.length > 0;
+  const visibleBookmarks = article.bookmarks.filter((b) => b.comment.trim().length > 0);
+  const hasVisibleBookmarks = visibleBookmarks.length > 0;
   const hasSummary = article.summary.trim().length > 0;
   const hasHatenaSummary = article.hatenaSummary.trim().length > 0;
 
@@ -163,17 +165,17 @@ export function ArticleCard({ article, onMarkAsRead }: ArticleCardProps) {
           )}
         </div>
 
-        {/* Bookmarks */}
-        {hasBookmarks && (
+        {/* Bookmarks (空コメントは表示しないが、件数バッジには全件含める) */}
+        {hasVisibleBookmarks && (
           <>
             <Separator />
             <div className="flex flex-col gap-2">
               <h3 className="flex items-center gap-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
                 <MessageSquare />
-                コメント ({article.bookmarks.length})
+                コメント ({visibleBookmarks.length})
               </h3>
               <ul className="flex flex-col gap-1.5 text-sm">
-                {article.bookmarks.map((bookmark) => (
+                {visibleBookmarks.map((bookmark) => (
                   <li key={bookmark.id} className="flex gap-2">
                     <span className="font-medium text-primary shrink-0">{bookmark.user}</span>
                     <span className="text-muted-foreground">{bookmark.comment}</span>

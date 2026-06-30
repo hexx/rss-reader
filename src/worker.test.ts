@@ -232,11 +232,13 @@ describe('worker app', () => {
       { id: 'bookmark-3', user: 'carol', comment: 'third', createdAt: '2024-01-03T00:00:00.000Z' },
     ]);
 
-    const whereMock = vi
+    // orderBy が thenable として結果を返す（Drizzle の QueryPromise に相当）
+    const orderByMock = vi
       .fn()
       .mockResolvedValueOnce([bookmarkRows[0]])
       .mockResolvedValueOnce([bookmarkRows[1]])
       .mockResolvedValueOnce([bookmarkRows[2]]);
+    const whereMock = vi.fn(() => ({ orderBy: orderByMock }));
     const fromMock = vi.fn(() => ({ where: whereMock }));
     const selectMock = vi.fn(() => ({ from: fromMock }));
     const database = { select: selectMock } as unknown as Parameters<typeof fetchBookmarksByArticleIds>[0];

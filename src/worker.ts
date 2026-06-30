@@ -228,7 +228,8 @@ export async function fetchBookmarksByArticleIds(
         user: hatenaBookmarks.user,
       })
       .from(hatenaBookmarks)
-      .where(inArray(hatenaBookmarks.articleId, chunk));
+      .where(inArray(hatenaBookmarks.articleId, chunk))
+      .orderBy(asc(hatenaBookmarks.createdAt));
 
     for (const row of rows) {
       const bookmark: Bookmark = {
