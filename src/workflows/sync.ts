@@ -82,10 +82,6 @@ const CRON_MAX_PER_SITE = 10;
 /** 手動同期: 全体の記事処理上限（全サイト合計） */
 const MANUAL_MAX_TOTAL = 2;
 
-function shouldFetchHatenaBookmarks(siteUrl: string): boolean {
-  return siteUrl.includes('b.hatena.ne.jp');
-}
-
 /**
  * 1つの購読サイトを同期し、記事本文・要約・はてブコメントを保存します。
  * 既存記事は重複登録せず、手動実行では1回あたりの処理件数を抑えてタイムアウトを避けます。
@@ -121,11 +117,11 @@ export async function syncSite(
         // 既存記事でも、はてなブックマークは冪等に再取得する。
         // jsonlite の件数上限や、一時的なネットワーク失敗で取りこぼした分を
         // 後の同期で埋められるようにする。
+        // 購読元が b.hatena.ne.jp かどうかは関係なく、常に試みる
+        // (レート制御は hatena モジュール内のリミッターが行う)。
         const existing = existingArticle[0];
         if (existing) {
-          if (shouldFetchHatenaBookmarks(siteUrl)) {
-            await syncBookmarksForExistingArticle(database, existing.id, article.url);
-          }
+          await syncBookmarksForExistingArticle(database, existing.id, article.url);
           continue;
         }
 
@@ -143,7 +139,7 @@ export async function syncSite(
             error: message,
           });
         }
-        const bookmarks = shouldFetchHatenaBookmarks(siteUrl) ? await fetchHatenaBookmarks(article.url) : [];
+        const bookmarks = await fetchHatenaBookmarks(article.url);
         const summary = await generateArticleSummary(article.title, content, env);
         const hatenaSummary =
           bookmarks.length > 0 ? await generateHatenaSummary(bookmarks, env) : null;

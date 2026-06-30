@@ -141,16 +141,20 @@ describe('syncSite', () => {
     });
   });
 
-  it('skips Hatena bookmarks for non-Hatena sites', async () => {
+  it('attempts to fetch Hatena bookmarks for any subscription site (rate-limiter is the guard)', async () => {
     const { syncSite } = await import('./sync.js');
 
     fetchRssOrFallbackMock.mockResolvedValue([article]);
     fetchArticleContentMock.mockResolvedValue('本文の内容です。');
     generateArticleSummaryMock.mockResolvedValue('要約文');
+    // 非 Hatena サイトでも、jsonlite は記事 URL をキーにしてブックマークを返す
+    // 可能性があるため、常に取得を試みる。返ってきた結果が空でも問題なし。
+    fetchHatenaBookmarksMock.mockResolvedValue([]);
 
     await syncSite(nonHatenaSiteUrl, false, testEnv, false);
 
-    expect(fetchHatenaBookmarksMock).not.toHaveBeenCalled();
+    expect(fetchHatenaBookmarksMock).toHaveBeenCalledWith(article.url);
+    // ブックマークが 0 件なので、generateHatenaSummary は呼ばれない
     expect(generateHatenaSummaryMock).not.toHaveBeenCalled();
 
     const savedArticles = await testDb.select().from(articles);
@@ -165,6 +169,21 @@ describe('syncSite', () => {
       url: article.url,
     });
     expect(savedBookmarks).toHaveLength(0);
+  });
+
+  it('swallows a 429 (rate-limited) error when re-fetching existing articles', async () => {
+    const { syncSite } = await import('./sync.js');
+
+    fetchRssOrFallbackMock.mockResolvedValue([article]);
+    fetchArticleContentMock.mockResolvedValue('本文');
+    // 1 回目: 失敗 (429) → 記事は保存されない
+    fetchHatenaBookmarksMock.mockRejectedValueOnce(new Error('Hatena rate limited: 429 Too Many Requests'));
+    generateArticleSummaryMock.mockResolvedValue('要約文');
+
+    await syncSite(siteUrl, false, testEnv, false);
+    // 記事 INSERT は bookmarks.fetch 失敗で巻き戻されるので 0 件
+    const savedArticles = await testDb.select().from(articles);
+    expect(savedArticles).toHaveLength(0);
   });
 
   it('falls back to empty content when article fetch fails', async () => {
