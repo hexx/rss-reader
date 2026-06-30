@@ -16,6 +16,7 @@ import type {
   SyncAcceptedResponse,
 } from './shared/types.js';
 import { syncAllSubscriptions } from './workflows/sync.js';
+import { discoverRssFeedUrl } from './services/scraper.js';
 
 type SourceRow = {
   articleId: string | null;
@@ -375,11 +376,35 @@ app.post('/api/subscriptions', async (c) => {
   }
 
   const normalizedSiteUrl = normalizeSiteUrl(siteUrl);
+
+  // 入力 URL から実際の RSS/Atom フィード URL を自動検出する。
+  // 入力が既にフィード URL の場合はそのまま、そうでない場合は HTML 内の
+  // <link rel="alternate"> タグを探索してフィード URL を特定する。
+  let discoveredFeed: Awaited<ReturnType<typeof discoverRssFeedUrl>>;
+  try {
+    discoveredFeed = await discoverRssFeedUrl(normalizedSiteUrl);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.warn('RSS フィードの自動検出に失敗しました。', { siteUrl: normalizedSiteUrl, error: message });
+    return c.json(
+      { error: '指定されたURLからRSSフィードを検出できませんでした。URLを確認してください。' },
+      400,
+    );
+  }
+
+  if (discoveredFeed === null) {
+    return c.json(
+      { error: '指定されたURLからRSSフィードを検出できませんでした。URLを確認してください。' },
+      400,
+    );
+  }
+
+  const feedSiteUrl = discoveredFeed.feedUrl;
   const database = getDb(c.env);
   const existingSubscription = await database
     .select({ id: subscriptions.id })
     .from(subscriptions)
-    .where(eq(subscriptions.siteUrl, normalizedSiteUrl))
+    .where(eq(subscriptions.siteUrl, feedSiteUrl))
     .limit(1);
 
   if (existingSubscription.length > 0) {
@@ -387,16 +412,19 @@ app.post('/api/subscriptions', async (c) => {
   }
 
   const id = crypto.randomUUID();
-  const title = sourceHostname(normalizedSiteUrl);
+  const title = sourceHostname(feedSiteUrl);
   await database.insert(subscriptions).values({
     id,
-    siteUrl: normalizedSiteUrl,
+    siteUrl: feedSiteUrl,
     title,
   }).run();
 
   const response: SubscriptionMutationResponse = {
+    alreadyAFeed: discoveredFeed.alreadyAFeed,
+    detectedFeed: !discoveredFeed.alreadyAFeed,
+    feedType: discoveredFeed.type,
     id,
-    siteUrl: normalizedSiteUrl,
+    siteUrl: feedSiteUrl,
     title,
   };
 

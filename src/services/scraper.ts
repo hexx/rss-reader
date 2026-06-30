@@ -171,6 +171,171 @@ export async function fetchArticleContent(url: string): Promise<string> {
   return extractArticleContent(html);
 }
 
+/** RSS / Atom フィードの Content-Type として扱う値。 */
+const FEED_CONTENT_TYPE_PATTERN = /application\/(?:rss|atom)\+xml/i;
+
+/** フィードの type として許可する MIME タイプ。 */
+const FEED_TYPE_RSS = 'application/rss+xml';
+const FEED_TYPE_ATOM = 'application/atom+xml';
+
+/** 自動検出を許可しないホスト名（SSRF 対策）。 */
+const BLOCKED_HOSTNAMES = new Set([
+  'localhost',
+  '0.0.0.0',
+  '127.0.0.1',
+  '::1',
+  '[::1]',
+  '169.254.169.254',
+  'metadata.google.internal',
+  'metadata',
+]);
+
+const PRIVATE_IPV4_PATTERN = /^(?:10\.|172\.(?:1[6-9]|2\d|3[01])\.|192\.168\.|169\.254\.)/;
+const PRIVATE_IPV6_PATTERN = /^(?:fc|fd|fe80|::1$)/i;
+
+export type DiscoveredFeedType = 'rss' | 'atom';
+
+export interface DiscoveredFeed {
+  /** 検出されたフィードの絶対 URL。 */
+  feedUrl: string;
+  /** 検出されたフィードの種類。 */
+  type: DiscoveredFeedType;
+  /** 入力 URL と検出結果が同一だったかどうか。 */
+  alreadyAFeed: boolean;
+}
+
+/**
+ * URL のホスト名が内部ネットワーク（SSRF 対象）かどうか判定する。
+ * DNS ルックアップは行わず、文字列レベルでブロック可能な範囲のみを防御する。
+ */
+function isUnsafeHostname(hostname: string): boolean {
+  const lower = hostname.toLowerCase();
+  if (BLOCKED_HOSTNAMES.has(lower)) {
+    return true;
+  }
+  // 角括弧で囲まれた IPv6 表記 (例: [::1]) を除去してから評価。
+  const stripped = lower.startsWith('[') && lower.endsWith(']') ? lower.slice(1, -1) : lower;
+  if (PRIVATE_IPV4_PATTERN.test(stripped) || PRIVATE_IPV6_PATTERN.test(stripped)) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * 自動検出対象として URL を検証する。許可されないプロトコルや内部ネットワーク宛の URL は例外を投げる。
+ */
+function ensureSafePageUrl(rawUrl: string): URL {
+  let url: URL;
+  try {
+    url = new URL(rawUrl);
+  } catch {
+    throw new Error(`Invalid URL: ${rawUrl}`);
+  }
+  if (!['http:', 'https:'].includes(url.protocol)) {
+    throw new Error(`Unsupported protocol for feed discovery: ${url.protocol}`);
+  }
+  if (isUnsafeHostname(url.hostname)) {
+    throw new Error(`Refusing to fetch from internal address: ${url.hostname}`);
+  }
+  return url;
+}
+
+function pickFeedType(typeAttr: string): DiscoveredFeedType | null {
+  const lower = typeAttr.toLowerCase();
+  if (lower === FEED_TYPE_RSS) {
+    return 'rss';
+  }
+  if (lower === FEED_TYPE_ATOM) {
+    return 'atom';
+  }
+  return null;
+}
+
+/**
+ * 与えられた URL のページを開き、RSS/Atom フィードの URL を自動検出する。
+ *
+ * - 入力 URL の Content-Type が既に RSS/Atom だった場合は、その URL をそのまま返す。
+ * - HTML の場合は `<link rel="alternate" type="application/rss+xml|application/atom+xml">` を探す。
+ * - 複数候補が見つかった場合は RSS を優先して最初の 1 件を返す。
+ * - フィードが見つからない場合は null を返す。
+ */
+export async function discoverRssFeedUrl(rawUrl: string): Promise<DiscoveredFeed | null> {
+  const safeUrl = ensureSafePageUrl(rawUrl);
+
+  const response = await fetch(safeUrl.toString(), {
+    headers: browserRequestHeaders,
+    redirect: 'follow',
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to fetch ${rawUrl}: ${response.status} ${response.statusText}`);
+  }
+
+  const contentType = response.headers.get('content-type') ?? '';
+
+  // 入力 URL が既にフィードそのものを指している場合はそのまま返す。
+  if (FEED_CONTENT_TYPE_PATTERN.test(contentType)) {
+    const type: DiscoveredFeedType = contentType.toLowerCase().includes('atom') ? 'atom' : 'rss';
+    return { alreadyAFeed: true, feedUrl: safeUrl.toString(), type };
+  }
+
+  // HTML / テキストのみ自動検出を試みる。
+  if (!/text\/html|application\/xhtml\+xml/.test(contentType) && contentType.length > 0) {
+    return null;
+  }
+
+  const html = await response.text();
+  const $ = load(html);
+  const candidates: Array<{ feedUrl: string; type: DiscoveredFeedType }> = [];
+
+  $('link[rel~="alternate"]').each((_, node) => {
+    if (!isTag(node)) {
+      return;
+    }
+    const rel = ($(node).attr('rel') ?? '').toLowerCase();
+    if (!rel.split(/\s+/).includes('alternate')) {
+      return;
+    }
+    const typeAttr = $(node).attr('type') ?? '';
+    const feedType = pickFeedType(typeAttr);
+    if (!feedType) {
+      return;
+    }
+    const href = $(node).attr('href');
+    if (!href || href.length === 0) {
+      return;
+    }
+    try {
+      const resolved = new URL(href, safeUrl);
+      if (!['http:', 'https:'].includes(resolved.protocol)) {
+        return;
+      }
+      candidates.push({ feedUrl: resolved.toString(), type: feedType });
+    } catch {
+      // 不正な href はスキップ
+    }
+  });
+
+  if (candidates.length === 0) {
+    return null;
+  }
+
+  // RSS を優先、同一 type 内ではソース上の出現順を保つ。
+  candidates.sort((a, b) => {
+    if (a.type === b.type) {
+      return 0;
+    }
+    return a.type === 'rss' ? -1 : 1;
+  });
+
+  const first = candidates[0];
+  if (!first) {
+    return null;
+  }
+
+  return { ...first, alreadyAFeed: false };
+}
+
 export async function fetchRssOrFallback(siteUrl: string): Promise<ScrapedLink[]> {
   const htmlOrXml = await fetchHtml(siteUrl);
 

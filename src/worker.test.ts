@@ -1,6 +1,8 @@
+import { http, HttpResponse } from 'msw';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { createTestDatabase } from './test-utils/sqljs-db.js';
+import { server } from './test/setup.js';
 
 vi.mock('./workflows/sync.js', () => ({
   syncAllSubscriptions: vi.fn(),
@@ -248,6 +250,14 @@ describe('worker app', () => {
   });
 
   it('creates subscriptions through the worker API', async () => {
+    server.use(
+      http.get('https://example.com/feed', () =>
+        HttpResponse.text('<?xml version="1.0"?><rss version="2.0"><channel><title>Example</title></channel></rss>', {
+          headers: { 'Content-Type': 'application/rss+xml' },
+        }),
+      ),
+    );
+
     const response = await app.fetch(
       new Request('http://localhost/api/subscriptions', {
         method: 'POST',
@@ -260,6 +270,9 @@ describe('worker app', () => {
 
     expect(response.status).toBe(201);
     await expect(response.json()).resolves.toMatchObject({
+      alreadyAFeed: true,
+      detectedFeed: false,
+      feedType: 'rss',
       siteUrl: 'https://example.com/feed',
       title: 'example.com',
     });
@@ -270,6 +283,121 @@ describe('worker app', () => {
       siteUrl: 'https://example.com/feed',
       title: 'example.com',
     });
+  });
+
+  it('auto-discovers RSS feed URLs from regular web pages', async () => {
+    const blogHtml = `<!doctype html>
+<html>
+  <head>
+    <title>My Blog</title>
+    <link rel="alternate" type="application/rss+xml" title="My Blog RSS" href="/feed.xml" />
+    <link rel="alternate" type="application/atom+xml" title="My Blog Atom" href="/atom.xml" />
+  </head>
+  <body><h1>My Blog</h1></body>
+</html>`;
+
+    server.use(
+      http.get('https://blog.example.com/', () =>
+        HttpResponse.text(blogHtml, { headers: { 'Content-Type': 'text/html; charset=utf-8' } }),
+      ),
+      http.get('https://blog.example.com/feed.xml', () =>
+        HttpResponse.text('<?xml version="1.0"?><rss version="2.0"><channel><title>Blog</title></channel></rss>', {
+          headers: { 'Content-Type': 'application/rss+xml' },
+        }),
+      ),
+    );
+
+    const response = await app.fetch(
+      new Request('http://localhost/api/subscriptions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ siteUrl: 'https://blog.example.com/' }),
+      }),
+    );
+
+    expect(response.status).toBe(201);
+    await expect(response.json()).resolves.toMatchObject({
+      alreadyAFeed: false,
+      detectedFeed: true,
+      feedType: 'rss',
+      siteUrl: 'https://blog.example.com/feed.xml',
+    });
+
+    const savedSubscriptions = await testDb.select().from(subscriptions);
+    expect(savedSubscriptions).toHaveLength(1);
+    expect(savedSubscriptions[0]).toMatchObject({
+      siteUrl: 'https://blog.example.com/feed.xml',
+    });
+  });
+
+  it('prefers atom feed when only atom is advertised', async () => {
+    const blogHtml = `<!doctype html>
+<html>
+  <head>
+    <link rel="alternate" type="application/atom+xml" href="/atom.xml" />
+  </head>
+  <body></body>
+</html>`;
+
+    server.use(
+      http.get('https://atom.example.com/', () =>
+        HttpResponse.text(blogHtml, { headers: { 'Content-Type': 'text/html' } }),
+      ),
+    );
+
+    const response = await app.fetch(
+      new Request('http://localhost/api/subscriptions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ siteUrl: 'https://atom.example.com/' }),
+      }),
+    );
+
+    expect(response.status).toBe(201);
+    await expect(response.json()).resolves.toMatchObject({
+      detectedFeed: true,
+      feedType: 'atom',
+      siteUrl: 'https://atom.example.com/atom.xml',
+    });
+  });
+
+  it('returns 400 when no feed can be discovered', async () => {
+    server.use(
+      http.get('https://nofeed.example.com/', () =>
+        HttpResponse.text('<!doctype html><html><body>no feed here</body></html>', {
+          headers: { 'Content-Type': 'text/html' },
+        }),
+      ),
+    );
+
+    const response = await app.fetch(
+      new Request('http://localhost/api/subscriptions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ siteUrl: 'https://nofeed.example.com/' }),
+      }),
+    );
+
+    expect(response.status).toBe(400);
+    const body = (await response.json()) as { error?: string };
+    expect(body.error).toContain('RSSフィードを検出');
+
+    const savedSubscriptions = await testDb.select().from(subscriptions);
+    expect(savedSubscriptions).toHaveLength(0);
+  });
+
+  it('returns 400 for internal hostnames to prevent SSRF', async () => {
+    const response = await app.fetch(
+      new Request('http://localhost/api/subscriptions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ siteUrl: 'http://127.0.0.1/' }),
+      }),
+    );
+
+    expect(response.status).toBe(400);
+    const body = (await response.json()) as { error?: string };
+    expect(body.error).toContain('RSSフィードを検出');
   });
 
   it('updates article read state through the article route', async () => {

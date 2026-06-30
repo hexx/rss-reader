@@ -218,7 +218,7 @@ export function App() {
   );
 
   const displayedStatus: Status | null =
-    readStateStatus ?? subscriptions.error ?? sync.status ?? articlesStatus ?? sources.status;
+    readStateStatus ?? subscriptions.status ?? sync.status ?? articlesStatus ?? sources.status;
 
   return (
     <TooltipProvider>
