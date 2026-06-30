@@ -46,6 +46,8 @@ export async function createTestDatabase(options: { initializeSchema?: boolean }
         comment TEXT,
         created_at INTEGER NOT NULL DEFAULT 0
       );
+      CREATE UNIQUE INDEX hatena_bookmarks_article_id_user_unique
+        ON hatena_bookmarks (article_id, user);
       CREATE TABLE subscriptions (
         id TEXT PRIMARY KEY,
         site_url TEXT NOT NULL UNIQUE,

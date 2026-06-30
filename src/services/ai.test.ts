@@ -104,8 +104,8 @@ describe('generateArticleSummary', () => {
 
     await expect(
       generateHatenaSummary([
-        { user: 'alice', comment: '参考になる' },
-        { user: 'bob', comment: '視点が面白い' },
+        { user: 'alice', comment: '参考になる', timestamp: new Date('2024-01-01T00:00:00.000Z') },
+        { user: 'bob', comment: '視点が面白い', timestamp: new Date('2024-01-02T00:00:00.000Z') },
       ]),
     ).resolves.toBe('反応の要約');
 
