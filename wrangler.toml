@@ -9,6 +9,9 @@ assets = { directory = "./dist-client", binding = "ASSETS" }
 binding = "DB"
 database_name = "rss-reader"
 database_id = "DATABASE_ID_PLACEHOLDER"
+# Drizzle が生成するマイグレーションは `drizzle/` 配下に置かれる
+# (デフォルトの `migrations/` ではない) ため、wrangler に場所を教える
+migrations_dir = "drizzle"
 
 [triggers]
 crons = ["0 */3 * * *"]

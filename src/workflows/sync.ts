@@ -4,11 +4,76 @@ import type { RuntimeEnv } from '../env.js';
 import { getDb } from '../db/index.js';
 import { articles, hatenaBookmarks, subscriptions } from '../db/schema.js';
 import { generateArticleSummary, generateHatenaSummary } from '../services/ai.js';
-import { fetchHatenaBookmarks } from '../services/hatena.js';
+import { fetchHatenaBookmarks, type HatenaBookmarkComment } from '../services/hatena.js';
 import { fetchArticleContent, fetchRssOrFallback } from '../services/scraper.js';
 import { logger } from '../utils/logger.js';
 
 const bookmarkChunkSize = 20;
+
+type AppDatabase = ReturnType<typeof getDb>;
+
+/**
+ * 1 記事分のはてなブックマークをチャンクで INSERT する。
+ * `(article_id, user)` の UNIQUE 制約で重複行の増殖を防ぎ、timestamp は
+ * jsonlite が返す値（=ユーザーがブックマークした実時刻）をそのまま保存する。
+ */
+async function persistBookmarks(
+  database: AppDatabase,
+  articleId: string,
+  bookmarks: readonly HatenaBookmarkComment[],
+): Promise<void> {
+  if (bookmarks.length === 0) {
+    return;
+  }
+  for (let index = 0; index < bookmarks.length; index += bookmarkChunkSize) {
+    const chunk = bookmarks.slice(index, index + bookmarkChunkSize);
+    await database
+      .insert(hatenaBookmarks)
+      .values(
+        chunk.map((bookmark) => ({
+          id: crypto.randomUUID(),
+          articleId,
+          user: bookmark.user,
+          comment: bookmark.comment,
+          createdAt: bookmark.timestamp,
+        })),
+      )
+      .onConflictDoNothing({
+        target: [hatenaBookmarks.articleId, hatenaBookmarks.user],
+      })
+      .run();
+  }
+}
+
+/**
+ * 既存記事に対しはてなブックマークのみを冪等に再取得・保存する。
+ * 主に 2 つの取りこぼしケースの補完を目的とする：
+ *  - jsonlite の取得件数上限を超えた分の取りこぼし
+ *  - 手動同期の `MANUAL_MAX_*` に引っかかって当該記事分のブックマークが
+ *    まだ保存されていないケース
+ * 取得失敗は best-effort で握り潰し、既存記事のメタデータ更新は阻害しない。
+ * 同一ユーザー重複は schema の UNIQUE 制約 `hatena_bookmarks_article_id_user_unique`
+ * によって DB レベルで除外される。
+ */
+async function syncBookmarksForExistingArticle(
+  database: AppDatabase,
+  articleId: string,
+  articleUrl: string,
+): Promise<void> {
+  let bookmarks: HatenaBookmarkComment[];
+  try {
+    bookmarks = await fetchHatenaBookmarks(articleUrl);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    logger.warn('既存記事のはてなブックマーク再取得に失敗したため、スキップします。', {
+      articleId,
+      articleUrl,
+      error: message,
+    });
+    return;
+  }
+  await persistBookmarks(database, articleId, bookmarks);
+}
 
 /** 手動同期: 1 サイトあたりの記事処理上限 */
 const MANUAL_MAX_PER_SITE = 2;
@@ -48,12 +113,19 @@ export async function syncSite(
     for (const article of siteArticles) {
       try {
         const existingArticle = await database
-          .select({ id: articles.id, hatenaSummary: articles.hatenaSummary })
+          .select({ id: articles.id })
           .from(articles)
           .where(eq(articles.url, article.url))
           .limit(1);
 
-        if (existingArticle.length > 0) {
+        // 既存記事でも、はてなブックマークは冪等に再取得する。
+        // jsonlite の件数上限や、一時的なネットワーク失敗で取りこぼした分を
+        // 後の同期で埋められるようにする。
+        const existing = existingArticle[0];
+        if (existing) {
+          if (shouldFetchHatenaBookmarks(siteUrl)) {
+            await syncBookmarksForExistingArticle(database, existing.id, article.url);
+          }
           continue;
         }
 
@@ -89,23 +161,7 @@ export async function syncSite(
           isRead: false,
         }).run();
 
-        if (bookmarks.length > 0) {
-          for (let index = 0; index < bookmarks.length; index += bookmarkChunkSize) {
-            const chunk = bookmarks.slice(index, index + bookmarkChunkSize);
-            await database
-              .insert(hatenaBookmarks)
-              .values(
-                chunk.map((bookmark) => ({
-                  id: crypto.randomUUID(),
-                  articleId,
-                  user: bookmark.user,
-                  comment: bookmark.comment,
-                })),
-              )
-              .onConflictDoNothing()
-              .run();
-          }
-        }
+        await persistBookmarks(database, articleId, bookmarks);
 
         processedCount += 1;
         if (processedCount >= maxProcessPerSync) {
