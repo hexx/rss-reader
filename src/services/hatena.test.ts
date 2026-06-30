@@ -148,10 +148,13 @@ describe('fetchHatenaBookmarks', () => {
 
     // 1 回目: 429 を受けたのでリミッター状態が更新されている。
     // Retry-After: 120 をジッター 50%–100% で適用するので 60_000–120_000 ms 先。
+    // _getRateLimiterStateForTest() の前後で ms ドリフトが入らないよう、
+    // state 取得直後に `now` を取ってそこを基準にする。
     const state1 = _getRateLimiterStateForTest();
+    const now1 = Date.now();
     expect(state1.consecutiveBackoffs).toBe(1);
-    expect(state1.nextAllowedAtMs).toBeGreaterThanOrEqual(Date.now() + 60_000);
-    expect(state1.nextAllowedAtMs).toBeLessThanOrEqual(Date.now() + 120_000);
+    expect(state1.nextAllowedAtMs).toBeGreaterThanOrEqual(now1 + 60_000);
+    expect(state1.nextAllowedAtMs).toBeLessThanOrEqual(now1 + 120_000);
 
     // 2 回目: 同様に Retry-After: 120 を受ける。
     // consecutiveBackoffs は増えるが、Retry-After が同じなら
@@ -182,10 +185,11 @@ describe('fetchHatenaBookmarks', () => {
     await expect(fetchHatenaBookmarks(articleUrl)).rejects.toThrow(/rate limited/i);
 
     const state = _getRateLimiterStateForTest();
+    const now = Date.now();
     // 1 回目の exponential backoff は 1s (= 1000 ms) ベース × ジッター 50%
     // → randomFn = () => 0 のとき 500ms になる
     expect(state.consecutiveBackoffs).toBe(1);
-    const wait = state.nextAllowedAtMs - Date.now();
+    const wait = state.nextAllowedAtMs - now;
     expect(wait).toBeGreaterThan(0);
     expect(wait).toBeLessThan(1_000);
   });
@@ -229,19 +233,21 @@ describe('fetchHatenaBookmarks', () => {
 
     await expect(fetchHatenaBookmarks(articleUrl)).rejects.toThrow(/rate limited/i);
     const state1 = _getRateLimiterStateForTest();
+    const now1 = Date.now();
     expect(state1.consecutiveBackoffs).toBe(1);
     // exponential: 1 回目 = 2^0 * 1000 = 1000 ms ジッター 50%–100%
     // → randomFn = () => 0 のとき 500ms
-    const wait1 = state1.nextAllowedAtMs - Date.now();
+    const wait1 = state1.nextAllowedAtMs - now1;
     expect(wait1).toBeGreaterThan(0);
     expect(wait1).toBeLessThanOrEqual(maximumBackoffAllowedForTest());
 
     await expect(fetchHatenaBookmarks(articleUrl)).rejects.toThrow(/rate limited/i);
     const state2 = _getRateLimiterStateForTest();
+    const now2 = Date.now();
     // 2 回目: 2^1 * 1000 = 2000 ms ジッター 50%–100% → 1000–2000ms
     expect(state2.consecutiveBackoffs).toBe(2);
-    const wait2 = state2.nextAllowedAtMs - Date.now();
-    expect(wait2).toBeGreaterThanOrEqual(wait1);
+    const wait2 = state2.nextAllowedAtMs - now2;
+    expect(state2.nextAllowedAtMs).toBeGreaterThanOrEqual(state1.nextAllowedAtMs);
     expect(wait2).toBeLessThanOrEqual(maximumBackoffAllowedForTest());
   });
 });

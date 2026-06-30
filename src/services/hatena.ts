@@ -108,9 +108,13 @@ async function acquireRequestSlot(): Promise<void> {
  * 3. 上記以外 / 未指定: exponential (1s, 2s, 4s, 8s, ...) ジッター 50%–100%
  *
  * 礼儀 delay と同じくサンダリングハード herd を避けるためジッターを入れる。
+ *
+ * Note: \`Date.now()\` をこの関数内で複数回呼ぶとテストや呼び出し側で
+ * ms 単位のドリフトが見えるので、冒頭で 1 回だけ取得して使い回す。
  */
 function applyRetryAfter(value: string | null | undefined): void {
   consecutiveBackoffs += 1;
+  const now = Date.now();
 
   let baseBackoffMs: number;
 
@@ -126,7 +130,7 @@ function applyRetryAfter(value: string | null | undefined): void {
     // Retry-After: <HTTP date> を試みる
     const date = new Date(value);
     if (!Number.isNaN(date.getTime())) {
-      baseBackoffMs = Math.max(0, date.getTime() - Date.now());
+      baseBackoffMs = Math.max(0, date.getTime() - now);
     } else {
       baseBackoffMs = exponentialBackoffMs(consecutiveBackoffs);
     }
@@ -138,7 +142,7 @@ function applyRetryAfter(value: string | null | undefined): void {
   const jitter = 0.5 + randomFn() * 0.5;
   const backoffMs = Math.max(1, Math.floor(baseBackoffMs * jitter));
 
-  nextAllowedAtMs = Math.max(nextAllowedAtMs, Date.now() + backoffMs);
+  nextAllowedAtMs = Math.max(nextAllowedAtMs, now + backoffMs);
 }
 
 /**
