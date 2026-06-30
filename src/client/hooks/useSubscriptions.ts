@@ -31,7 +31,6 @@ export function useSubscriptions({
         });
         const payload = (await response.json().catch(() => ({}))) as {
           alreadyAFeed?: boolean;
-          detectedFeed?: boolean;
           error?: string;
           feedType?: 'rss' | 'atom';
         };
@@ -40,7 +39,7 @@ export function useSubscriptions({
         }
 
         let message = '購読に追加しました。';
-        if (payload.detectedFeed) {
+        if (payload.alreadyAFeed === false) {
           const typeLabel = payload.feedType === 'atom' ? 'Atom' : 'RSS';
           message = `${typeLabel}フィードを自動検出して購読に追加しました。`;
         }

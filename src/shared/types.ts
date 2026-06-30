@@ -43,8 +43,6 @@ export interface Source {
 export interface SubscriptionMutationResponse {
   /** 入力 URL がそのままフィード URL として登録された場合は true。auto-discovery された場合は false。 */
   alreadyAFeed?: boolean;
-  /** auto-discovery によってフィード URL が検出されたかどうか。 */
-  detectedFeed?: boolean;
   /** 検出されたフィードの種類。 */
   feedType?: 'rss' | 'atom';
   id?: string;

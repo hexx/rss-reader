@@ -16,7 +16,7 @@ import type {
   SyncAcceptedResponse,
 } from './shared/types.js';
 import { syncAllSubscriptions } from './workflows/sync.js';
-import { discoverRssFeedUrl } from './services/scraper.js';
+import { discoverRssFeedUrl, type DiscoveredFeed } from './services/scraper.js';
 
 type SourceRow = {
   articleId: string | null;
@@ -380,19 +380,16 @@ app.post('/api/subscriptions', async (c) => {
   // 入力 URL から実際の RSS/Atom フィード URL を自動検出する。
   // 入力が既にフィード URL の場合はそのまま、そうでない場合は HTML 内の
   // <link rel="alternate"> タグを探索してフィード URL を特定する。
-  let discoveredFeed: Awaited<ReturnType<typeof discoverRssFeedUrl>>;
+  let discoveredFeed: DiscoveredFeed | null;
   try {
     discoveredFeed = await discoverRssFeedUrl(normalizedSiteUrl);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     console.warn('RSS フィードの自動検出に失敗しました。', { siteUrl: normalizedSiteUrl, error: message });
-    return c.json(
-      { error: '指定されたURLからRSSフィードを検出できませんでした。URLを確認してください。' },
-      400,
-    );
+    discoveredFeed = null;
   }
 
-  if (discoveredFeed === null) {
+  if (!discoveredFeed) {
     return c.json(
       { error: '指定されたURLからRSSフィードを検出できませんでした。URLを確認してください。' },
       400,
@@ -421,7 +418,6 @@ app.post('/api/subscriptions', async (c) => {
 
   const response: SubscriptionMutationResponse = {
     alreadyAFeed: discoveredFeed.alreadyAFeed,
-    detectedFeed: !discoveredFeed.alreadyAFeed,
     feedType: discoveredFeed.type,
     id,
     siteUrl: feedSiteUrl,

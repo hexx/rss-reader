@@ -17,7 +17,7 @@ vi.mock('rss-parser', () => ({
   },
 }));
 
-import { fetchArticleContent, fetchRssOrFallback, discoverRssFeedUrl } from './scraper.js';
+import { fetchArticleContent, fetchRssOrFallback, discoverRssFeedUrl, readBoundedText } from './scraper.js';
 
 const feedUrl = 'https://example.com/feed.xml';
 const fallbackUrl = 'https://example.com/';
@@ -376,6 +376,76 @@ describe('scraper service', () => {
 
     it('rejects invalid URLs', async () => {
       await expect(discoverRssFeedUrl('not-a-url')).rejects.toThrow(/invalid/i);
+    });
+
+    it('rejects redirects to internal addresses to prevent SSRF', async () => {
+      server.use(
+        http.get('https://public.example.com/', () =>
+          HttpResponse.text('', { status: 302, headers: { Location: 'http://127.0.0.1/feed.xml' } }),
+        ),
+      );
+
+      await expect(discoverRssFeedUrl('https://public.example.com/')).rejects.toThrow(/internal/i);
+    });
+
+    it('rejects redirect loops', async () => {
+      server.use(
+        http.get('https://loop.example.com/a', () =>
+          HttpResponse.text('', { status: 302, headers: { Location: 'https://loop.example.com/b' } }),
+        ),
+        http.get('https://loop.example.com/b', () =>
+          HttpResponse.text('', { status: 302, headers: { Location: 'https://loop.example.com/a' } }),
+        ),
+      );
+
+      await expect(discoverRssFeedUrl('https://loop.example.com/a')).rejects.toThrow(/redirects/i);
+    });
+
+    it('ignores linked feed URLs pointing to internal addresses', async () => {
+      const blogHtml = `<!doctype html>
+<html>
+  <head>
+    <link rel="alternate" type="application/rss+xml" href="http://127.0.0.1/feed.xml" />
+    <link rel="alternate" type="application/atom+xml" href="https://example.com/atom.xml" />
+  </head>
+  <body></body>
+</html>`;
+
+      server.use(
+        http.get('https://example.com/', () =>
+          HttpResponse.text(blogHtml, { headers: { 'Content-Type': 'text/html' } }),
+        ),
+      );
+
+      await expect(discoverRssFeedUrl('https://example.com/')).resolves.toEqual({
+        alreadyAFeed: false,
+        feedUrl: 'https://example.com/atom.xml',
+        type: 'atom',
+      });
+    });
+
+    it('rejects response bodies exceeding the size limit', async () => {
+      const oversized = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode('x'.repeat(2048)));
+          controller.close();
+        },
+      });
+      const fakeResponse = { body: oversized } as unknown as Response;
+
+      await expect(readBoundedText(fakeResponse, 1024)).rejects.toThrow(/size limit/i);
+    });
+
+    it('returns the decoded body when under the size limit', async () => {
+      const stream = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode('hello'));
+          controller.close();
+        },
+      });
+      const fakeResponse = { body: stream } as unknown as Response;
+
+      await expect(readBoundedText(fakeResponse, 1024)).resolves.toBe('hello');
     });
   });
 });

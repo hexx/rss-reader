@@ -271,7 +271,6 @@ describe('worker app', () => {
     expect(response.status).toBe(201);
     await expect(response.json()).resolves.toMatchObject({
       alreadyAFeed: true,
-      detectedFeed: false,
       feedType: 'rss',
       siteUrl: 'https://example.com/feed',
       title: 'example.com',
@@ -318,7 +317,6 @@ describe('worker app', () => {
     expect(response.status).toBe(201);
     await expect(response.json()).resolves.toMatchObject({
       alreadyAFeed: false,
-      detectedFeed: true,
       feedType: 'rss',
       siteUrl: 'https://blog.example.com/feed.xml',
     });
@@ -355,7 +353,7 @@ describe('worker app', () => {
 
     expect(response.status).toBe(201);
     await expect(response.json()).resolves.toMatchObject({
-      detectedFeed: true,
+      alreadyAFeed: false,
       feedType: 'atom',
       siteUrl: 'https://atom.example.com/atom.xml',
     });
