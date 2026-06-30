@@ -1,5 +1,12 @@
 name = "rss-reader"
 main = "src/worker.ts"
+# 複数 Cloudflare アカウントを扱う運用下で `wrangler d1 migrations apply` /
+# `wrangler deploy` などが意図しないアカウントを引いてしまうのを防ぐため、
+# 使用するアカウントを明示する。値は `wrangler whoami` で確認できる 32 桁
+# 16 進の Account ID に置き換えること。未設定だと wrangler のデフォルト
+# 認証アカウントが使われ、エラー 7403 (The given account is not valid...)
+# になることがある。
+account_id = "ACCOUNT_ID_PLACEHOLDER"
 compatibility_date = "2024-05-01"
 compatibility_flags = [ "nodejs_compat" ]
 
