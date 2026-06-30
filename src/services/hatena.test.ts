@@ -148,13 +148,14 @@ describe('fetchHatenaBookmarks', () => {
 
     // 1 回目: 429 を受けたのでリミッター状態が更新されている。
     // Retry-After: 120 をジッター 50%–100% で適用するので 60_000–120_000 ms 先。
-    // _getRateLimiterStateForTest() の前後で ms ドリフトが入らないよう、
-    // state 取得直後に `now` を取ってそこを基準にする。
+    // applyRetryAfter 内の Date.now() とテストの Date.now() の ms ドリフトを
+    // 吸収するため、delta 形式で比較し 100ms の tolerance を持たせる。
     const state1 = _getRateLimiterStateForTest();
     const now1 = Date.now();
+    const wait1 = state1.nextAllowedAtMs - now1;
     expect(state1.consecutiveBackoffs).toBe(1);
-    expect(state1.nextAllowedAtMs).toBeGreaterThanOrEqual(now1 + 60_000);
-    expect(state1.nextAllowedAtMs).toBeLessThanOrEqual(now1 + 120_000);
+    expect(wait1).toBeGreaterThanOrEqual(60_000 - 100);
+    expect(wait1).toBeLessThanOrEqual(120_000);
 
     // 2 回目: 同様に Retry-After: 120 を受ける。
     // consecutiveBackoffs は増えるが、Retry-After が同じなら
