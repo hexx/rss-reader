@@ -31,6 +31,8 @@ const minimumHatenaRequestDelayMs = 1_000;
 const maximumHatenaRequestDelayMs = 3_000;
 /** exponential backoff の最大値。5 分を超えて待つのは無意味なので打ち切る。 */
 const maximumBackoffMs = 5 * 60 * 1000;
+/** Retry-After の値が秒数文字列として有効か判定する厳密正規表現。 */
+const retryAfterSecondsPattern = /^\d+$/;
 
 /**
  * モジュールローカルなレートリミッター状態。
@@ -51,19 +53,24 @@ let sleepFn: SleepFn = (ms) => new Promise((resolve) => {
 });
 let randomFn: RandomFn = Math.random;
 
-/** 本番では使うな。テスト時の sleep 差し替え用。 */
+/**
+ * テスト用 DI ポイント。本番コードから呼ばない前提。
+ *
+ * \`src/test-utils/hatena-rate-limiter.ts\` 経由でのみ利用される想定で、
+ * モジュールローカルの \`let\` を書き換える。
+ */
 export function _setSleepForTest(fn: SleepFn | null): void {
   sleepFn = fn ?? ((ms) => new Promise((resolve) => {
     setTimeout(resolve, ms);
   }));
 }
 
-/** 本番では使うな。テスト時の乱数差し替え用（ジッター決定論化）。 */
+/** テスト用 DI ポイント。本番コードから呼ばない前提。 */
 export function _setRandomForTest(fn: RandomFn | null): void {
   randomFn = fn ?? Math.random;
 }
 
-/** 本番では使うな。テスト間のレートリミッター状態リセット用。 */
+/** テスト用: レートリミッター状態をリセットする。 */
 export function _resetRateLimiterForTest(): void {
   nextAllowedAtMs = 0;
   consecutiveBackoffs = 0;
@@ -95,26 +102,52 @@ async function acquireRequestSlot(): Promise<void> {
 
 /**
  * 429/503 を受けたときに `Retry-After` を尊重しつつ exponential backoff を計算する。
- * Retry-After は秒数（int）または HTTP date 形式。解釈できない場合は exponential。
+ *
+ * 1. \`Retry-After: <秒数>\` 形式: \`/^\d+$/\` で厳密検証 → 秒 * 1000 ms
+ * 2. \`Retry-After: <HTTP date>\` 形式: \`new Date()\` でパース → 差分 ms
+ * 3. 上記以外 / 未指定: exponential (1s, 2s, 4s, 8s, ...) ジッター 50%–100%
+ *
+ * 礼儀 delay と同じくサンダリングハード herd を避けるためジッターを入れる。
  */
 function applyRetryAfter(value: string | null | undefined): void {
   consecutiveBackoffs += 1;
-  // デフォルト: exponential (1s, 2s, 4s, 8s, ...) 上限 5 分
-  let backoffMs = Math.min(maximumBackoffMs, 1000 * Math.pow(2, consecutiveBackoffs));
 
-  if (value) {
+  let baseBackoffMs: number;
+
+  if (typeof value === 'string' && retryAfterSecondsPattern.test(value)) {
+    // Retry-After: <秒数> の厳密マッチ
     const seconds = Number.parseInt(value, 10);
-    if (Number.isFinite(seconds) && seconds > 0) {
-      backoffMs = Math.min(maximumBackoffMs, seconds * 1000);
+    if (seconds > 0) {
+      baseBackoffMs = Math.min(maximumBackoffMs, seconds * 1000);
     } else {
-      const date = new Date(value);
-      if (!Number.isNaN(date.getTime())) {
-        backoffMs = Math.max(0, date.getTime() - Date.now());
-      }
+      baseBackoffMs = exponentialBackoffMs(consecutiveBackoffs);
     }
+  } else if (typeof value === 'string') {
+    // Retry-After: <HTTP date> を試みる
+    const date = new Date(value);
+    if (!Number.isNaN(date.getTime())) {
+      baseBackoffMs = Math.max(0, date.getTime() - Date.now());
+    } else {
+      baseBackoffMs = exponentialBackoffMs(consecutiveBackoffs);
+    }
+  } else {
+    baseBackoffMs = exponentialBackoffMs(consecutiveBackoffs);
   }
 
+  // ジッター (50%–100% の幅) を乗算しサンダリングハード herd を避ける
+  const jitter = 0.5 + randomFn() * 0.5;
+  const backoffMs = Math.max(1, Math.floor(baseBackoffMs * jitter));
+
   nextAllowedAtMs = Math.max(nextAllowedAtMs, Date.now() + backoffMs);
+}
+
+/**
+ * exponential backoff の基準値を計算する。
+ * 1 回目: 1s, 2 回目: 2s, 3 回目: 4s, 4 回目: 8s, ... 上限 5 分。
+ */
+function exponentialBackoffMs(consecutiveBackoffs: number): number {
+  const exponent = Math.max(0, consecutiveBackoffs - 1);
+  return Math.min(maximumBackoffMs, 1000 * Math.pow(2, exponent));
 }
 
 /** 成功時にバックオフ累積をリセット（次回 429 で再カウント）。 */

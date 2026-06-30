@@ -7,8 +7,8 @@ import {
   _resetRateLimiterForTest,
   _setRandomForTest,
   _setSleepForTest,
-  fetchHatenaBookmarks,
-} from './hatena.js';
+} from '../test-utils/hatena-rate-limiter.js';
+import { fetchHatenaBookmarks } from './hatena.js';
 
 const articleUrl = 'https://example.com/articles/1';
 const hatenaApiBaseUrl = 'https://b.hatena.ne.jp/entry/jsonlite/';
@@ -146,19 +146,48 @@ describe('fetchHatenaBookmarks', () => {
 
     await expect(fetchHatenaBookmarks(articleUrl)).rejects.toThrow(/rate limited/i);
 
-    // 1 回目: 429 を受けたのでリミッター状態が更新されている
+    // 1 回目: 429 を受けたのでリミッター状態が更新されている。
+    // Retry-After: 120 をジッター 50%–100% で適用するので 60_000–120_000 ms 先。
     const state1 = _getRateLimiterStateForTest();
     expect(state1.consecutiveBackoffs).toBe(1);
-    expect(state1.nextAllowedAtMs).toBeGreaterThan(Date.now() + 60_000); // 最低 120 秒先
+    expect(state1.nextAllowedAtMs).toBeGreaterThanOrEqual(Date.now() + 60_000);
+    expect(state1.nextAllowedAtMs).toBeLessThanOrEqual(Date.now() + 120_000);
 
-    // 2 回目: 1 回目より長い backoff (exponential)
+    // 2 回目: 同様に Retry-After: 120 を受ける。
+    // consecutiveBackoffs は増えるが、Retry-After が同じなら
+    // nextAllowedAtMs は max() で前値以上に保たれる。
     await expect(fetchHatenaBookmarks(articleUrl)).rejects.toThrow(/rate limited/i);
     const state2 = _getRateLimiterStateForTest();
     expect(state2.consecutiveBackoffs).toBe(2);
-    // Retry-After: 120 が指定されているので、120 秒 backoff が max(前値, 新値) で反映される
     expect(state2.nextAllowedAtMs).toBeGreaterThanOrEqual(state1.nextAllowedAtMs);
 
     expect(callCount).toBe(2);
+  });
+
+  it('rejects Retry-After values with non-numeric suffixes (parseInt partial-match guard)', async () => {
+    server.use(
+      http.get(hatenaApiBaseUrl, () =>
+        new HttpResponse(JSON.stringify({ bookmarks: [] }), {
+          status: 429,
+          headers: {
+            'Content-Type': 'application/json',
+            // 数値 + 文字列の混合値。parseInt だと 120 が拾われてしまうが、
+            // 厳密正規表現 /^\d+$/ では弾いて exponential backoff にフォールバックする。
+            'Retry-After': '120abc',
+          },
+        }),
+      ),
+    );
+
+    await expect(fetchHatenaBookmarks(articleUrl)).rejects.toThrow(/rate limited/i);
+
+    const state = _getRateLimiterStateForTest();
+    // 1 回目の exponential backoff は 1s (= 1000 ms) ベース × ジッター 50%
+    // → randomFn = () => 0 のとき 500ms になる
+    expect(state.consecutiveBackoffs).toBe(1);
+    const wait = state.nextAllowedAtMs - Date.now();
+    expect(wait).toBeGreaterThan(0);
+    expect(wait).toBeLessThan(1_000);
   });
 
   it('resets backoff counter on successful response', async () => {
@@ -186,7 +215,7 @@ describe('fetchHatenaBookmarks', () => {
     expect(_getRateLimiterStateForTest().consecutiveBackoffs).toBe(0);
   });
 
-  it('falls back to exponential backoff when Retry-After is missing or unparseable', async () => {
+  it('falls back to exponential backoff with jitter when Retry-After is missing', async () => {
     _setSleepForTest(() => new Promise<void>((resolve) => { resolve(); }));
 
     // Retry-After 無し
@@ -201,14 +230,19 @@ describe('fetchHatenaBookmarks', () => {
     await expect(fetchHatenaBookmarks(articleUrl)).rejects.toThrow(/rate limited/i);
     const state1 = _getRateLimiterStateForTest();
     expect(state1.consecutiveBackoffs).toBe(1);
-    // exponential: 1 回目 = 2^1 * 1000 = 2000 ms
-    expect(state1.nextAllowedAtMs - Date.now()).toBeGreaterThan(0);
-    expect(state1.nextAllowedAtMs - Date.now()).toBeLessThanOrEqual(maximumBackoffAllowedForTest());
+    // exponential: 1 回目 = 2^0 * 1000 = 1000 ms ジッター 50%–100%
+    // → randomFn = () => 0 のとき 500ms
+    const wait1 = state1.nextAllowedAtMs - Date.now();
+    expect(wait1).toBeGreaterThan(0);
+    expect(wait1).toBeLessThanOrEqual(maximumBackoffAllowedForTest());
 
     await expect(fetchHatenaBookmarks(articleUrl)).rejects.toThrow(/rate limited/i);
     const state2 = _getRateLimiterStateForTest();
-    // 2 回目: 2^2 * 1000 = 4000 ms (or 上限)
+    // 2 回目: 2^1 * 1000 = 2000 ms ジッター 50%–100% → 1000–2000ms
     expect(state2.consecutiveBackoffs).toBe(2);
+    const wait2 = state2.nextAllowedAtMs - Date.now();
+    expect(wait2).toBeGreaterThanOrEqual(wait1);
+    expect(wait2).toBeLessThanOrEqual(maximumBackoffAllowedForTest());
   });
 });
 
