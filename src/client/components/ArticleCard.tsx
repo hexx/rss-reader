@@ -165,14 +165,14 @@ export function ArticleCard({ article, onMarkAsRead }: ArticleCardProps) {
           )}
         </div>
 
-        {/* Bookmarks (空コメントは表示しないが、件数バッジには全件含める) */}
+        {/* Bookmarks (空コメントは非表示。件数バッジ・見出しのカウントは全件を表示) */}
         {hasVisibleBookmarks && (
           <>
             <Separator />
             <div className="flex flex-col gap-2">
               <h3 className="flex items-center gap-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
                 <MessageSquare />
-                コメント ({visibleBookmarks.length})
+                コメント ({article.bookmarks.length})
               </h3>
               <ul className="flex flex-col gap-1.5 text-sm">
                 {visibleBookmarks.map((bookmark) => (
