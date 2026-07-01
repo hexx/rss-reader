@@ -15,7 +15,6 @@
     "build": "npm run build:client && tsc -p tsconfig.json",
     "build:client": "vite build && tsc -p tsconfig.client.json --noEmit",
     "test": "vitest run",
-    "test:e2e": "playwright test",
     "test:watch": "vitest",
     "db:generate": "drizzle-kit generate",
     "db:push": "drizzle-kit push",
@@ -55,7 +54,6 @@
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20260515.1",
-    "@playwright/test": "^1.61.0",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
     "@testing-library/user-event": "^14.6.1",
