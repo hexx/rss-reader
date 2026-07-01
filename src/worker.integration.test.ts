@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { articles, subscriptions } from './db/schema.js';
 import { createTestDatabase } from './test-utils/sqljs-db.js';
 
-// syncAllSubscriptions の依存をモック（実際のネットワーク・AI呼び出しを避ける）
+// SyncAllSubscriptions の依存をモック（実際のネットワーク・AI呼び出しを避ける）
 vi.mock('./services/scraper.js', () => ({
   discoverRssFeedUrl: vi.fn(),
   fetchArticleContent: vi.fn(),
@@ -78,9 +78,9 @@ describe('worker integration: sync -> articles flow', () => {
 
     const subResponse = await app.fetch(
       new Request('http://localhost/api/subscriptions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ siteUrl: 'https://example.com/feed.xml' }),
+        headers: { 'Content-Type': 'application/json' },
+        method: 'POST',
       }),
     );
     expect(subResponse.status).toBe(201);
@@ -98,7 +98,7 @@ describe('worker integration: sync -> articles flow', () => {
     ]);
     fetchArticleContentMock.mockResolvedValue('<p>同期本文</p>');
     fetchHatenaBookmarksMock.mockResolvedValue([
-      { user: 'alice', comment: '参考になる', timestamp: new Date('2024-01-01T00:00:00.000Z') },
+      { comment: '参考になる', timestamp: new Date('2024-01-01T00:00:00.000Z'), user: 'alice' },
     ]);
     generateArticleSummaryMock.mockResolvedValue('<p>要約</p>');
     generateHatenaSummaryMock.mockResolvedValue('<p>はてブ要約</p>');
@@ -110,7 +110,7 @@ describe('worker integration: sync -> articles flow', () => {
     );
     expect(syncResponse.status).toBe(202);
 
-    // sync は非同期のため、記事が保存されるまで待機
+    // Sync は非同期のため、記事が保存されるまで待機
     await vi.waitFor(async () => {
       const savedArticles = await testDb.select().from(articles);
       expect(savedArticles).toHaveLength(1);
@@ -121,7 +121,7 @@ describe('worker integration: sync -> articles flow', () => {
       new Request('http://localhost/api/articles?unread_only=false'),
     );
     expect(articlesResponse.status).toBe(200);
-    const articlesBody = (await articlesResponse.json()) as { articles: Array<{ title: string; summary: string }> };
+    const articlesBody = (await articlesResponse.json()) as { articles: { title: string; summary: string }[] };
     expect(articlesBody.articles).toHaveLength(1);
     expect(articlesBody.articles[0]?.title).toBe('同期記事');
     expect(articlesBody.articles[0]?.summary).toBe('<p>要約</p>');
@@ -132,9 +132,9 @@ describe('worker integration: sync -> articles flow', () => {
 
     const readResponse = await app.fetch(
       new Request(`http://localhost/api/articles/${articleId}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ isRead: true }),
+        headers: { 'Content-Type': 'application/json' },
+        method: 'PATCH',
       }),
     );
     expect(readResponse.status).toBe(200);
@@ -144,28 +144,28 @@ describe('worker integration: sync -> articles flow', () => {
     const unreadResponse = await app.fetch(
       new Request('http://localhost/api/articles?unread_only=true'),
     );
-    const unreadBody = (await unreadResponse.json()) as { articles: Array<unknown> };
+    const unreadBody = (await unreadResponse.json()) as { articles: unknown[] };
     expect(unreadBody.articles).toHaveLength(0);
   });
 
   it('uses the /read sub-path for updating article read state', async () => {
     await testDb.insert(articles).values({
-      id: 'article-integration-read',
-      siteUrl: 'https://example.com/feed.xml',
-      url: 'https://example.com/articles/read-path',
-      title: 'Read Path Test',
       content: '',
-      summary: '',
       hatenaSummary: null,
+      id: 'article-integration-read',
       isRead: false,
       publishedAt: new Date('2024-01-01T00:00:00.000Z'),
+      siteUrl: 'https://example.com/feed.xml',
+      summary: '',
+      title: 'Read Path Test',
+      url: 'https://example.com/articles/read-path',
     });
 
     const response = await app.fetch(
       new Request('http://localhost/api/articles/article-integration-read/read', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ isRead: true }),
+        headers: { 'Content-Type': 'application/json' },
+        method: 'PATCH',
       }),
     );
     expect(response.status).toBe(200);

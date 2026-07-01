@@ -1,5 +1,7 @@
-import { load, type CheerioAPI } from 'cheerio';
-import { isTag, type Element } from 'domhandler';
+import { load } from 'cheerio';
+import type { CheerioAPI } from 'cheerio';
+import { isTag } from 'domhandler';
+import type { Element } from 'domhandler';
 
 import { ALLOWED_TAGS, REMOVE_CONTENT_TAGS, SAFE_URL_PATTERN } from '../shared/sanitize-constants.js';
 
@@ -43,7 +45,7 @@ function sanitizeNode($: CheerioAPI, element: Element): void {
 
   // 属性を全削除（a タグの href だけ例外的に再付与する）
   // スナップショットを取ってからイテレートする。
-  for (const attr of Array.from(element.attributes)) {
+  for (const attr of element.attributes) {
     const allowed = tagName === 'a' && attr.name === 'href' && isSafeHref(attr.value);
     if (!allowed) {
       $(element).removeAttr(attr.name);
@@ -51,7 +53,7 @@ function sanitizeNode($: CheerioAPI, element: Element): void {
   }
 
   // 子ノードを再帰的にサニタイズ
-  const children = element.children.slice();
+  const children = [...element.children];
   for (const child of children) {
     if (isTag(child)) {
       sanitizeNode($, child);
@@ -70,8 +72,8 @@ export function sanitizeSummaryHtml(html: string): string {
     return '';
   }
 
-  // cheerio の load は <html><head></head><body>...</body></html> を生成する。
-  // body を直接使うことで、入力に含まれる </div> などでラッパーが壊れる問題を回避する。
+  // Cheerio の load は <html><head></head><body>...</body></html> を生成する。
+  // Body を直接使うことで、入力に含まれる </div> などでラッパーが壊れる問題を回避する。
   const $ = load(html);
   const body = $('body');
   const bodyElement = body[0] as Element | undefined;
@@ -79,7 +81,7 @@ export function sanitizeSummaryHtml(html: string): string {
     return '';
   }
 
-  for (const child of bodyElement.children.slice()) {
+  for (const child of bodyElement.children) {
     if (isTag(child)) {
       sanitizeNode($, child);
     }

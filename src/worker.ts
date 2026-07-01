@@ -16,25 +16,26 @@ import type {
   SyncAcceptedResponse,
 } from './shared/types.js';
 import { syncAllSubscriptions } from './workflows/sync.js';
-import { discoverRssFeedUrl, type DiscoveredFeed } from './services/scraper.js';
+import { discoverRssFeedUrl } from './services/scraper.js';
+import type { DiscoveredFeed } from './services/scraper.js';
 
-type SourceRow = {
+interface SourceRow {
   articleId: string | null;
   id: string;
   isRead: boolean | null;
   siteUrl: string;
   title: string | null;
-};
+}
 
-type SourceAggregate = {
+interface SourceAggregate {
   articleCount: number;
   id: string;
   siteUrl: string;
   title: string | null;
   unreadCount: number;
-};
+}
 
-type ArticleRow = {
+interface ArticleRow {
   content: string | null;
   createdAt: Date | string | null;
   id: string;
@@ -45,15 +46,15 @@ type ArticleRow = {
   summary: string | null;
   title: string;
   url: string;
-};
+}
 
-type BookmarkRow = {
+interface BookmarkRow {
   articleId: string;
   comment: string | null;
   createdAt: Date | string | null;
   id: string;
   user: string;
-};
+}
 
 const app = new Hono<{ Bindings: Bindings }>();
 const bookmarkArticleIdChunkSize = 50;
@@ -85,10 +86,10 @@ function createArticleResponse(article: ArticleRow, bookmarks: Bookmark[]): Arti
       id: bookmark.id,
       user: bookmark.user,
     })),
-    createdAt: formatDate(article.createdAt),
     content: article.content ?? '',
-    id: article.id,
+    createdAt: formatDate(article.createdAt),
     hatenaSummary: article.hatenaSummary?.trim() ?? '',
+    id: article.id,
     isRead: Boolean(article.isRead),
     publishedAt: formatDate(article.publishedAt ?? article.createdAt),
     siteUrl: article.siteUrl,
@@ -119,7 +120,7 @@ function sourceSuffix(siteUrl: string): string {
       return '';
     }
 
-    return segments[segments.length - 1]!.replace(/\.[^.]+$/, '').trim().toUpperCase();
+    return segments.at(-1)!.replace(/\.[^.]+$/, '').trim().toUpperCase();
   } catch {
     return '';
   }
@@ -264,19 +265,19 @@ app.get('/api/articles', async (c) => {
     articleRows.map((article) => article.id),
   );
 
-  const articles: Article[] = articleRows.map((article) =>
+  const articleList: Article[] = articleRows.map((article) =>
     createArticleResponse(article, bookmarksByArticleId.get(article.id) ?? []),
   );
 
-  return c.json({ articles });
+  return c.json({ articles: articleList });
 });
 
 app.get('/api/sources', async (c) => {
   const database = getDb(c.env);
   const sourceRows = (await database
     .select({
-      id: subscriptions.id,
       articleId: articles.id,
+      id: subscriptions.id,
       isRead: articles.isRead,
       siteUrl: subscriptions.siteUrl,
       title: subscriptions.title,
@@ -308,7 +309,7 @@ app.get('/api/sources', async (c) => {
     });
   }
 
-  const groupedSources = Array.from(sourcesById.values());
+  const groupedSources = [...sourcesById.values()];
   const titleCounts = new Map<string, number>();
   for (const source of groupedSources) {
     const base = sourceTitleBase(source);
@@ -386,7 +387,7 @@ app.post('/api/subscriptions', async (c) => {
     discoveredFeed = await discoverRssFeedUrl(normalizedSiteUrl);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    console.warn('RSS フィードの自動検出に失敗しました。', { siteUrl: normalizedSiteUrl, error: message });
+    console.warn('RSS フィードの自動検出に失敗しました。', { error: message, siteUrl: normalizedSiteUrl });
     discoveredFeed = null;
   }
 
@@ -473,7 +474,7 @@ app.post('/api/sync', (c) => {
   if (c.executionCtx) {
     c.executionCtx.waitUntil(syncTask);
   } else {
-    // syncTask は定義時に .catch() 済みのため、ここでは追加のエラーハンドリングは不要。
+    // SyncTask は定義時に .catch() 済みのため、ここでは追加のエラーハンドリングは不要。
     void syncTask;
   }
 
@@ -494,9 +495,9 @@ app.get('*', async (c) => {
   return c.text('Cloudflare Worker scaffold is not fully wired yet.', 503);
 });
 
-type ScheduledContext = {
+interface ScheduledContext {
   waitUntil: (promise: Promise<unknown>) => void;
-};
+}
 
 function createScheduledHandler() {
   return async (_event: unknown, env: Bindings, ctx: ScheduledContext) => {

@@ -23,7 +23,8 @@ import {
   RefreshCw,
   Search,
 } from 'lucide-react';
-import { useCallback, useMemo, useState, type FormEvent } from 'react';
+import { useCallback, useMemo, useState } from 'react';
+import type { FormEvent } from 'react';
 
 import { applyReadStateChange } from './articleState.js';
 import { shouldShowLoadMore } from './articlePagination.js';
@@ -35,7 +36,8 @@ import { useSources } from './hooks/useSources.js';
 import { useSubscriptions } from './hooks/useSubscriptions.js';
 import { useSync } from './hooks/useSync.js';
 import type { Article, ArticleSortDirection } from './types.js';
-import { normalizeError, type Status } from './utils/status.js';
+import { normalizeError } from './utils/status.js';
+import type { Status } from './utils/status.js';
 
 function includesQuery(value: string | null | undefined, query: string): boolean {
   return value?.toLowerCase().includes(query) ?? false;
@@ -81,12 +83,15 @@ function ArticleCardSkeleton() {
 function StatusAlert({ status }: { status: Status }) {
   const icon = (() => {
     switch (status.kind) {
-      case 'error':
+      case 'error': {
         return <AlertCircle className="size-4" />;
-      case 'success':
+      }
+      case 'success': {
         return <CheckCircle2 className="size-4" />;
-      case 'loading':
+      }
+      case 'loading': {
         return <Loader2 className="size-4 animate-spin" />;
+      }
     }
   })();
 
@@ -107,7 +112,7 @@ function StatusAlert({ status }: { status: Status }) {
 export function App() {
   const [searchQuery, setSearchQuery] = useState('');
   const [showUnreadOnly, setShowUnreadOnly] = useState(true);
-  const [selectedSourceUrl, setSelectedSourceUrl] = useState<string | undefined>(undefined);
+  const [selectedSourceUrl, setSelectedSourceUrl] = useState<string | undefined>();
   const [sortOrder, setSortOrder] = useState<ArticleSortDirection>('asc');
   const [sheetOpen, setSheetOpen] = useState(false);
 
@@ -120,7 +125,7 @@ export function App() {
 
   const refreshAll = useCallback(() => {
     sources.reload().catch((error: unknown) => {
-      // useSources 側で status が更新されるため、ここでは何もしない
+      // UseSources 側で status が更新されるため、ここでは何もしない
       void normalizeError(error, '購読ソースの読み込みに失敗しました。');
     });
     refresh();
@@ -136,15 +141,15 @@ export function App() {
       const previousArticles = articles;
 
       // Optimistic UI: 即座に既読化 / 未読のみモードでは削除。
-      // unreadCount の減算は sources.reload() 後に再計算されるためここでは行わない。
+      // UnreadCount の減算は sources.reload() 後に再計算されるためここでは行わない。
       setArticles((current) => applyReadStateChange(current, articleId, true, showUnreadOnly));
       setReadStateStatus({ kind: 'loading', message: '既読にしています...' });
 
       try {
         const response = await fetch(`/api/articles/${articleId}`, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ isRead: true }),
+          headers: { 'Content-Type': 'application/json' },
+          method: 'PATCH',
         });
         if (!response.ok) {
           throw new Error('既読状態の更新に失敗しました。');
@@ -160,7 +165,7 @@ export function App() {
         });
       }
     },
-    [articles, showUnreadOnly, sources],
+    [articles, setArticles, showUnreadOnly, sources],
   );
 
   useKeyboardShortcuts(articles, { onMarkAsRead: (id) => void handleMarkAsRead(id) });
@@ -356,7 +361,7 @@ export function App() {
                     <ArticleCardSkeleton />
                     <ArticleCardSkeleton />
                   </>
-                ) : filteredArticles.length === 0 ? (
+                ) : (filteredArticles.length === 0 ? (
                   <Empty>
                     <EmptyHeader>
                       <EmptyMedia variant="icon">
@@ -384,7 +389,7 @@ export function App() {
                       onMarkAsRead={(id) => void handleMarkAsRead(id)}
                     />
                   ))
-                )}
+                ))}
               </div>
 
               {showLoadMoreButton && (

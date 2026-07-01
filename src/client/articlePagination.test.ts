@@ -36,8 +36,8 @@ describe('articlePagination', () => {
   it('builds articles urls with pagination parameters', () => {
     expect(
       buildArticlesUrl({
-        unreadOnly: true,
         sourceUrl: 'https://example.com/feed.xml',
+        unreadOnly: true,
       }),
     ).toBe(`/api/articles?unread_only=true&limit=${ARTICLE_PAGE_SIZE}&offset=0&sort=asc&source=https%3A%2F%2Fexample.com%2Ffeed.xml`);
   });

@@ -15,7 +15,7 @@ describe('worker internal functions', () => {
 
     it('returns empty string for an invalid date string', async () => {
       const { formatDate } = await import('./worker.js');
-      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
       expect(formatDate('not-a-date')).toBe('');
       expect(warnSpy).toHaveBeenCalledWith('formatDate: invalid date string encountered', 'not-a-date');
@@ -30,7 +30,7 @@ describe('worker internal functions', () => {
 
     it('returns empty string for undefined', async () => {
       const { formatDate } = await import('./worker.js');
-      expect(formatDate(undefined)).toBe('');
+      expect(formatDate()).toBe('');
     });
   });
 

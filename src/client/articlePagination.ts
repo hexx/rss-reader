@@ -2,13 +2,13 @@ import type { Article } from './types.js';
 
 export const ARTICLE_PAGE_SIZE = 50;
 
-type BuildArticlesUrlOptions = {
+interface BuildArticlesUrlOptions {
   limit?: number;
   offset?: number;
   sourceUrl?: string | undefined;
   sort?: 'asc' | 'desc';
   unreadOnly: boolean;
-};
+}
 
 export function buildArticlesUrl({
   limit = ARTICLE_PAGE_SIZE,

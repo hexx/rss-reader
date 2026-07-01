@@ -58,9 +58,9 @@ function createOpenCodeGoProvider(env: AiEnv) {
   const apiKey = requireEnv(env, 'OPENCODE_GO_API_KEY');
 
   return createOpenAICompatible({
+    apiKey,
     baseURL,
     name: 'opencode-go',
-    apiKey,
   });
 }
 
@@ -86,9 +86,9 @@ export async function generateArticleSummary(
   const truncatedContent = truncateArticleContent(content);
   const result = await generateText({
     model: getOpenCodeGoChatModel(env),
+    prompt: buildArticleSummaryPrompt(title, truncatedContent),
     system:
       'あなたは日本語の要約アシスタントです。与えられた記事を簡潔に要約してください。記事本文が空で提供される場合もあります。その場合は、タイトルから推測できる範囲で要約を作成してください。出力は段落(<p>)やリスト(<ul>,<li>)、強調(<strong>)などのHTMLタグを用いて、見やすく構造化されたHTMLスニペットにしてください。',
-    prompt: buildArticleSummaryPrompt(title, truncatedContent),
   });
 
   // AI 出力は信頼できないので、保存前に許可タグ・許可属性のみにサニタイズする。
@@ -113,9 +113,9 @@ export async function generateHatenaSummary(
 
   const result = await generateText({
     model: getOpenCodeGoChatModel(env),
+    prompt: buildHatenaSummaryPrompt(comments),
     system:
       'あなたは日本語の要約アシスタントです。はてなブックマークのコメントの雰囲気を簡潔に要約してください。出力は段落(<p>)やリスト(<ul>,<li>)、強調(<strong>)などのHTMLタグを用いて、見やすく構造化されたHTMLスニペットにしてください。',
-    prompt: buildHatenaSummaryPrompt(comments),
   });
 
   return sanitizeSummaryHtml(result.text.trim());

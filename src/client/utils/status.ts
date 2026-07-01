@@ -7,10 +7,10 @@
  */
 export type StatusKind = 'loading' | 'success' | 'error';
 
-export type Status = {
+export interface Status {
   kind: StatusKind;
   message: string;
-};
+}
 
 export function statusOf(kind: StatusKind, message: string): Status {
   return { kind, message };

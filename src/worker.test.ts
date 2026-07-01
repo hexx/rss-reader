@@ -1,4 +1,4 @@
-import { http, HttpResponse } from 'msw';
+import { HttpResponse, http } from 'msw';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { createTestDatabase } from './test-utils/sqljs-db.js';
@@ -54,71 +54,71 @@ describe('worker app', () => {
   it('returns articles and sources from the worker database', async () => {
     await testDb.insert(subscriptions).values([
       {
+        addedAt: new Date('2024-01-03T00:00:00.000Z'),
         id: 'subscription-1',
         siteUrl: 'https://example.com/feed.xml',
         title: 'Example Feed',
-        addedAt: new Date('2024-01-03T00:00:00.000Z'),
       },
       {
+        addedAt: new Date('2024-01-02T00:00:00.000Z'),
         id: 'subscription-2',
         siteUrl: 'https://example.com/other.xml',
         title: 'Example Feed',
-        addedAt: new Date('2024-01-02T00:00:00.000Z'),
       },
       {
+        addedAt: new Date('2024-01-01T00:00:00.000Z'),
         id: 'subscription-3',
         siteUrl: 'https://third.example/rss.xml',
         title: null,
-        addedAt: new Date('2024-01-01T00:00:00.000Z'),
       },
     ]);
 
     await testDb.insert(articles).values([
       {
-        id: 'article-1',
-        siteUrl: 'https://example.com/feed.xml',
-        url: 'https://example.com/articles/1',
-        title: '最初の記事',
         content: '本文',
-        summary: '本文要約',
         hatenaSummary: '反応要約',
+        id: 'article-1',
         isRead: false,
         publishedAt: new Date('2024-01-01T00:00:00.000Z'),
+        siteUrl: 'https://example.com/feed.xml',
+        summary: '本文要約',
+        title: '最初の記事',
+        url: 'https://example.com/articles/1',
       },
       {
-        id: 'article-2',
-        siteUrl: 'https://example.com/feed.xml',
-        url: 'https://example.com/articles/2',
-        title: '二番目の記事',
         content: '本文2',
-        summary: '別の要約',
         hatenaSummary: null,
+        id: 'article-2',
         isRead: true,
         publishedAt: new Date('2024-01-02T00:00:00.000Z'),
+        siteUrl: 'https://example.com/feed.xml',
+        summary: '別の要約',
+        title: '二番目の記事',
+        url: 'https://example.com/articles/2',
       },
       {
-        id: 'article-3',
-        siteUrl: 'https://example.com/other.xml',
-        url: 'https://example.com/articles/3',
-        title: '別の記事',
         content: '本文3',
-        summary: '別の要約',
         hatenaSummary: null,
+        id: 'article-3',
         isRead: true,
         publishedAt: new Date('2024-01-03T00:00:00.000Z'),
+        siteUrl: 'https://example.com/other.xml',
+        summary: '別の要約',
+        title: '別の記事',
+        url: 'https://example.com/articles/3',
       },
     ]);
 
     await testDb.insert(hatenaBookmarks).values({
-      id: 'bookmark-1',
       articleId: 'article-1',
-      user: 'alice',
       comment: '参考になる',
+      id: 'bookmark-1',
+      user: 'alice',
     });
 
     const articlesResponse = await app.fetch(new Request('http://localhost/api/articles'));
     const articlesPayload = (await articlesResponse.json()) as {
-      articles: Array<{ title: string; url: string; bookmarks: Array<{ comment: string }> }>;
+      articles: { title: string; url: string; bookmarks: Array<{ comment: string }> }[];
     };
     expect(articlesResponse.ok).toBe(true);
     expect(articlesPayload.articles).toHaveLength(1);
@@ -132,7 +132,7 @@ describe('worker app', () => {
       new Request('http://localhost/api/articles?source=https://example.com/other.xml&unread_only=false'),
     );
     const sourcePayload = (await sourceResponse.json()) as {
-      articles: Array<{ title: string; url: string }>;
+      articles: { title: string; url: string }[];
     };
     expect(sourceResponse.ok).toBe(true);
     expect(sourcePayload.articles).toHaveLength(1);
@@ -145,7 +145,7 @@ describe('worker app', () => {
       new Request('http://localhost/api/articles?unread_only=false&limit=1&offset=1'),
     );
     const pagedPayload = (await pagedResponse.json()) as {
-      articles: Array<{ title: string; url: string }>;
+      articles: { title: string; url: string }[];
     };
     expect(pagedResponse.ok).toBe(true);
     expect(pagedPayload.articles).toHaveLength(1);
@@ -156,39 +156,39 @@ describe('worker app', () => {
 
     const sourcesResponse = await app.fetch(new Request('http://localhost/api/sources'));
     const sourcesPayload = (await sourcesResponse.json()) as {
-      sources: Array<{
+      sources: {
         articleCount: number;
         displayTitle: string;
         id: string;
         siteUrl: string;
         title: string;
         unreadCount: number;
-      }>;
+      }[];
     };
     expect(sourcesResponse.ok).toBe(true);
     expect(sourcesPayload.sources).toEqual([
       {
+        articleCount: 2,
+        displayTitle: 'Example Feed (FEED)',
         id: 'subscription-1',
         siteUrl: 'https://example.com/feed.xml',
         title: 'Example Feed',
-        displayTitle: 'Example Feed (FEED)',
-        articleCount: 2,
         unreadCount: 1,
       },
       {
+        articleCount: 1,
+        displayTitle: 'Example Feed (OTHER)',
         id: 'subscription-2',
         siteUrl: 'https://example.com/other.xml',
         title: 'Example Feed',
-        displayTitle: 'Example Feed (OTHER)',
-        articleCount: 1,
         unreadCount: 0,
       },
       {
+        articleCount: 0,
+        displayTitle: 'third.example',
         id: 'subscription-3',
         siteUrl: 'https://third.example/rss.xml',
         title: 'third.example',
-        displayTitle: 'third.example',
-        articleCount: 0,
         unreadCount: 0,
       },
     ]);
@@ -221,18 +221,18 @@ describe('worker app', () => {
       },
     ];
 
-    const expected = new Map<string, Array<{ id: string; user: string; comment: string; createdAt: string }>>();
+    const expected = new Map<string, { id: string; user: string; comment: string; createdAt: string }[]>();
     expected.set('article-1', [
-      { id: 'bookmark-1', user: 'alice', comment: 'first', createdAt: '2024-01-01T00:00:00.000Z' },
+      { comment: 'first', createdAt: '2024-01-01T00:00:00.000Z', id: 'bookmark-1', user: 'alice' },
     ]);
     expected.set('article-51', [
-      { id: 'bookmark-2', user: 'bob', comment: 'second', createdAt: '2024-01-02T00:00:00.000Z' },
+      { comment: 'second', createdAt: '2024-01-02T00:00:00.000Z', id: 'bookmark-2', user: 'bob' },
     ]);
     expected.set('article-101', [
-      { id: 'bookmark-3', user: 'carol', comment: 'third', createdAt: '2024-01-03T00:00:00.000Z' },
+      { comment: 'third', createdAt: '2024-01-03T00:00:00.000Z', id: 'bookmark-3', user: 'carol' },
     ]);
 
-    // orderBy が thenable として結果を返す（Drizzle の QueryPromise に相当）
+    // OrderBy が thenable として結果を返す（Drizzle の QueryPromise に相当）
     const orderByMock = vi
       .fn()
       .mockResolvedValueOnce([bookmarkRows[0]])
@@ -262,11 +262,11 @@ describe('worker app', () => {
 
     const response = await app.fetch(
       new Request('http://localhost/api/subscriptions', {
-        method: 'POST',
+        body: JSON.stringify({ siteUrl: 'https://example.com/feed' }),
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ siteUrl: 'https://example.com/feed' }),
+        method: 'POST',
       }),
     );
 
@@ -310,9 +310,9 @@ describe('worker app', () => {
 
     const response = await app.fetch(
       new Request('http://localhost/api/subscriptions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ siteUrl: 'https://blog.example.com/' }),
+        headers: { 'Content-Type': 'application/json' },
+        method: 'POST',
       }),
     );
 
@@ -347,9 +347,9 @@ describe('worker app', () => {
 
     const response = await app.fetch(
       new Request('http://localhost/api/subscriptions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ siteUrl: 'https://atom.example.com/' }),
+        headers: { 'Content-Type': 'application/json' },
+        method: 'POST',
       }),
     );
 
@@ -372,9 +372,9 @@ describe('worker app', () => {
 
     const response = await app.fetch(
       new Request('http://localhost/api/subscriptions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ siteUrl: 'https://nofeed.example.com/' }),
+        headers: { 'Content-Type': 'application/json' },
+        method: 'POST',
       }),
     );
 
@@ -389,9 +389,9 @@ describe('worker app', () => {
   it('returns 400 for internal hostnames to prevent SSRF', async () => {
     const response = await app.fetch(
       new Request('http://localhost/api/subscriptions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ siteUrl: 'http://127.0.0.1/' }),
+        headers: { 'Content-Type': 'application/json' },
+        method: 'POST',
       }),
     );
 
@@ -402,24 +402,24 @@ describe('worker app', () => {
 
   it('updates article read state through the article route', async () => {
     await testDb.insert(articles).values({
-      id: 'article-1',
-      siteUrl: 'https://example.com/feed.xml',
-      url: 'https://example.com/articles/1',
-      title: '最初の記事',
       content: '本文',
-      summary: '本文要約',
       hatenaSummary: null,
+      id: 'article-1',
       isRead: false,
       publishedAt: new Date('2024-01-01T00:00:00.000Z'),
+      siteUrl: 'https://example.com/feed.xml',
+      summary: '本文要約',
+      title: '最初の記事',
+      url: 'https://example.com/articles/1',
     });
 
     const response = await app.fetch(
       new Request('http://localhost/api/articles/article-1', {
-        method: 'PATCH',
+        body: JSON.stringify({ isRead: true }),
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ isRead: true }),
+        method: 'PATCH',
       }),
     );
 
@@ -438,38 +438,38 @@ describe('worker app', () => {
 
   it('rejects non-object request bodies with 400', async () => {
     await testDb.insert(articles).values({
-      id: 'article-1',
-      siteUrl: 'https://example.com/feed.xml',
-      url: 'https://example.com/articles/1',
-      title: '記事',
       content: '本文',
-      summary: '要約',
       hatenaSummary: null,
+      id: 'article-1',
       isRead: false,
       publishedAt: new Date('2024-01-01T00:00:00.000Z'),
+      siteUrl: 'https://example.com/feed.xml',
+      summary: '要約',
+      title: '記事',
+      url: 'https://example.com/articles/1',
     });
 
-    const cases: Array<{ method: 'POST' | 'DELETE' | 'PATCH'; pathname: string; body: string }> = [
-      { method: 'POST', pathname: '/api/subscriptions', body: 'null' },
-      { method: 'DELETE', pathname: '/api/subscriptions', body: 'null' },
-      { method: 'PATCH', pathname: '/api/articles/article-1', body: 'null' },
+    const cases: { method: 'POST' | 'DELETE' | 'PATCH'; pathname: string; body: string }[] = [
+      { body: 'null', method: 'POST', pathname: '/api/subscriptions' },
+      { body: 'null', method: 'DELETE', pathname: '/api/subscriptions' },
+      { body: 'null', method: 'PATCH', pathname: '/api/articles/article-1' },
     ];
 
     for (const { method, pathname, body } of cases) {
       const response = await app.fetch(
         new Request(`http://localhost${pathname}`, {
-          method,
-          headers: { 'Content-Type': 'application/json' },
           body,
+          headers: { 'Content-Type': 'application/json' },
+          method,
         }),
       );
-      const status = response.status;
+      const {status} = response;
       const responseBody = (await response.json()) as { error?: string };
-      expect({ method, pathname, status, error: responseBody.error }).toEqual({
+      expect({ error: responseBody.error, method, pathname, status }).toEqual({
+        error: 'Request body must be a JSON object.',
         method,
         pathname,
         status: 400,
-        error: 'Request body must be a JSON object.',
       });
     }
   });
@@ -484,7 +484,7 @@ describe('worker app', () => {
       waitUntil: vi.fn(),
     };
 
-    syncAllSubscriptionsMock.mockResolvedValue(undefined);
+    syncAllSubscriptionsMock.mockResolvedValue();
 
     const syncResponse = await app.fetch(
       new Request('http://localhost/api/sync', { method: 'POST' }),
@@ -517,7 +517,7 @@ describe('worker app', () => {
       waitUntil: vi.fn(),
     };
 
-    syncAllSubscriptionsMock.mockResolvedValue(undefined);
+    syncAllSubscriptionsMock.mockResolvedValue();
     const workerModule = await import('./worker.js');
 
     await workerModule.default.scheduled({} as never, env as never, executionContext as never);
@@ -528,22 +528,22 @@ describe('worker app', () => {
 
   it('updates article read state through the /read sub-path', async () => {
     await testDb.insert(articles).values({
-      id: 'article-read',
-      siteUrl: 'https://example.com/feed.xml',
-      url: 'https://example.com/articles/read',
-      title: 'read article',
       content: '本文',
-      summary: '要約',
       hatenaSummary: null,
+      id: 'article-read',
       isRead: false,
       publishedAt: new Date('2024-01-01T00:00:00.000Z'),
+      siteUrl: 'https://example.com/feed.xml',
+      summary: '要約',
+      title: 'read article',
+      url: 'https://example.com/articles/read',
     });
 
     const response = await app.fetch(
       new Request('http://localhost/api/articles/article-read/read', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ isRead: true }),
+        headers: { 'Content-Type': 'application/json' },
+        method: 'PATCH',
       }),
     );
 
@@ -557,9 +557,9 @@ describe('worker app', () => {
   it('returns 404 when deleting a non-existent subscription', async () => {
     const response = await app.fetch(
       new Request('http://localhost/api/subscriptions', {
-        method: 'DELETE',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ siteUrl: 'https://nonexistent.example/feed.xml' }),
+        headers: { 'Content-Type': 'application/json' },
+        method: 'DELETE',
       }),
     );
 
@@ -572,35 +572,35 @@ describe('worker app', () => {
     beforeEach(async () => {
       await testDb.insert(subscriptions).values([
         {
+          addedAt: new Date('2024-01-01T00:00:00.000Z'),
           id: 'sub-sort',
           siteUrl: 'https://example.com/feed.xml',
           title: 'Sort Test',
-          addedAt: new Date('2024-01-01T00:00:00.000Z'),
         },
       ]);
 
       await testDb.insert(articles).values([
         {
-          id: 'article-old',
-          siteUrl: 'https://example.com/feed.xml',
-          url: 'https://example.com/old',
-          title: 'Old Article',
           content: '',
-          summary: '',
           hatenaSummary: null,
+          id: 'article-old',
           isRead: false,
           publishedAt: new Date('2024-01-01T00:00:00.000Z'),
+          siteUrl: 'https://example.com/feed.xml',
+          summary: '',
+          title: 'Old Article',
+          url: 'https://example.com/old',
         },
         {
-          id: 'article-new',
-          siteUrl: 'https://example.com/feed.xml',
-          url: 'https://example.com/new',
-          title: 'New Article',
           content: '',
-          summary: '',
           hatenaSummary: null,
+          id: 'article-new',
           isRead: false,
           publishedAt: new Date('2024-01-10T00:00:00.000Z'),
+          siteUrl: 'https://example.com/feed.xml',
+          summary: '',
+          title: 'New Article',
+          url: 'https://example.com/new',
         },
       ]);
     });
@@ -609,7 +609,7 @@ describe('worker app', () => {
       const response = await app.fetch(
         new Request('http://localhost/api/articles?unread_only=false'),
       );
-      const body = (await response.json()) as { articles: Array<{ title: string }> };
+      const body = (await response.json()) as { articles: { title: string }[] };
       expect(body.articles[0]?.title).toBe('Old Article');
       expect(body.articles[1]?.title).toBe('New Article');
     });
@@ -618,7 +618,7 @@ describe('worker app', () => {
       const response = await app.fetch(
         new Request('http://localhost/api/articles?unread_only=false&sort=desc'),
       );
-      const body = (await response.json()) as { articles: Array<{ title: string }> };
+      const body = (await response.json()) as { articles: { title: string }[] };
       expect(body.articles[0]?.title).toBe('New Article');
       expect(body.articles[1]?.title).toBe('Old Article');
     });
@@ -627,7 +627,7 @@ describe('worker app', () => {
       const response = await app.fetch(
         new Request('http://localhost/api/articles?unread_only=false&sort=invalid'),
       );
-      const body = (await response.json()) as { articles: Array<{ title: string }> };
+      const body = (await response.json()) as { articles: { title: string }[] };
       expect(body.articles[0]?.title).toBe('Old Article');
       expect(body.articles[1]?.title).toBe('New Article');
     });

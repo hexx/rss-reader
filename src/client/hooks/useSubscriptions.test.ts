@@ -1,4 +1,4 @@
-import { http, HttpResponse } from 'msw';
+import { HttpResponse, http } from 'msw';
 import { act, renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -40,8 +40,8 @@ describe('useSubscriptions', () => {
 
   it('shows auto-discovery message when alreadyAFeed is false', async () => {
     server.use(
-      http.post('*/api/subscriptions', () => {
-        return HttpResponse.json(
+      http.post('*/api/subscriptions', () => 
+        HttpResponse.json(
           {
             alreadyAFeed: false,
             feedType: 'rss',
@@ -50,8 +50,8 @@ describe('useSubscriptions', () => {
             title: 'example.com',
           },
           { status: 201 },
-        );
-      }),
+        )
+      ),
     );
 
     const { result } = renderHook(() => useSubscriptions({ onAfterChange: vi.fn() }));
@@ -66,8 +66,8 @@ describe('useSubscriptions', () => {
 
   it('shows "Atom" when feedType is atom', async () => {
     server.use(
-      http.post('*/api/subscriptions', () => {
-        return HttpResponse.json(
+      http.post('*/api/subscriptions', () => 
+        HttpResponse.json(
           {
             alreadyAFeed: false,
             feedType: 'atom',
@@ -76,8 +76,8 @@ describe('useSubscriptions', () => {
             title: 'example.com',
           },
           { status: 201 },
-        );
-      }),
+        )
+      ),
     );
 
     const { result } = renderHook(() => useSubscriptions({ onAfterChange: vi.fn() }));
@@ -92,19 +92,19 @@ describe('useSubscriptions', () => {
 
   it('handles subscription add errors', async () => {
     server.use(
-      http.post('*/api/subscriptions', () => {
-        return HttpResponse.json({ error: 'フィードが見つかりません。' }, { status: 400 });
-      }),
+      http.post('*/api/subscriptions', () => 
+        HttpResponse.json({ error: 'フィードが見つかりません。' }, { status: 400 })
+      ),
     );
 
     const { result } = renderHook(() => useSubscriptions({ onAfterChange: vi.fn() }));
 
-    // add はエラーを throw する
+    // Add はエラーを throw する
     await act(async () => {
       try {
         await result.current.add('https://example.com/bad');
       } catch {
-        // expected
+        // Expected
       }
     });
 
@@ -136,9 +136,9 @@ describe('useSubscriptions', () => {
 
   it('handles subscription remove errors', async () => {
     server.use(
-      http.delete('*/api/subscriptions', () => {
-        return HttpResponse.json({ error: '購読が見つかりません。' }, { status: 404 });
-      }),
+      http.delete('*/api/subscriptions', () => 
+        HttpResponse.json({ error: '購読が見つかりません。' }, { status: 404 })
+      ),
     );
 
     const { result } = renderHook(() => useSubscriptions({ onAfterChange: vi.fn() }));
@@ -147,7 +147,7 @@ describe('useSubscriptions', () => {
       try {
         await result.current.remove('https://example.com/nonexistent');
       } catch {
-        // expected
+        // Expected
       }
     });
 
@@ -158,12 +158,12 @@ describe('useSubscriptions', () => {
 
   it('resets isAdding to false after successful add', async () => {
     server.use(
-      http.post('*/api/subscriptions', () => {
-        return HttpResponse.json(
+      http.post('*/api/subscriptions', () => 
+        HttpResponse.json(
           { id: 'sub-1', siteUrl: 'https://example.com/feed' },
           { status: 201 },
-        );
-      }),
+        )
+      ),
     );
 
     const { result } = renderHook(() => useSubscriptions({ onAfterChange: vi.fn() }));
@@ -179,9 +179,9 @@ describe('useSubscriptions', () => {
 
   it('resets removingSiteUrl after successful remove', async () => {
     server.use(
-      http.delete('*/api/subscriptions', () => {
-        return HttpResponse.json({ siteUrl: 'https://example.com/feed.xml' });
-      }),
+      http.delete('*/api/subscriptions', () => 
+        HttpResponse.json({ siteUrl: 'https://example.com/feed.xml' })
+      ),
     );
 
     const { result } = renderHook(() => useSubscriptions({ onAfterChange: vi.fn() }));

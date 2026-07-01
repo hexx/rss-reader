@@ -1,5 +1,7 @@
-import { load, type CheerioAPI } from 'cheerio';
-import { isTag, type Element } from 'domhandler';
+import { load } from 'cheerio';
+import type { CheerioAPI } from 'cheerio';
+import { isTag } from 'domhandler';
+import type { Element } from 'domhandler';
 import Parser from 'rss-parser';
 
 export interface ScrapedLink {
@@ -36,7 +38,7 @@ const nonHtmlFileExtensionPattern =
   /\.(?:pdf|zip|exe|mp4|png|jpe?g|gif|webp|avif|svg|bmp|ico|webm|mov|avi|mkv|mp3|wav|ogg|docx?|xlsx?|pptx?|tar|tgz|gz|bz2|7z|rar)$/i;
 
 function normalizeText(value: string): string {
-  return value.replace(/\s+/g, ' ').trim();
+  return value.replaceAll(/\s+/g, ' ').trim();
 }
 
 function parsePubDate(value: string | undefined): Date | null {
@@ -376,7 +378,7 @@ export async function discoverRssFeedUrl(
 
   const html = await readBoundedText(response, maxBytes);
   const $ = load(html);
-  const candidates: Array<{ feedUrl: string; type: DiscoveredFeedType }> = [];
+  const candidates: { feedUrl: string; type: DiscoveredFeedType }[] = [];
 
   $('link[rel~="alternate"]').each((_, node) => {
     if (!isTag(node)) {

@@ -1,0 +1,50 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": [
+    "typescript",
+    "react",
+    "unicorn",
+    "import",
+    "oxc"
+  ],
+  "categories": {
+    "correctness": "error",
+    "suspicious": "error",
+    "pedantic": "warn",
+    "perf": "warn",
+    "style": "warn"
+  },
+  "rules": {
+    "no-console": "warn",
+    "react/react-in-jsx-scope": "off",
+    "react/no-multi-comp": "off",
+    "react/jsx-filename-extension": "off",
+    "react/jsx-props-no-spreading": "off",
+    "react/forbid-component-props": "off",
+    "react/jsx-max-depth": "off",
+    "import/no-named-export": "off",
+    "import/no-anonymous-default-export": "off",
+    "import/prefer-default-export": "off",
+    "import/group-exports": "off",
+    "import/no-unassigned-import": "off",
+    "oxc/no-async-endpoint-handlers": "off",
+    "no-underscore-dangle": ["error", {
+      "allow": [
+        "_setSleepForTest",
+        "_setRandomForTest",
+        "_resetRateLimiterForTest",
+        "_getRateLimiterStateForTest"
+      ]
+    }]
+  },
+  "env": {
+    "builtin": true,
+    "browser": true,
+    "node": true
+  },
+  "ignorePatterns": [
+    "dist/**",
+    "node_modules/**",
+    ".wrangler/**"
+  ]
+}

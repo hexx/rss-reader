@@ -1,12 +1,13 @@
 import { useCallback, useState } from 'react';
 
-import { normalizeError, type Status } from '../utils/status.js';
+import { normalizeError } from '../utils/status.js';
+import type { Status } from '../utils/status.js';
 
-type UseSyncResult = {
+interface UseSyncResult {
   isSyncing: boolean;
   status: Status | null;
   sync: () => Promise<void>;
-};
+}
 
 /**
  * サーバー側の `/api/sync` をキックして、一定時間後に記事一覧を
@@ -16,7 +17,7 @@ type UseSyncResult = {
  * 固定の待機時間後に refresh を呼び出している。本来はポーリングや
  * SSE / WebSocket で完了通知を受け取るのが望ましい。
  */
-const SYNC_REFRESH_DELAY_MS = 4_000;
+const SYNC_REFRESH_DELAY_MS = 4000;
 
 export function useSync({ onAfterSync }: { onAfterSync: () => void }): UseSyncResult {
   const [isSyncing, setIsSyncing] = useState(false);

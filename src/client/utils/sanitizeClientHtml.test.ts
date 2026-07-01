@@ -17,7 +17,7 @@ describe('sanitizeClientHtml', () => {
 
   it('preserves mailto: href values', () => {
     const html = '<p><a href="mailto:test@example.com">contact</a></p>';
-    // jsdom の DOMParser は属性値を小文字化する場合があるため、柔軟に検証
+    // Jsdom の DOMParser は属性値を小文字化する場合があるため、柔軟に検証
     const result = sanitizeClientHtml(html);
     expect(result).toContain('href="mailto:test@example.com"');
     expect(result).toContain('contact');
@@ -74,7 +74,7 @@ describe('sanitizeClientHtml', () => {
   });
 
   // SVG 要素は HTMLElement ではないためサニタイザの対象外です。
-  // onload 属性は除去されずそのまま残ります（サーバー側の cheerio ベース
+  // Onload 属性は除去されずそのまま残ります（サーバー側の cheerio ベース
   // サニタイザはタグ名で判定するため別の挙動となります）。
   // クライアント側サニタイザの将来の改善ポイントです。
   it('does not sanitize onload attributes on SVG elements', () => {

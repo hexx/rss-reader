@@ -57,20 +57,20 @@ const siteUrl = 'https://b.hatena.ne.jp/site/feed';
 const nonHatenaSiteUrl = 'https://example.com/feed.xml';
 
 const article = {
-  title: '記事タイトル',
   pubDate: new Date('2024-01-01T00:00:00.000Z'),
+  title: '記事タイトル',
   url: 'https://example.com/articles/1',
 };
 
 const secondArticle = {
-  title: '記事タイトル2',
   pubDate: new Date('2024-01-02T00:00:00.000Z'),
+  title: '記事タイトル2',
   url: 'https://example.com/articles/2',
 };
 
 const thirdArticle = {
-  title: '記事タイトル3',
   pubDate: new Date('2024-01-03T00:00:00.000Z'),
+  title: '記事タイトル3',
   url: 'https://example.com/articles/3',
 };
 
@@ -120,16 +120,16 @@ describe('syncSite', () => {
       hatenaSummary: 'はてブ要約',
       isRead: false,
       publishedAt: new Date('2024-01-01T00:00:00.000Z'),
-      summary: '要約文',
       siteUrl,
+      summary: '要約文',
       title: article.title,
       url: article.url,
     });
     expect(savedBookmarks).toHaveLength(1);
     expect(savedBookmarks[0]).toMatchObject({
       comment: '参考になる',
-      user: 'alice',
       createdAt: new Date('2024-01-01T00:00:00.000Z'),
+      user: 'alice',
     });
     expect(fetchArticleContentMock).toHaveBeenCalledWith(article.url);
     expect(fetchHatenaBookmarksMock).toHaveBeenCalledWith(article.url);
@@ -192,7 +192,7 @@ describe('syncSite', () => {
     fetchRssOrFallbackMock.mockResolvedValue([article]);
     fetchArticleContentMock.mockRejectedValueOnce(new Error('scrape failed'));
     fetchHatenaBookmarksMock.mockResolvedValue([
-      { user: 'bob', comment: '面白い', timestamp: new Date('2024-01-05T00:00:00.000Z') },
+      { comment: '面白い', timestamp: new Date('2024-01-05T00:00:00.000Z'), user: 'bob' },
     ]);
     generateArticleSummaryMock.mockResolvedValue('要約文');
     generateHatenaSummaryMock.mockResolvedValue('反応の要約');
@@ -204,8 +204,8 @@ describe('syncSite', () => {
     expect(savedArticles[0]).toMatchObject({
       content: '',
       hatenaSummary: '反応の要約',
-      summary: '要約文',
       siteUrl,
+      summary: '要約文',
       title: article.title,
       url: article.url,
     });
@@ -213,23 +213,23 @@ describe('syncSite', () => {
     expect(fetchHatenaBookmarksMock).toHaveBeenCalledWith(article.url);
     expect(generateArticleSummaryMock).toHaveBeenCalledWith(article.title, '', expect.any(Object));
     expect(generateHatenaSummaryMock).toHaveBeenCalledWith(
-      [{ user: 'bob', comment: '面白い', timestamp: new Date('2024-01-05T00:00:00.000Z') }],
+      [{ comment: '面白い', timestamp: new Date('2024-01-05T00:00:00.000Z'), user: 'bob' }],
       expect.any(Object),
     );
     expect(loggerMock.warn).toHaveBeenCalledWith(
       '本文の取得に失敗したため、本文なしで処理を継続します。',
       expect.objectContaining({
         articleUrl: article.url,
+        error: 'scrape failed',
         siteUrl,
         title: article.title,
-        error: 'scrape failed',
       }),
     );
   });
 
   it('fails fast in debug mode when an article sync fails', async () => {
     const { syncSite } = await import('./sync.js');
-    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
     fetchRssOrFallbackMock.mockResolvedValue([article]);
     fetchArticleContentMock.mockResolvedValue('本文の内容です。');
@@ -294,7 +294,7 @@ describe('syncSite', () => {
       .mockResolvedValueOnce([bookmarks[0]!])
       .mockResolvedValueOnce([
         bookmarks[0]!,
-        { user: 'bob', comment: '後から取れた', timestamp: new Date('2024-01-04T00:00:00.000Z') },
+        { comment: '後から取れた', timestamp: new Date('2024-01-04T00:00:00.000Z'), user: 'bob' },
       ]);
     generateArticleSummaryMock.mockResolvedValue('要約文');
     generateHatenaSummaryMock.mockResolvedValue('はてブ要約');
@@ -307,10 +307,10 @@ describe('syncSite', () => {
     expect(savedArticles).toHaveLength(1);
 
     const savedBookmarks = await testDb.select().from(hatenaBookmarks);
-    // alice は UNIQUE 制約で重複せず、bob が増えて 2 行になる
+    // Alice は UNIQUE 制約で重複せず、bob が増えて 2 行になる
     expect(savedBookmarks).toHaveLength(2);
-    expect(savedBookmarks.map((row) => row.user).sort()).toEqual(['alice', 'bob']);
-    // bob のコメントは 2 回目で取得したものがそのまま保存される
+    expect(savedBookmarks.map((row) => row.user).toSorted()).toEqual(['alice', 'bob']);
+    // Bob のコメントは 2 回目で取得したものがそのまま保存される
     const bobRow = savedBookmarks.find((row) => row.user === 'bob');
     expect(bobRow).toMatchObject({
       comment: '後から取れた',
@@ -379,9 +379,9 @@ describe('syncAllSubscriptions', () => {
 
   it('splits hatena bookmark inserts into chunks of 20', async () => {
     const manyBookmarks = Array.from({ length: 25 }, (_, index) => ({
-      user: `user-${index}`,
       comment: `comment-${index}`,
       timestamp: new Date(`2024-01-01T00:00:${String(index).padStart(2, '0')}.000Z`),
+      user: `user-${index}`,
     }));
 
     await testDb.insert(subscriptions).values([
@@ -420,6 +420,6 @@ describe('syncAllSubscriptions', () => {
 
     const savedArticles = await testDb.select().from(articles);
     expect(savedArticles).toHaveLength(2);
-    expect(savedArticles.map((row) => row.title).sort()).toEqual([article.title, secondArticle.title].sort());
+    expect(savedArticles.map((row) => row.title).toSorted()).toEqual([article.title, secondArticle.title].toSorted());
   });
 });

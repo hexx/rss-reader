@@ -92,12 +92,12 @@ describe('useKeyboardShortcuts', () => {
   it('ignores key events when the target is an INPUT element', () => {
     const onMarkAsRead = vi.fn();
     const input = document.createElement('input');
-    document.body.appendChild(input);
+    document.body.append(input);
 
     renderHook(() => useKeyboardShortcuts([mockArticle], { onMarkAsRead }));
 
     act(() => {
-      input.dispatchEvent(new KeyboardEvent('keydown', { key: 'm', bubbles: true }));
+      input.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'm' }));
     });
 
     // INPUT 要素内のキーイベントは無視される（onMarkAsRead は呼ばれない）
@@ -111,7 +111,7 @@ describe('useKeyboardShortcuts', () => {
 
     renderHook(() => useKeyboardShortcuts([mockArticle], { onMarkAsRead }));
 
-    // window に直接 dispatch したイベントは target が window になるため INPUT 判定の対象外
+    // Window に直接 dispatch したイベントは target が window になるため INPUT 判定の対象外
     act(() => {
       window.dispatchEvent(new KeyboardEvent('keydown', { key: 'm' }));
     });
@@ -121,7 +121,7 @@ describe('useKeyboardShortcuts', () => {
 
   it('uses the first unread article for shortcut actions', () => {
     const onMarkAsRead = vi.fn();
-    const articles = [readArticle, mockArticle]; // readArticle first, mockArticle second
+    const articles = [readArticle, mockArticle]; // ReadArticle first, mockArticle second
 
     renderHook(() => useKeyboardShortcuts(articles, { onMarkAsRead }));
 

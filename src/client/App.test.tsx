@@ -1,4 +1,4 @@
-import { http, HttpResponse } from 'msw';
+import { HttpResponse, http } from 'msw';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
@@ -87,7 +87,7 @@ describe('App', () => {
 
     // 「既読にする」ボタンをクリック
     const markReadButtons = screen.getAllByRole('button', { name: '既読にする' });
-    const innerButton = markReadButtons.find((btn) => btn.getAttribute('data-slot') === 'button');
+    const innerButton = markReadButtons.find((btn) => btn.dataset.slot === 'button');
     expect(innerButton).not.toBeNull();
 
     const user = userEvent.setup();

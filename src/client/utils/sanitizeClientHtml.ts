@@ -31,7 +31,7 @@ function sanitizeElement(element: Element): Node | null {
     }
 
     // 許可タグでも属性は全削除
-    const attrs = Array.from(element.attributes);
+    const attrs = [...element.attributes];
     for (const attr of attrs) {
       const keep = tag === 'a' && attr.name === 'href' && isSafeHref(attr.value);
       if (!keep) {
@@ -41,7 +41,7 @@ function sanitizeElement(element: Element): Node | null {
   }
 
   // 子ノードを再帰的にサニタイズ
-  for (const child of Array.from(element.childNodes)) {
+  for (const child of element.childNodes) {
     if (child.nodeType === Node.ELEMENT_NODE) {
       const sanitized = sanitizeElement(child as Element);
       if (sanitized === null) {
@@ -67,18 +67,18 @@ export function sanitizeClientHtml(html: string): string {
   if (typeof DOMParser === 'undefined') {
     // DOMParser が無い環境（例: 一部のテストランナー）はフォールバックとして
     // 全タグをテキストとして除去する。サーバー側サニタイズが第一防御だが、
-    // dangerouslySetInnerHTML に生 HTML を絶対に渡さないための保険。
-    return html.replace(/<[^>]*>/g, '');
+    // DangerouslySetInnerHTML に生 HTML を絶対に渡さないための保険。
+    return html.replaceAll(/<[^>]*>/g, '');
   }
 
   const parser = new DOMParser();
   const doc = parser.parseFromString(`<div id="__root__">${html}</div>`, 'text/html');
-  const root = doc.getElementById('__root__');
+  const root = doc.querySelector('#__root__');
   if (!root) {
     return '';
   }
 
-  for (const child of Array.from(root.childNodes)) {
+  for (const child of root.childNodes) {
     if (child.nodeType === Node.ELEMENT_NODE) {
       const sanitized = sanitizeElement(child as Element);
       if (sanitized === null) {

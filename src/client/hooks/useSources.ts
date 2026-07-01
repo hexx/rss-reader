@@ -1,14 +1,15 @@
 import { useCallback, useEffect, useState } from 'react';
 
 import type { Source } from '../types.js';
-import { normalizeError, type Status } from '../utils/status.js';
+import { normalizeError } from '../utils/status.js';
+import type { Status } from '../utils/status.js';
 
-type UseSourcesResult = {
+interface UseSourcesResult {
   isLoading: boolean;
   sources: Source[];
   reload: () => Promise<void>;
   status: Status | null;
-};
+}
 
 export function useSources(): UseSourcesResult {
   const [sources, setSources] = useState<Source[]>([]);
@@ -37,5 +38,5 @@ export function useSources(): UseSourcesResult {
     });
   }, [reload]);
 
-  return { isLoading, sources, reload, status };
+  return { isLoading, reload, sources, status };
 }

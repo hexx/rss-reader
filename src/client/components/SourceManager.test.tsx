@@ -138,8 +138,8 @@ describe('SourceManager', () => {
       />,
     );
 
-    // required 属性によるネイティブバリデーションをバイパスするため、
-    // input に空白を入力してから form を submit する
+    // Required 属性によるネイティブバリデーションをバイパスするため、
+    // Input に空白を入力してから form を submit する
     // （trim() で空になるため handleSubmit 内の validation が発動する）
     const input = screen.getByPlaceholderText(/ブログ・サイトのURL/) as HTMLInputElement;
     input.value = '   '; // 空白のみ
@@ -152,7 +152,7 @@ describe('SourceManager', () => {
   });
 
   it('calls onRemoveSubscription when the remove button is clicked', async () => {
-    const onRemoveSubscription = vi.fn().mockResolvedValue(undefined);
+    const onRemoveSubscription = vi.fn().mockResolvedValue();
     const user = userEvent.setup();
 
     render(
@@ -166,7 +166,7 @@ describe('SourceManager', () => {
     // 各ソースの削除ボタン（購読解除）をクリック
     const removeButtons = screen.getAllByRole('button', { name: '購読解除' });
     // TooltipTrigger の二重 button の内側を選択
-    const innerRemoveRemove = removeButtons.find((btn) => btn.getAttribute('data-slot') === 'button');
+    const innerRemoveRemove = removeButtons.find((btn) => btn.dataset.slot === 'button');
     expect(innerRemoveRemove).not.toBeNull();
 
     await user.click(innerRemoveRemove!);
@@ -243,7 +243,7 @@ describe('SourceManager', () => {
 
   it('stops propagation when clicking the remove button (prevents source selection)', async () => {
     const onSelectSource = vi.fn();
-    const onRemoveSubscription = vi.fn().mockResolvedValue(undefined);
+    const onRemoveSubscription = vi.fn().mockResolvedValue();
     const user = userEvent.setup();
 
     render(
@@ -256,12 +256,12 @@ describe('SourceManager', () => {
     );
 
     const removeButtons = screen.getAllByRole('button', { name: '購読解除' });
-    const innerRemove = removeButtons.find((btn) => btn.getAttribute('data-slot') === 'button');
+    const innerRemove = removeButtons.find((btn) => btn.dataset.slot === 'button');
     expect(innerRemove).not.toBeNull();
 
     await user.click(innerRemove!);
 
-    // onRemoveSubscription は呼ばれるが、onSelectSource は呼ばれない（stopPropagation）
+    // OnRemoveSubscription は呼ばれるが、onSelectSource は呼ばれない（stopPropagation）
     expect(onRemoveSubscription).toHaveBeenCalled();
     expect(onSelectSource).not.toHaveBeenCalled();
   });

@@ -69,16 +69,16 @@ describe('generateArticleSummary', () => {
     } as never);
 
     const model = getOpenCodeGoChatModel({
-      OPENCODE_GO_BASE_URL: 'https://opencode.example/v1',
       OPENCODE_GO_API_KEY: 'test-api-key',
+      OPENCODE_GO_BASE_URL: 'https://opencode.example/v1',
       OPENCODE_GO_MODEL: 'test-model',
     });
 
     expect(model).toBe('chat-model');
     expect(createOpenAICompatibleMock).toHaveBeenCalledWith({
+      apiKey: 'test-api-key',
       baseURL: 'https://opencode.example/v1',
       name: 'opencode-go',
-      apiKey: 'test-api-key',
     });
     expect(chatModelMock).toHaveBeenCalledWith('test-model');
   });
@@ -104,8 +104,8 @@ describe('generateArticleSummary', () => {
 
     await expect(
       generateHatenaSummary([
-        { user: 'alice', comment: '参考になる', timestamp: new Date('2024-01-01T00:00:00.000Z') },
-        { user: 'bob', comment: '視点が面白い', timestamp: new Date('2024-01-02T00:00:00.000Z') },
+        { comment: '参考になる', timestamp: new Date('2024-01-01T00:00:00.000Z'), user: 'alice' },
+        { comment: '視点が面白い', timestamp: new Date('2024-01-02T00:00:00.000Z'), user: 'bob' },
       ]),
     ).resolves.toBe('反応の要約');
 
