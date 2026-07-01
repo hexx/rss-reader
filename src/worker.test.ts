@@ -525,4 +525,111 @@ describe('worker app', () => {
     expect(syncAllSubscriptionsMock).toHaveBeenCalledWith(false, env, true);
     expect(executionContext.waitUntil).toHaveBeenCalledTimes(1);
   });
+
+  it('updates article read state through the /read sub-path', async () => {
+    await testDb.insert(articles).values({
+      id: 'article-read',
+      siteUrl: 'https://example.com/feed.xml',
+      url: 'https://example.com/articles/read',
+      title: 'read article',
+      content: '本文',
+      summary: '要約',
+      hatenaSummary: null,
+      isRead: false,
+      publishedAt: new Date('2024-01-01T00:00:00.000Z'),
+    });
+
+    const response = await app.fetch(
+      new Request('http://localhost/api/articles/article-read/read', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ isRead: true }),
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      id: 'article-read',
+      isRead: true,
+    });
+  });
+
+  it('returns 404 when deleting a non-existent subscription', async () => {
+    const response = await app.fetch(
+      new Request('http://localhost/api/subscriptions', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ siteUrl: 'https://nonexistent.example/feed.xml' }),
+      }),
+    );
+
+    expect(response.status).toBe(404);
+    const body = (await response.json()) as { error?: string };
+    expect(body.error).toBe('Subscription not found.');
+  });
+
+  describe('article sorting', () => {
+    beforeEach(async () => {
+      await testDb.insert(subscriptions).values([
+        {
+          id: 'sub-sort',
+          siteUrl: 'https://example.com/feed.xml',
+          title: 'Sort Test',
+          addedAt: new Date('2024-01-01T00:00:00.000Z'),
+        },
+      ]);
+
+      await testDb.insert(articles).values([
+        {
+          id: 'article-old',
+          siteUrl: 'https://example.com/feed.xml',
+          url: 'https://example.com/old',
+          title: 'Old Article',
+          content: '',
+          summary: '',
+          hatenaSummary: null,
+          isRead: false,
+          publishedAt: new Date('2024-01-01T00:00:00.000Z'),
+        },
+        {
+          id: 'article-new',
+          siteUrl: 'https://example.com/feed.xml',
+          url: 'https://example.com/new',
+          title: 'New Article',
+          content: '',
+          summary: '',
+          hatenaSummary: null,
+          isRead: false,
+          publishedAt: new Date('2024-01-10T00:00:00.000Z'),
+        },
+      ]);
+    });
+
+    it('defaults sort to asc when sort parameter is missing', async () => {
+      const response = await app.fetch(
+        new Request('http://localhost/api/articles?unread_only=false'),
+      );
+      const body = (await response.json()) as { articles: Array<{ title: string }> };
+      expect(body.articles[0]?.title).toBe('Old Article');
+      expect(body.articles[1]?.title).toBe('New Article');
+    });
+
+    it('sorts articles by desc when specified', async () => {
+      const response = await app.fetch(
+        new Request('http://localhost/api/articles?unread_only=false&sort=desc'),
+      );
+      const body = (await response.json()) as { articles: Array<{ title: string }> };
+      expect(body.articles[0]?.title).toBe('New Article');
+      expect(body.articles[1]?.title).toBe('Old Article');
+    });
+
+    it('falls back to asc for invalid sort parameter', async () => {
+      const response = await app.fetch(
+        new Request('http://localhost/api/articles?unread_only=false&sort=invalid'),
+      );
+      const body = (await response.json()) as { articles: Array<{ title: string }> };
+      expect(body.articles[0]?.title).toBe('Old Article');
+      expect(body.articles[1]?.title).toBe('New Article');
+    });
+  });
 });
