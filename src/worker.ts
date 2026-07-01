@@ -514,3 +514,15 @@ export default {
 };
 
 export { app };
+
+// テスト用エクスポート（テストコードからのみ参照）
+export {
+  formatDate,
+  isHatenaSource,
+  normalizeSiteUrl,
+  parsePaginationParam,
+  sourceDisplayTitle,
+  sourceHostname,
+  sourceSuffix,
+  sourceTitleBase,
+};
