@@ -30,7 +30,7 @@ describe('worker internal functions', () => {
 
     it('returns empty string for undefined', async () => {
       const { formatDate } = await import('./worker.js');
-      expect(formatDate()).toBe('');
+      expect(formatDate(undefined)).toBe('');
     });
   });
 

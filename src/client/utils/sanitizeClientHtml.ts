@@ -41,7 +41,7 @@ function sanitizeElement(element: Element): Node | null {
   }
 
   // 子ノードを再帰的にサニタイズ
-  for (const child of element.childNodes) {
+  for (const child of Array.from(element.childNodes)) {
     if (child.nodeType === Node.ELEMENT_NODE) {
       const sanitized = sanitizeElement(child as Element);
       if (sanitized === null) {
@@ -78,7 +78,7 @@ export function sanitizeClientHtml(html: string): string {
     return '';
   }
 
-  for (const child of root.childNodes) {
+  for (const child of Array.from(root.childNodes)) {
     if (child.nodeType === Node.ELEMENT_NODE) {
       const sanitized = sanitizeElement(child as Element);
       if (sanitized === null) {

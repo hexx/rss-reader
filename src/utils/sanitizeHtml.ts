@@ -45,7 +45,7 @@ function sanitizeNode($: CheerioAPI, element: Element): void {
 
   // 属性を全削除（a タグの href だけ例外的に再付与する）
   // スナップショットを取ってからイテレートする。
-  for (const attr of element.attributes) {
+  for (const attr of Array.from(element.attributes)) {
     const allowed = tagName === 'a' && attr.name === 'href' && isSafeHref(attr.value);
     if (!allowed) {
       $(element).removeAttr(attr.name);
@@ -81,7 +81,7 @@ export function sanitizeSummaryHtml(html: string): string {
     return '';
   }
 
-  for (const child of bodyElement.children) {
+  for (const child of Array.from(bodyElement.children)) {
     if (isTag(child)) {
       sanitizeNode($, child);
     }
