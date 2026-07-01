@@ -4,7 +4,8 @@ import type { RuntimeEnv } from '../env.js';
 import { getDb } from '../db/index.js';
 import { articles, hatenaBookmarks, subscriptions } from '../db/schema.js';
 import { generateArticleSummary, generateHatenaSummary } from '../services/ai.js';
-import { fetchHatenaBookmarks, type HatenaBookmarkComment } from '../services/hatena.js';
+import { fetchHatenaBookmarks } from '../services/hatena.js';
+import type { HatenaBookmarkComment } from '../services/hatena.js';
 import { fetchArticleContent, fetchRssOrFallback } from '../services/scraper.js';
 import { logger } from '../utils/logger.js';
 
@@ -31,11 +32,11 @@ async function persistBookmarks(
       .insert(hatenaBookmarks)
       .values(
         chunk.map((bookmark) => ({
-          id: crypto.randomUUID(),
           articleId,
-          user: bookmark.user,
           comment: bookmark.comment,
           createdAt: bookmark.timestamp,
+          id: crypto.randomUUID(),
+          user: bookmark.user,
         })),
       )
       .onConflictDoNothing({
@@ -115,7 +116,7 @@ export async function syncSite(
           .limit(1);
 
         // 既存記事でも、はてなブックマークは冪等に再取得する。
-        // jsonlite の件数上限や、一時的なネットワーク失敗で取りこぼした分を
+        // Jsonlite の件数上限や、一時的なネットワーク失敗で取りこぼした分を
         // 後の同期で埋められるようにする。
         // 購読元が b.hatena.ne.jp かどうかは関係なく、常に試みる
         // (レート制御は hatena モジュール内のリミッターが行う)。
@@ -134,9 +135,9 @@ export async function syncSite(
           const message = error instanceof Error ? error.message : String(error);
           logger.warn('本文の取得に失敗したため、本文なしで処理を継続します。', {
             articleUrl: article.url,
+            error: message,
             siteUrl,
             title: article.title,
-            error: message,
           });
         }
         const bookmarks = await fetchHatenaBookmarks(article.url);
@@ -146,15 +147,15 @@ export async function syncSite(
         const articleId = crypto.randomUUID();
 
         await database.insert(articles).values({
-          id: articleId,
-          siteUrl,
-          url: article.url,
-          title: article.title,
           content,
-          summary,
           hatenaSummary,
-          publishedAt: article.pubDate,
+          id: articleId,
           isRead: false,
+          publishedAt: article.pubDate,
+          siteUrl,
+          summary,
+          title: article.title,
+          url: article.url,
         }).run();
 
         await persistBookmarks(database, articleId, bookmarks);
@@ -173,14 +174,14 @@ export async function syncSite(
         const message = error instanceof Error ? error.message : String(error);
         logger.warn('記事の同期に失敗しました。', {
           articleUrl: article.url,
+          error: message,
           siteUrl,
           title: article.title,
-          error: message,
         });
       }
     }
 
-    logger.info('サイト同期が完了しました。', { siteUrl, articles: processedCount });
+    logger.info('サイト同期が完了しました。', { articles: processedCount, siteUrl });
     return processedCount;
   } catch (error) {
     if (debug) {
@@ -190,8 +191,8 @@ export async function syncSite(
 
     const message = error instanceof Error ? error.message : String(error);
     logger.warn('サイト同期に失敗しました。', {
-      siteUrl,
       error: message,
+      siteUrl,
     });
     return 0;
   }

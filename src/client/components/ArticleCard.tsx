@@ -15,10 +15,10 @@ import type { Article } from '../types.js';
 import { getHatenaEntryUrl } from '../utils/hatena.js';
 import { sanitizeClientHtml } from '../utils/sanitizeClientHtml.js';
 
-type ArticleCardProps = {
+interface ArticleCardProps {
   article: Article;
   onMarkAsRead: (articleId: string) => void | Promise<void>;
-};
+}
 
 function formatDate(value: string): string {
   const date = new Date(value);

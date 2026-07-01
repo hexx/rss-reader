@@ -1,4 +1,4 @@
-import { http, HttpResponse } from 'msw';
+import { HttpResponse, http } from 'msw';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { server } from '../test/setup.js';
@@ -12,8 +12,6 @@ vi.mock('rss-parser', () => ({
   default: class ParserMock {
     parseString = parseStringMock;
     parseURL = parseURLMock;
-
-    constructor(_options?: unknown) {}
   },
 }));
 
@@ -381,7 +379,7 @@ describe('scraper service', () => {
     it('rejects redirects to internal addresses to prevent SSRF', async () => {
       server.use(
         http.get('https://public.example.com/', () =>
-          HttpResponse.text('', { status: 302, headers: { Location: 'http://127.0.0.1/feed.xml' } }),
+          HttpResponse.text('', { headers: { Location: 'http://127.0.0.1/feed.xml' }, status: 302 }),
         ),
       );
 
@@ -391,10 +389,10 @@ describe('scraper service', () => {
     it('rejects redirect loops', async () => {
       server.use(
         http.get('https://loop.example.com/a', () =>
-          HttpResponse.text('', { status: 302, headers: { Location: 'https://loop.example.com/b' } }),
+          HttpResponse.text('', { headers: { Location: 'https://loop.example.com/b' }, status: 302 }),
         ),
         http.get('https://loop.example.com/b', () =>
-          HttpResponse.text('', { status: 302, headers: { Location: 'https://loop.example.com/a' } }),
+          HttpResponse.text('', { headers: { Location: 'https://loop.example.com/a' }, status: 302 }),
         ),
       );
 

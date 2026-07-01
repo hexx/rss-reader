@@ -1,4 +1,4 @@
-import { http, HttpResponse } from 'msw';
+import { HttpResponse, http } from 'msw';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
@@ -36,9 +36,9 @@ describe('useSources', () => {
 
   it('fetches sources on mount and sets them in state', async () => {
     server.use(
-      http.get('*/api/sources', () => {
-        return HttpResponse.json({ sources: mockSources });
-      }),
+      http.get('*/api/sources', () => 
+        HttpResponse.json({ sources: mockSources })
+      ),
     );
 
     const { result } = renderHook(() => useSources());
@@ -74,7 +74,7 @@ describe('useSources', () => {
     });
     expect(callCount).toBe(1);
 
-    // reload を呼ぶ
+    // Reload を呼ぶ
     await act(async () => {
       await result.current.reload();
     });
@@ -85,9 +85,9 @@ describe('useSources', () => {
 
   it('handles API errors', async () => {
     server.use(
-      http.get('*/api/sources', () => {
-        return new HttpResponse(null, { status: 500 });
-      }),
+      http.get('*/api/sources', () => 
+        new HttpResponse(null, { status: 500 })
+      ),
     );
 
     const { result } = renderHook(() => useSources());
@@ -103,9 +103,9 @@ describe('useSources', () => {
 
   it('handles malformed responses as empty array', async () => {
     server.use(
-      http.get('*/api/sources', () => {
-        return HttpResponse.json({});
-      }),
+      http.get('*/api/sources', () => 
+        HttpResponse.json({})
+      ),
     );
 
     const { result } = renderHook(() => useSources());
@@ -119,9 +119,9 @@ describe('useSources', () => {
 
   it('handles non-array sources field as empty array', async () => {
     server.use(
-      http.get('*/api/sources', () => {
-        return HttpResponse.json({ sources: null });
-      }),
+      http.get('*/api/sources', () => 
+        HttpResponse.json({ sources: null })
+      ),
     );
 
     const { result } = renderHook(() => useSources());

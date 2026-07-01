@@ -1,5 +1,4 @@
-import { dirname, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { resolve } from 'node:path';
 
 import initSqlJs from 'sql.js';
 import { drizzle } from 'drizzle-orm/sql-js';
@@ -12,7 +11,7 @@ async function loadSqlJs() {
   if (!sqlJsPromise) {
     sqlJsPromise = initSqlJs({
       locateFile(fileName: string) {
-        return resolve(dirname(fileURLToPath(import.meta.url)), '../../node_modules/sql.js/dist', fileName);
+        return resolve(import.meta.dirname, '../../node_modules/sql.js/dist', fileName);
       },
     });
   }

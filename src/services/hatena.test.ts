@@ -1,4 +1,4 @@
-import { http, HttpResponse } from 'msw';
+import { HttpResponse, http } from 'msw';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { server } from '../test/setup.js';
@@ -22,9 +22,9 @@ const browserHeaders = {
 const hatenaResponse = {
   bookmarks: [
     {
-      user: 'alice',
       comment: '  良記事  ',
       timestamp: '1704067200', // 2024-01-01T00:00:00Z
+      user: 'alice',
     },
     {
       // コメント空（タグだけ）のブックマークは保持する
@@ -33,18 +33,18 @@ const hatenaResponse = {
       timestamp: '1704153600', // 2024-01-02T00:00:00Z
     },
     {
-      user: 'carol',
       comment: '参考になる',
       timestamp: '1704240000', // 2024-01-03T00:00:00Z
+      user: 'carol',
     },
     {
-      // user 欠落エントリは破棄する
+      // User 欠落エントリは破棄する
       comment: 'no user here',
       timestamp: '1704326400',
     },
     {
       user: 'eve',
-      // timestamp 欠落は fetch 時刻でフォールバック
+      // Timestamp 欠落は fetch 時刻でフォールバック
       comment: 'no timestamp',
     },
   ],
@@ -56,7 +56,7 @@ describe('fetchHatenaBookmarks', () => {
     _setRandomForTest(() => 0); // ジッターを最小値 (1 秒) に固定
     // テストでは sleep を即完了させて時間計測を単純化
     _setSleepForTest(() => new Promise<void>((resolve) => {
-      // microtask 的に即座に解決
+      // Microtask 的に即座に解決
       resolve();
     }));
   });
@@ -95,24 +95,24 @@ describe('fetchHatenaBookmarks', () => {
 
     await expect(fetchHatenaBookmarks(articleUrl)).resolves.toEqual([
       {
-        user: 'alice',
         comment: '良記事',
         timestamp: new Date('2024-01-01T00:00:00.000Z'),
+        user: 'alice',
       },
       {
-        user: 'bob',
         comment: '',
         timestamp: new Date('2024-01-02T00:00:00.000Z'),
+        user: 'bob',
       },
       {
-        user: 'carol',
         comment: '参考になる',
         timestamp: new Date('2024-01-03T00:00:00.000Z'),
+        user: 'carol',
       },
       {
-        user: 'eve',
         comment: 'no timestamp',
         timestamp: expect.any(Date),
+        user: 'eve',
       },
     ]);
   });
@@ -135,11 +135,11 @@ describe('fetchHatenaBookmarks', () => {
       http.get(hatenaApiBaseUrl, () => {
         callCount += 1;
         return new HttpResponse(JSON.stringify({ bookmarks: [] }), {
-          status: 429,
           headers: {
             'Content-Type': 'application/json',
             'Retry-After': '120', // 120 秒待つべき
           },
+          status: 429,
         });
       }),
     );
@@ -148,7 +148,7 @@ describe('fetchHatenaBookmarks', () => {
 
     // 1 回目: 429 を受けたのでリミッター状態が更新されている。
     // Retry-After: 120 をジッター 50%–100% で適用するので 60_000–120_000 ms 先。
-    // applyRetryAfter 内の Date.now() とテストの Date.now() の ms ドリフトを
+    // ApplyRetryAfter 内の Date.now() とテストの Date.now() の ms ドリフトを
     // 吸収するため、delta 形式で比較し 100ms の tolerance を持たせる。
     const state1 = _getRateLimiterStateForTest();
     const now1 = Date.now();
@@ -158,8 +158,8 @@ describe('fetchHatenaBookmarks', () => {
     expect(wait1).toBeLessThanOrEqual(120_000);
 
     // 2 回目: 同様に Retry-After: 120 を受ける。
-    // consecutiveBackoffs は増えるが、Retry-After が同じなら
-    // nextAllowedAtMs は max() で前値以上に保たれる。
+    // ConsecutiveBackoffs は増えるが、Retry-After が同じなら
+    // NextAllowedAtMs は max() で前値以上に保たれる。
     await expect(fetchHatenaBookmarks(articleUrl)).rejects.toThrow(/rate limited/i);
     const state2 = _getRateLimiterStateForTest();
     expect(state2.consecutiveBackoffs).toBe(2);
@@ -172,13 +172,13 @@ describe('fetchHatenaBookmarks', () => {
     server.use(
       http.get(hatenaApiBaseUrl, () =>
         new HttpResponse(JSON.stringify({ bookmarks: [] }), {
-          status: 429,
           headers: {
             'Content-Type': 'application/json',
             // 数値 + 文字列の混合値。parseInt だと 120 が拾われてしまうが、
             // 厳密正規表現 /^\d+$/ では弾いて exponential backoff にフォールバックする。
             'Retry-After': '120abc',
           },
+          status: 429,
         }),
       ),
     );
@@ -192,7 +192,7 @@ describe('fetchHatenaBookmarks', () => {
     expect(state.consecutiveBackoffs).toBe(1);
     const wait = state.nextAllowedAtMs - now;
     expect(wait).toBeGreaterThan(0);
-    expect(wait).toBeLessThan(1_000);
+    expect(wait).toBeLessThan(1000);
   });
 
   it('resets backoff counter on successful response', async () => {
@@ -202,8 +202,8 @@ describe('fetchHatenaBookmarks', () => {
         callCount += 1;
         if (callCount === 1) {
           return new HttpResponse(JSON.stringify({ bookmarks: [] }), {
-            status: 429,
             headers: { 'Retry-After': '10' },
+            status: 429,
           });
         }
         return HttpResponse.json({ bookmarks: [] }, {
@@ -236,7 +236,7 @@ describe('fetchHatenaBookmarks', () => {
     const state1 = _getRateLimiterStateForTest();
     const now1 = Date.now();
     expect(state1.consecutiveBackoffs).toBe(1);
-    // exponential: 1 回目 = 2^0 * 1000 = 1000 ms ジッター 50%–100%
+    // Exponential: 1 回目 = 2^0 * 1000 = 1000 ms ジッター 50%–100%
     // → randomFn = () => 0 のとき 500ms
     const wait1 = state1.nextAllowedAtMs - now1;
     expect(wait1).toBeGreaterThan(0);

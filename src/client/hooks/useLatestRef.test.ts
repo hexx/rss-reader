@@ -35,7 +35,7 @@ describe('useLatestRef', () => {
 
     expect(result.current.current).toEqual({ name: 'test' });
 
-    // ref オブジェクトそのものは同じインスタンスだが、current は新しいオブジェクトを指す
+    // Ref オブジェクトそのものは同じインスタンスだが、current は新しいオブジェクトを指す
     const refInstance = result.current;
     rerender({ name: 'updated' });
     expect(result.current).toBe(refInstance); // 同じ ref インスタンス

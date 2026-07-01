@@ -23,8 +23,8 @@ const baseArticle: Article = {
  * 内側の実際の Button コンポーネントをデータ属性で特定する */
 function getInnerMarkAsReadButton(): HTMLElement | null {
   const allButtons = screen.getAllByRole('button', { name: '既読にする' });
-  // data-slot="button" が内側の実際の Button コンポーネント
-  return allButtons.find((btn) => btn.getAttribute('data-slot') === 'button') ?? null;
+  // Data-slot="button" が内側の実際の Button コンポーネント
+  return allButtons.find((btn) => btn.dataset.slot === 'button') ?? null;
 }
 
 describe('ArticleCard', () => {

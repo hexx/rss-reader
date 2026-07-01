@@ -1,17 +1,19 @@
-import { useCallback, useEffect, useRef, useState, type Dispatch, type SetStateAction } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import type { Dispatch, SetStateAction } from 'react';
 
 import type { Article, ArticleSortDirection } from '../types.js';
 import { ARTICLE_PAGE_SIZE, buildArticlesUrl, mergeLoadedArticles } from '../articlePagination.js';
-import { normalizeError, type Status } from '../utils/status.js';
+import { normalizeError } from '../utils/status.js';
+import type { Status } from '../utils/status.js';
 import { useLatestRef } from './useLatestRef.js';
 
-type UseArticlesParams = {
+interface UseArticlesParams {
   selectedSourceUrl: string | undefined;
   showUnreadOnly: boolean;
   sortOrder: ArticleSortDirection;
-};
+}
 
-type UseArticlesResult = {
+interface UseArticlesResult {
   articles: Article[];
   hasMore: boolean;
   isLoading: boolean;
@@ -20,7 +22,7 @@ type UseArticlesResult = {
   setArticles: Dispatch<SetStateAction<Article[]>>;
   status: Status | null;
   clearStatus: () => void;
-};
+}
 
 export function useArticles({
   selectedSourceUrl,
@@ -60,9 +62,9 @@ export function useArticles({
     setStatus({
       kind: 'loading',
       message: isFirstPage
-        ? unreadOnly
+        ? (unreadOnly
           ? '未読記事を読み込み中...'
-          : '記事を読み込み中...'
+          : '記事を読み込み中...')
         : 'さらに記事を読み込み中...',
     });
 
@@ -72,11 +74,11 @@ export function useArticles({
       try {
         const response = await fetch(
           buildArticlesUrl({
-            unreadOnly,
-            sourceUrl,
             limit: ARTICLE_PAGE_SIZE,
             offset,
             sort,
+            sourceUrl,
+            unreadOnly,
           }),
           { signal: controller.signal },
         );
@@ -131,12 +133,12 @@ export function useArticles({
 
   return {
     articles,
+    clearStatus,
     hasMore,
     isLoading,
     loadMore,
     refresh,
     setArticles,
     status,
-    clearStatus,
   };
 }

@@ -12,12 +12,12 @@ export interface HatenaBookmarkComment {
 }
 
 interface HatenaBookmarkApiResponse {
-  bookmarks?: Array<{
+  bookmarks?: {
     comment?: string;
     /** jsonlite は epoch 秒を文字列で返す。欠落時は現在時刻をフォールバックとする。 */
     timestamp?: string;
     user?: string;
-  }>;
+  }[];
 }
 
 const hatenaEntryJsonLiteBaseUrl = 'https://b.hatena.ne.jp/entry/jsonlite/?url=';
@@ -26,10 +26,10 @@ const hatenaEntryJsonLiteBaseUrl = 'https://b.hatena.ne.jp/entry/jsonlite/?url='
  * 礼儀としての最低待ち時間。はてなのレート制限に余裕で収まる 1 秒とし、
  * ジッターでバースト検出を避ける。
  */
-const minimumHatenaRequestDelayMs = 1_000;
+const minimumHatenaRequestDelayMs = 1000;
 /** ジッター上界。バースト検出を避けるため最大 3 秒までズラす。 */
-const maximumHatenaRequestDelayMs = 3_000;
-/** exponential backoff の最大値。5 分を超えて待つのは無意味なので打ち切る。 */
+const maximumHatenaRequestDelayMs = 3000;
+/** Exponential backoff の最大値。5 分を超えて待つのは無意味なので打ち切る。 */
 const maximumBackoffMs = 5 * 60 * 1000;
 /** Retry-After の値が秒数文字列として有効か判定する厳密正規表現。 */
 const retryAfterSecondsPattern = /^\d+$/;
@@ -78,7 +78,7 @@ export function _resetRateLimiterForTest(): void {
 
 /** テスト用: 現在のレートリミッター状態を読み出す。 */
 export function _getRateLimiterStateForTest(): { nextAllowedAtMs: number; consecutiveBackoffs: number } {
-  return { nextAllowedAtMs, consecutiveBackoffs };
+  return { consecutiveBackoffs, nextAllowedAtMs };
 }
 
 function jitteredDelayMs(): number {
@@ -129,10 +129,10 @@ function applyRetryAfter(value: string | null | undefined): void {
   } else if (typeof value === 'string') {
     // Retry-After: <HTTP date> を試みる
     const date = new Date(value);
-    if (!Number.isNaN(date.getTime())) {
-      baseBackoffMs = Math.max(0, date.getTime() - now);
-    } else {
+    if (Number.isNaN(date.getTime())) {
       baseBackoffMs = exponentialBackoffMs(consecutiveBackoffs);
+    } else {
+      baseBackoffMs = Math.max(0, date.getTime() - now);
     }
   } else {
     baseBackoffMs = exponentialBackoffMs(consecutiveBackoffs);
@@ -146,12 +146,12 @@ function applyRetryAfter(value: string | null | undefined): void {
 }
 
 /**
- * exponential backoff の基準値を計算する。
+ * Exponential backoff の基準値を計算する。
  * 1 回目: 1s, 2 回目: 2s, 3 回目: 4s, 4 回目: 8s, ... 上限 5 分。
  */
-function exponentialBackoffMs(consecutiveBackoffs: number): number {
-  const exponent = Math.max(0, consecutiveBackoffs - 1);
-  return Math.min(maximumBackoffMs, 1000 * Math.pow(2, exponent));
+function exponentialBackoffMs(count: number): number {
+  const exponent = Math.max(0, count - 1);
+  return Math.min(maximumBackoffMs, 1000 * 2 ** exponent);
 }
 
 /** 成功時にバックオフ累積をリセット（次回 429 で再カウント）。 */
@@ -160,10 +160,10 @@ function resetBackoff(): void {
 }
 
 function normalizeComment(comment: string): string {
-  return comment.replace(/\s+/g, ' ').trim();
+  return comment.replaceAll(/\s+/g, ' ').trim();
 }
 
-/** jsonlite の `timestamp`（epoch 秒文字列）を `Date` に変換する。 */
+/** Jsonlite の `timestamp`（epoch 秒文字列）を `Date` に変換する。 */
 function parseHatenaTimestamp(value: string | undefined, fallback: Date): Date {
   if (typeof value !== 'string' || value.length === 0) {
     return fallback;
@@ -212,9 +212,9 @@ export async function fetchHatenaBookmarks(articleUrl: string): Promise<HatenaBo
 
       const rawComment = typeof bookmark.comment === 'string' ? bookmark.comment : '';
       return {
-        user: bookmark.user,
         comment: normalizeComment(rawComment),
         timestamp: parseHatenaTimestamp(bookmark.timestamp, now),
+        user: bookmark.user,
       };
     })
     .filter((bookmark): bookmark is HatenaBookmarkComment => bookmark !== null);

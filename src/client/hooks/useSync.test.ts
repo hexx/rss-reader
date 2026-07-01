@@ -1,11 +1,11 @@
-import { http, HttpResponse } from 'msw';
+import { HttpResponse, http } from 'msw';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { server } from '../../test/setup.js';
 import { useSync } from './useSync.js';
 
-// useSync 内部で SYNC_REFRESH_DELAY_MS (4000ms) の遅延があるため、
+// UseSync 内部で SYNC_REFRESH_DELAY_MS (4000ms) の遅延があるため、
 // 成功系テストはタイムアウトを長めに設定する
 const LONG_TIMEOUT = 10_000;
 
@@ -23,15 +23,15 @@ describe('useSync', () => {
     'triggers sync and calls onAfterSync after delay',
     async () => {
       server.use(
-        http.post('*/api/sync', () => {
-          return HttpResponse.json({ status: 'accepted' });
-        }),
+        http.post('*/api/sync', () => 
+          HttpResponse.json({ status: 'accepted' })
+        ),
       );
 
       const onAfterSync = vi.fn();
       const { result } = renderHook(() => useSync({ onAfterSync }));
 
-      // sync を開始
+      // Sync を開始
       act(() => {
         result.current.sync();
       });
@@ -59,9 +59,9 @@ describe('useSync', () => {
     'handles sync API errors',
     async () => {
       server.use(
-        http.post('*/api/sync', () => {
-          return new HttpResponse(null, { status: 500 });
-        }),
+        http.post('*/api/sync', () => 
+          new HttpResponse(null, { status: 500 })
+        ),
       );
 
       const onAfterSync = vi.fn();
@@ -86,9 +86,9 @@ describe('useSync', () => {
     'handles network errors',
     async () => {
       server.use(
-        http.post('*/api/sync', () => {
-          return HttpResponse.error(); // ネットワークエラー
-        }),
+        http.post('*/api/sync', () => 
+          HttpResponse.error() // ネットワークエラー
+        ),
       );
 
       const onAfterSync = vi.fn();

@@ -3,10 +3,10 @@ import { useEffect } from 'react';
 import type { Article } from '../types.js';
 import { getHatenaEntryUrl } from '../utils/hatena.js';
 
-type ShortcutHandler = {
+interface ShortcutHandler {
   /** 'm' で未読記事を既読にする。 */
   onMarkAsRead: (articleId: string) => void;
-};
+}
 
 const TARGET_KEYS = new Set(['INPUT', 'TEXTAREA']);
 
@@ -29,18 +29,22 @@ export function useKeyboardShortcuts(articles: Article[], handler: ShortcutHandl
       }
 
       switch (event.key) {
-        case 'm':
+        case 'm': {
           onMarkAsRead(firstUnread.id);
           break;
-        case 'v':
+        }
+        case 'v': {
           window.open(firstUnread.url, '_blank', 'noreferrer noopener');
           break;
-        case 'b':
+        }
+        case 'b': {
           // 'b' で、はてなブックマークのエントリーページを開く。
           window.open(getHatenaEntryUrl(firstUnread.url), '_blank', 'noreferrer noopener');
           break;
-        default:
+        }
+        default: {
           return;
+        }
       }
     }
 

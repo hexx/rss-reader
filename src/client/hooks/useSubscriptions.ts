@@ -1,14 +1,15 @@
 import { useCallback, useState } from 'react';
 
-import { normalizeError, type Status } from '../utils/status.js';
+import { normalizeError } from '../utils/status.js';
+import type { Status } from '../utils/status.js';
 
-type UseSubscriptionsResult = {
+interface UseSubscriptionsResult {
   add: (siteUrl: string) => Promise<void>;
   isAdding: boolean;
   remove: (siteUrl: string) => Promise<void>;
   removingSiteUrl: string | null;
   status: Status | null;
-};
+}
 
 export function useSubscriptions({
   onAfterChange,
@@ -25,9 +26,9 @@ export function useSubscriptions({
       setStatus(null);
       try {
         const response = await fetch('/api/subscriptions', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ siteUrl }),
+          headers: { 'Content-Type': 'application/json' },
+          method: 'POST',
         });
         const payload = (await response.json().catch(() => ({}))) as {
           alreadyAFeed?: boolean;
@@ -46,9 +47,9 @@ export function useSubscriptions({
         setStatus({ kind: 'success', message });
 
         await onAfterChange();
-      } catch (err) {
-        setStatus({ kind: 'error', message: normalizeError(err, '購読の追加に失敗しました。') });
-        throw err;
+      } catch (error) {
+        setStatus({ kind: 'error', message: normalizeError(error, '購読の追加に失敗しました。') });
+        throw error;
       } finally {
         setIsAdding(false);
       }
@@ -62,9 +63,9 @@ export function useSubscriptions({
       setStatus(null);
       try {
         const response = await fetch('/api/subscriptions', {
-          method: 'DELETE',
-          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ siteUrl }),
+          headers: { 'Content-Type': 'application/json' },
+          method: 'DELETE',
         });
         const payload = (await response.json().catch(() => ({}))) as { error?: string };
         if (!response.ok) {
@@ -72,9 +73,9 @@ export function useSubscriptions({
         }
         setStatus({ kind: 'success', message: '購読を解除しました。' });
         await onAfterChange();
-      } catch (err) {
-        setStatus({ kind: 'error', message: normalizeError(err, '購読解除に失敗しました。') });
-        throw err;
+      } catch (error) {
+        setStatus({ kind: 'error', message: normalizeError(error, '購読解除に失敗しました。') });
+        throw error;
       } finally {
         setRemovingSiteUrl(null);
       }

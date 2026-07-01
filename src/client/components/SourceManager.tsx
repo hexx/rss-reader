@@ -8,19 +8,20 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 import { Globe, Loader2, Plus, Rss, Trash2 } from 'lucide-react';
-import { useCallback, useState, type FormEvent } from 'react';
+import { useCallback, useState } from 'react';
+import type { FormEvent } from 'react';
 
 import type { Source } from '../types.js';
 import { normalizeError } from '../utils/status.js';
 
-type SourceManagerProps = {
+interface SourceManagerProps {
   onAddSubscription: (siteUrl: string) => Promise<void>;
   onRemoveSubscription: (siteUrl: string) => Promise<void>;
   sources: Source[];
   isLoading?: boolean;
   onSelectSource?: (siteUrl?: string) => void;
   selectedSourceUrl?: string | undefined;
-};
+}
 
 function SourceSkeleton() {
   return (
@@ -153,7 +154,7 @@ export function SourceManager({
               <SourceSkeleton />
               <SourceSkeleton />
             </>
-          ) : sources.length === 0 ? (
+          ) : (sources.length === 0 ? (
             <Empty>
               <EmptyHeader>
                 <EmptyMedia variant="icon">
@@ -233,7 +234,7 @@ export function SourceManager({
                 </div>
               );
             })
-          )}
+          ))}
         </div>
       </ScrollArea>
 

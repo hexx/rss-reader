@@ -5,18 +5,18 @@ import type { InferSelectModel } from 'drizzle-orm';
 const createdAtDefault = sql<number>`(cast((julianday('now') - 2440587.5) * 86400000 as integer))`;
 
 export const articles = sqliteTable('articles', {
-  id: text('id').primaryKey(),
-  url: text('url').notNull().unique(),
-  siteUrl: text('site_url').notNull().default(''),
-  title: text('title').notNull(),
   content: text('content'),
-  publishedAt: integer('published_at', { mode: 'timestamp_ms' }),
-  summary: text('summary'),
-  hatenaSummary: text('hatena_summary'),
-  isRead: integer('is_read', { mode: 'boolean' }).notNull().default(false),
   createdAt: integer('created_at', { mode: 'timestamp_ms' })
     .notNull()
     .default(createdAtDefault),
+  hatenaSummary: text('hatena_summary'),
+  id: text('id').primaryKey(),
+  isRead: integer('is_read', { mode: 'boolean' }).notNull().default(false),
+  publishedAt: integer('published_at', { mode: 'timestamp_ms' }),
+  siteUrl: text('site_url').notNull().default(''),
+  summary: text('summary'),
+  title: text('title').notNull(),
+  url: text('url').notNull().unique(),
 });
 
 /**
@@ -30,15 +30,15 @@ export const articles = sqliteTable('articles', {
 export const hatenaBookmarks = sqliteTable(
   'hatena_bookmarks',
   {
-    id: text('id').primaryKey(),
     articleId: text('article_id')
       .notNull()
       .references(() => articles.id, { onDelete: 'cascade' }),
-    user: text('user').notNull(),
     comment: text('comment'),
     createdAt: integer('created_at', { mode: 'timestamp_ms' })
       .notNull()
       .default(createdAtDefault),
+    id: text('id').primaryKey(),
+    user: text('user').notNull(),
   },
   (table) => ({
     articleUserUnique: uniqueIndex('hatena_bookmarks_article_id_user_unique').on(
@@ -49,12 +49,12 @@ export const hatenaBookmarks = sqliteTable(
 );
 
 export const subscriptions = sqliteTable('subscriptions', {
-  id: text('id').primaryKey(),
-  siteUrl: text('site_url').notNull().unique(),
-  title: text('title'),
   addedAt: integer('added_at', { mode: 'timestamp_ms' })
     .notNull()
     .default(createdAtDefault),
+  id: text('id').primaryKey(),
+  siteUrl: text('site_url').notNull().unique(),
+  title: text('title'),
 });
 
 export type Article = InferSelectModel<typeof articles>;

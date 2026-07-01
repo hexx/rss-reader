@@ -1,4 +1,4 @@
-import { http, HttpResponse } from 'msw';
+import { HttpResponse, http } from 'msw';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
@@ -97,7 +97,7 @@ describe('useArticles', () => {
     expect(result.current.hasMore).toBe(true);
     expect(callCount).toBe(1);
 
-    // loadMore を呼ぶ
+    // LoadMore を呼ぶ
     act(() => {
       result.current.loadMore();
     });
@@ -127,7 +127,7 @@ describe('useArticles', () => {
     });
     expect(callCount).toBe(1);
 
-    // refresh で最初から再読み込み
+    // Refresh で最初から再読み込み
     act(() => {
       result.current.refresh();
     });
@@ -140,9 +140,9 @@ describe('useArticles', () => {
 
   it('handles API errors gracefully', async () => {
     server.use(
-      http.get('*/api/articles', () => {
-        return new HttpResponse(null, { status: 500 });
-      }),
+      http.get('*/api/articles', () => 
+        new HttpResponse(null, { status: 500 })
+      ),
     );
 
     const { result } = renderHook(() => useArticles(defaultParams));
@@ -158,9 +158,9 @@ describe('useArticles', () => {
 
   it('shows different status messages based on unreadOnly and page', async () => {
     server.use(
-      http.get('*/api/articles', () => {
-        return HttpResponse.json({ articles: [] });
-      }),
+      http.get('*/api/articles', () => 
+        HttpResponse.json({ articles: [] })
+      ),
     );
 
     const { result } = renderHook(() =>
@@ -250,9 +250,9 @@ describe('useArticles', () => {
 
   it('clearStatus resets the status to null', async () => {
     server.use(
-      http.get('*/api/articles', () => {
-        return new HttpResponse(null, { status: 500 });
-      }),
+      http.get('*/api/articles', () => 
+        new HttpResponse(null, { status: 500 })
+      ),
     );
 
     const { result } = renderHook(() => useArticles(defaultParams));
@@ -272,9 +272,9 @@ describe('useArticles', () => {
     const articles = createArticles(2);
 
     server.use(
-      http.get('*/api/articles', () => {
-        return HttpResponse.json({ articles });
-      }),
+      http.get('*/api/articles', () => 
+        HttpResponse.json({ articles })
+      ),
     );
 
     const { result } = renderHook(() => useArticles(defaultParams));
