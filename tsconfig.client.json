@@ -10,5 +10,5 @@
     }
   },
   "include": ["src/client/**/*", "src/components/**/*", "src/lib/**/*", "src/shared/**/*"],
-  "exclude": ["node_modules"]
+  "exclude": ["node_modules", "src/**/*.test.ts", "src/**/*.test.tsx", "src/test/**/*"]
 }
