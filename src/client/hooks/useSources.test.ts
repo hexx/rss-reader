@@ -1,10 +1,18 @@
 import { HttpResponse, http } from 'msw';
+import { QueryClientProvider } from '@tanstack/react-query';
+import { createElement } from 'react';
+import type { ReactNode } from 'react';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { makeQueryClient } from '../queryClient.js';
 import { server } from '../../test/setup.js';
 import type { Source } from '../types.js';
 import { useSources } from './useSources.js';
+
+function wrapper({ children }: { children: ReactNode }) {
+  return createElement(QueryClientProvider, { client: makeQueryClient() }, children);
+}
 
 const mockSources: Source[] = [
   {
@@ -41,7 +49,7 @@ describe('useSources', () => {
       ),
     );
 
-    const { result } = renderHook(() => useSources());
+    const { result } = renderHook(() => useSources(), { wrapper });
 
     // 初回はローディング
     expect(result.current.isLoading).toBe(true);
@@ -67,7 +75,7 @@ describe('useSources', () => {
       }),
     );
 
-    const { result } = renderHook(() => useSources());
+    const { result } = renderHook(() => useSources(), { wrapper });
 
     await waitFor(() => {
       expect(result.current.sources).toHaveLength(1);
@@ -79,7 +87,9 @@ describe('useSources', () => {
       await result.current.reload();
     });
 
-    expect(result.current.sources).toHaveLength(2);
+    await waitFor(() => {
+      expect(result.current.sources).toHaveLength(2);
+    });
     expect(callCount).toBe(2);
   });
 
@@ -90,7 +100,7 @@ describe('useSources', () => {
       ),
     );
 
-    const { result } = renderHook(() => useSources());
+    const { result } = renderHook(() => useSources(), { wrapper });
 
     await waitFor(() => {
       expect(result.current.isLoading).toBe(false);
@@ -108,7 +118,7 @@ describe('useSources', () => {
       ),
     );
 
-    const { result } = renderHook(() => useSources());
+    const { result } = renderHook(() => useSources(), { wrapper });
 
     await waitFor(() => {
       expect(result.current.isLoading).toBe(false);
@@ -124,7 +134,7 @@ describe('useSources', () => {
       ),
     );
 
-    const { result } = renderHook(() => useSources());
+    const { result } = renderHook(() => useSources(), { wrapper });
 
     await waitFor(() => {
       expect(result.current.isLoading).toBe(false);
