@@ -1,8 +1,20 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 
 import type { Source } from '../types.js';
 import { normalizeError } from '../utils/status.js';
 import type { Status } from '../utils/status.js';
+
+const SOURCES_QUERY_KEY = ['sources'] as const;
+const SOURCES_ERROR_MESSAGE = '購読ソースの読み込みに失敗しました。';
+
+async function fetchSources(): Promise<Source[]> {
+  const response = await fetch('/api/sources');
+  if (!response.ok) {
+    throw new Error(SOURCES_ERROR_MESSAGE);
+  }
+  const payload = (await response.json()) as { sources?: Source[] };
+  return Array.isArray(payload.sources) ? payload.sources : [];
+}
 
 interface UseSourcesResult {
   isLoading: boolean;
@@ -12,31 +24,19 @@ interface UseSourcesResult {
 }
 
 export function useSources(): UseSourcesResult {
-  const [sources, setSources] = useState<Source[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [status, setStatus] = useState<Status | null>(null);
+  const query = useQuery({
+    queryKey: SOURCES_QUERY_KEY,
+    queryFn: fetchSources,
+  });
 
-  const reload = useCallback(async () => {
-    setIsLoading(true);
-    try {
-      const response = await fetch('/api/sources');
-      if (!response.ok) {
-        throw new Error('購読ソースの読み込みに失敗しました。');
-      }
-      const payload = (await response.json()) as { sources?: Source[] };
-      setSources(Array.isArray(payload.sources) ? payload.sources : []);
-    } catch (error) {
-      setStatus({ kind: 'error', message: normalizeError(error, '購読ソースの読み込みに失敗しました。') });
-    } finally {
-      setIsLoading(false);
-    }
-  }, []);
+  const status: Status | null = query.isError
+    ? { kind: 'error', message: normalizeError(query.error, SOURCES_ERROR_MESSAGE) }
+    : null;
 
-  useEffect(() => {
-    void reload().catch((error: unknown) => {
-      setStatus({ kind: 'error', message: normalizeError(error, '購読ソースの読み込みに失敗しました。') });
-    });
-  }, [reload]);
-
-  return { isLoading, reload, sources, status };
+  return {
+    isLoading: query.isLoading,
+    reload: () => query.refetch().then(() => undefined),
+    sources: query.data ?? [],
+    status,
+  };
 }

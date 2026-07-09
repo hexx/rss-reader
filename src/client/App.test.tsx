@@ -1,10 +1,20 @@
 import { HttpResponse, http } from 'msw';
+import { QueryClientProvider } from '@tanstack/react-query';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
 
+import { makeQueryClient } from './queryClient.js';
 import { server } from '../test/setup.js';
 import { App } from './App.js';
+
+function renderApp() {
+  return render(
+    <QueryClientProvider client={makeQueryClient()}>
+      <App />
+    </QueryClientProvider>,
+  );
+}
 
 const sourcesResponse = {
   sources: [
@@ -55,7 +65,7 @@ describe('App', () => {
       http.get('*/api/articles', () => HttpResponse.json(articlesResponse)),
     );
 
-    render(<App />);
+    renderApp();
 
     // ヘッダーが表示される
     expect(screen.getByText('RSS Reader')).toBeInTheDocument();
@@ -79,7 +89,7 @@ describe('App', () => {
       ),
     );
 
-    render(<App />);
+    renderApp();
 
     await waitFor(() => {
       expect(screen.getByText('最初の記事')).toBeInTheDocument();
@@ -140,7 +150,7 @@ describe('App', () => {
     );
 
     const user = userEvent.setup();
-    render(<App />);
+    renderApp();
 
     await waitFor(() => {
       expect(screen.getByText('React入門')).toBeInTheDocument();
@@ -165,7 +175,7 @@ describe('App', () => {
       http.get('*/api/articles', () => HttpResponse.json(articlesResponse)),
     );
 
-    render(<App />);
+    renderApp();
 
     await waitFor(() => {
       expect(screen.getByText('最初の記事')).toBeInTheDocument();
@@ -181,7 +191,7 @@ describe('App', () => {
       http.get('*/api/articles', () => new HttpResponse(null, { status: 500 })),
     );
 
-    render(<App />);
+    renderApp();
 
     await waitFor(() => {
       expect(screen.getByText('記事の読み込みに失敗しました。')).toBeInTheDocument();
