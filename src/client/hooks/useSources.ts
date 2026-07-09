@@ -25,8 +25,8 @@ interface UseSourcesResult {
 
 export function useSources(): UseSourcesResult {
   const query = useQuery({
-    queryKey: SOURCES_QUERY_KEY,
     queryFn: fetchSources,
+    queryKey: SOURCES_QUERY_KEY,
   });
 
   const status: Status | null = query.isError
@@ -35,7 +35,7 @@ export function useSources(): UseSourcesResult {
 
   return {
     isLoading: query.isLoading,
-    reload: () => query.refetch().then(() => undefined),
+    reload: () => query.refetch().then(() => {}),
     sources: query.data ?? [],
     status,
   };
