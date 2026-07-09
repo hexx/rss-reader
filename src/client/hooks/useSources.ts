@@ -1,3 +1,4 @@
+import { useCallback } from 'react';
 import { useQuery } from '@tanstack/react-query';
 
 import type { Source } from '../types.js';
@@ -29,13 +30,17 @@ export function useSources(): UseSourcesResult {
     queryKey: SOURCES_QUERY_KEY,
   });
 
+  const reload = useCallback((): Promise<void> => {
+    return query.refetch().then(() => {});
+  }, [query]);
+
   const status: Status | null = query.isError
     ? { kind: 'error', message: normalizeError(query.error, SOURCES_ERROR_MESSAGE) }
     : null;
 
   return {
-    isLoading: query.isLoading,
-    reload: () => query.refetch().then(() => {}),
+    isLoading: query.isFetching,
+    reload,
     sources: query.data ?? [],
     status,
   };
