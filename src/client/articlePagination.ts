@@ -32,7 +32,3 @@ export function buildArticlesUrl({
 export function mergeLoadedArticles(articles: Article[], nextArticles: Article[], offset: number): Article[] {
   return offset === 0 ? nextArticles : [...articles, ...nextArticles];
 }
-
-export function shouldShowLoadMore(hasMore: boolean, searchQuery: string): boolean {
-  return hasMore && searchQuery.trim().length === 0;
-}

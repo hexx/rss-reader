@@ -10,7 +10,6 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from '@/components/ui/empty';
-import { Input } from '@/components/ui/input';
 import { Sheet, SheetContent, SheetTitle, SheetTrigger } from '@/components/ui/sheet';
 import { Skeleton } from '@/components/ui/skeleton';
 import { TooltipProvider } from '@/components/ui/tooltip';
@@ -18,16 +17,14 @@ import {
   AlertCircle,
   ArrowUpDown,
   CheckCircle2,
+  Inbox,
   Loader2,
   Menu,
   RefreshCw,
-  Search,
 } from 'lucide-react';
 import { useCallback, useMemo, useState } from 'react';
-import type { FormEvent } from 'react';
 
 import { applyReadStateChange } from './articleState.js';
-import { shouldShowLoadMore } from './articlePagination.js';
 import { ArticleCard } from './components/ArticleCard.js';
 import { SourceManager } from './components/SourceManager.js';
 import { useArticles } from './hooks/useArticles.js';
@@ -35,31 +32,9 @@ import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts.js';
 import { useSources } from './hooks/useSources.js';
 import { useSubscriptions } from './hooks/useSubscriptions.js';
 import { useSync } from './hooks/useSync.js';
-import type { Article, ArticleSortDirection } from './types.js';
+import type { ArticleSortDirection } from './types.js';
 import { normalizeError } from './utils/status.js';
 import type { Status } from './utils/status.js';
-
-function includesQuery(value: string | null | undefined, query: string): boolean {
-  return value?.toLowerCase().includes(query) ?? false;
-}
-
-function matchesSearch(article: Article, query: string): boolean {
-  if (query.length === 0) {
-    return true;
-  }
-
-  return (
-    includesQuery(article.title, query) ||
-    includesQuery(article.summary, query) ||
-    includesQuery(article.hatenaSummary, query) ||
-    includesQuery(article.content, query) ||
-    includesQuery(article.url, query) ||
-    includesQuery(article.siteUrl, query) ||
-    article.bookmarks.some(
-      (bookmark) => includesQuery(bookmark.user, query) || includesQuery(bookmark.comment, query),
-    )
-  );
-}
 
 function ArticleCardSkeleton() {
   return (
@@ -110,7 +85,6 @@ function StatusAlert({ status }: { status: Status }) {
 }
 
 export function App() {
-  const [searchQuery, setSearchQuery] = useState('');
   const [showUnreadOnly, setShowUnreadOnly] = useState(true);
   const [selectedSourceUrl, setSelectedSourceUrl] = useState<string | undefined>();
   const [sortOrder, setSortOrder] = useState<ArticleSortDirection>('asc');
@@ -200,23 +174,8 @@ export function App() {
     loadMore();
   }, [loadMore]);
 
-  const filteredArticles = useMemo(() => {
-    const normalizedQuery = searchQuery.trim().toLowerCase();
-    return articles.filter((article) => matchesSearch(article, normalizedQuery));
-  }, [articles, searchQuery]);
-
-  const handleLocalSearch = useCallback(
-    (event: FormEvent<HTMLFormElement>) => {
-      event.preventDefault();
-      if (searchQuery.trim().length === 0) {
-        refresh();
-      }
-    },
-    [refresh, searchQuery],
-  );
-
   const showAllSelected = selectedSourceUrl === undefined;
-  const showLoadMoreButton = shouldShowLoadMore(hasMore, searchQuery);
+  const showLoadMoreButton = hasMore;
   const totalUnreadCount = useMemo(
     () => sources.sources.reduce((sum, source) => sum + source.unreadCount, 0),
     [sources.sources],
@@ -313,28 +272,6 @@ export function App() {
                 <span className="hidden sm:inline">同期</span>
               </Button>
             </div>
-
-            <form
-              className="flex w-full md:flex-1 items-center gap-2 order-last md:order-none min-w-0"
-              onSubmit={handleLocalSearch}
-            >
-              <div className="relative flex-1 max-w-md min-w-0">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
-                <Input
-                  id="search-input"
-                  name="query"
-                  type="search"
-                  placeholder="記事を検索..."
-                  autoComplete="off"
-                  value={searchQuery}
-                  onChange={(event) => setSearchQuery(event.target.value)}
-                  className="pl-9"
-                />
-              </div>
-              <Button type="submit" variant="secondary" size="sm">
-                検索
-              </Button>
-            </form>
           </div>
         </header>
 
@@ -361,28 +298,24 @@ export function App() {
                     <ArticleCardSkeleton />
                     <ArticleCardSkeleton />
                   </>
-                ) : (filteredArticles.length === 0 ? (
+                ) : (articles.length === 0 ? (
                   <Empty>
                     <EmptyHeader>
                       <EmptyMedia variant="icon">
-                        <Search />
+                        <Inbox />
                       </EmptyMedia>
                       <EmptyTitle>
-                        {searchQuery.trim().length > 0
-                          ? '検索条件に一致する記事がありません'
-                          : showAllSelected
-                            ? '記事がまだありません'
-                            : '選択したソースの記事がありません'}
+                        {showAllSelected
+                          ? '記事がまだありません'
+                          : '選択したソースの記事がありません'}
                       </EmptyTitle>
                       <EmptyDescription>
-                        {searchQuery.trim().length > 0
-                          ? 'キーワードを変更して再度検索してください'
-                          : 'RSSフィードを追加して記事を取得しましょう'}
+                        RSSフィードを追加して記事を取得しましょう
                       </EmptyDescription>
                     </EmptyHeader>
                   </Empty>
                 ) : (
-                  filteredArticles.map((article) => (
+                  articles.map((article) => (
                     <ArticleCard
                       key={article.id}
                       article={article}

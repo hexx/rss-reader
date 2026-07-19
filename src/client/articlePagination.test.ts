@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import type { Article } from './types.js';
-import { ARTICLE_PAGE_SIZE, buildArticlesUrl, mergeLoadedArticles, shouldShowLoadMore } from './articlePagination.js';
+import { ARTICLE_PAGE_SIZE, buildArticlesUrl, mergeLoadedArticles } from './articlePagination.js';
 
 const articles: Article[] = [
   {
@@ -47,9 +47,4 @@ describe('articlePagination', () => {
     expect(mergeLoadedArticles([articles[0]!], [articles[1]!], ARTICLE_PAGE_SIZE)).toEqual(articles);
   });
 
-  it('shows load more only in the normal browsing state', () => {
-    expect(shouldShowLoadMore(true, '')).toBe(true);
-    expect(shouldShowLoadMore(false, '')).toBe(false);
-    expect(shouldShowLoadMore(true, '検索')).toBe(false);
-  });
 });

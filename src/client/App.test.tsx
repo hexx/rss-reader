@@ -112,63 +112,6 @@ describe('App', () => {
     expect(screen.getByText('既読にしました。')).toBeInTheDocument();
   });
 
-  it('filters articles by search query', async () => {
-    const twoArticles = {
-      articles: [
-        {
-          bookmarks: [],
-          content: '',
-          createdAt: '2024-01-01T00:00:00.000Z',
-          hatenaSummary: '',
-          id: 'article-1',
-          isRead: false,
-          publishedAt: '2024-01-01T00:00:00.000Z',
-          siteUrl: 'https://example.com/feed.xml',
-          summary: '',
-          title: 'React入門',
-          url: 'https://example.com/articles/1',
-        },
-        {
-          bookmarks: [],
-          content: '',
-          createdAt: '2024-01-02T00:00:00.000Z',
-          hatenaSummary: '',
-          id: 'article-2',
-          isRead: false,
-          publishedAt: '2024-01-02T00:00:00.000Z',
-          siteUrl: 'https://example.com/feed.xml',
-          summary: '',
-          title: 'Python入門',
-          url: 'https://example.com/articles/2',
-        },
-      ],
-    };
-
-    server.use(
-      http.get('*/api/sources', () => HttpResponse.json(sourcesResponse)),
-      http.get('*/api/articles', () => HttpResponse.json(twoArticles)),
-    );
-
-    const user = userEvent.setup();
-    renderApp();
-
-    await waitFor(() => {
-      expect(screen.getByText('React入門')).toBeInTheDocument();
-      expect(screen.getByText('Python入門')).toBeInTheDocument();
-    });
-
-    // 検索ボックスに "React" と入力
-    const searchInput = screen.getByPlaceholderText('記事を検索...');
-    await user.type(searchInput, 'React');
-
-    // 検索ボタンをクリック
-    await user.click(screen.getByRole('button', { name: '検索' }));
-
-    // 「React入門」のみ表示され、「Python入門」は非表示
-    expect(screen.getByText('React入門')).toBeInTheDocument();
-    expect(screen.queryByText('Python入門')).not.toBeInTheDocument();
-  });
-
   it('shows sidebar with source manager on desktop', async () => {
     server.use(
       http.get('*/api/sources', () => HttpResponse.json(sourcesResponse)),
