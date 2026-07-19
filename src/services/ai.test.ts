@@ -11,16 +11,16 @@ vi.mock('@ai-sdk/openai-compatible', () => ({
 import { generateText } from 'ai';
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
 
-import { generateArticleSummary, generateHatenaSummary, getOpenCodeGoChatModel } from './ai.js';
+import { generateArticleSummary, generateHatenaSummary, getChatModel } from './ai.js';
 
 const generateTextMock = vi.mocked(generateText);
 const createOpenAICompatibleMock = vi.mocked(createOpenAICompatible);
 
 describe('generateArticleSummary', () => {
   beforeEach(() => {
-    vi.stubEnv('OPENCODE_GO_BASE_URL', 'https://opencode.example/v1');
-    vi.stubEnv('OPENCODE_GO_API_KEY', 'test-api-key');
-    vi.stubEnv('OPENCODE_GO_MODEL', 'test-model');
+    vi.stubEnv('AI_BASE_URL', 'https://opencode.example/v1');
+    vi.stubEnv('AI_API_KEY', 'test-api-key');
+    vi.stubEnv('AI_MODEL', 'test-model');
     generateTextMock.mockReset();
     createOpenAICompatibleMock.mockReset();
     createOpenAICompatibleMock.mockReturnValue({
@@ -62,41 +62,41 @@ describe('generateArticleSummary', () => {
     expect(callArgs?.prompt).not.toContain('__TAIL__');
   });
 
-  it('builds the OpenCode Go chat model from env bindings', () => {
+  it('builds the chat model from env bindings', () => {
     const chatModelMock = vi.fn().mockReturnValue('chat-model');
     createOpenAICompatibleMock.mockReturnValue({
       chatModel: chatModelMock,
     } as never);
 
-    const model = getOpenCodeGoChatModel({
-      OPENCODE_GO_API_KEY: 'test-api-key',
-      OPENCODE_GO_BASE_URL: 'https://opencode.example/v1',
-      OPENCODE_GO_MODEL: 'test-model',
+    const model = getChatModel({
+      AI_API_KEY: 'test-api-key',
+      AI_BASE_URL: 'https://opencode.example/v1',
+      AI_MODEL: 'test-model',
     });
 
     expect(model).toBe('chat-model');
     expect(createOpenAICompatibleMock).toHaveBeenCalledWith({
       apiKey: 'test-api-key',
       baseURL: 'https://opencode.example/v1',
-      name: 'opencode-go',
+      name: 'ai',
     });
     expect(chatModelMock).toHaveBeenCalledWith('test-model');
   });
 
-  it('rejects when the OpenCode Go base URL is missing', async () => {
+  it('rejects when the AI base URL is missing', async () => {
     await expect(
       generateArticleSummary('記事タイトル', '本文', {
-        OPENCODE_GO_API_KEY: 'test-api-key',
+        AI_API_KEY: 'test-api-key',
       } as never),
-    ).rejects.toThrow('Missing required environment variable: OPENCODE_GO_BASE_URL');
+    ).rejects.toThrow('Missing required environment variable: AI_BASE_URL');
   });
 
-  it('rejects when the OpenCode Go API key is missing', async () => {
+  it('rejects when the AI API key is missing', async () => {
     await expect(
       generateArticleSummary('記事タイトル', '本文', {
-        OPENCODE_GO_BASE_URL: 'https://opencode.example/v1',
+        AI_BASE_URL: 'https://opencode.example/v1',
       } as never),
-    ).rejects.toThrow('Missing required environment variable: OPENCODE_GO_API_KEY');
+    ).rejects.toThrow('Missing required environment variable: AI_API_KEY');
   });
 
   it('summarizes Hatena reactions from comments only', async () => {

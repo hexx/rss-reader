@@ -476,9 +476,9 @@ describe('worker app', () => {
 
   it('threads env bindings into sync routes', async () => {
     const env = {
-      OPENCODE_GO_API_KEY: 'test-api-key',
-      OPENCODE_GO_BASE_URL: 'https://opencode.example/v1',
-      OPENCODE_GO_MODEL: 'test-model',
+      AI_API_KEY: 'test-api-key',
+      AI_BASE_URL: 'https://opencode.example/v1',
+      AI_MODEL: 'test-model',
     };
     const executionContext = {
       waitUntil: vi.fn(),
@@ -509,9 +509,9 @@ describe('worker app', () => {
 
   it('uses cron mode for scheduled syncs', async () => {
     const env = {
-      OPENCODE_GO_API_KEY: 'test-api-key',
-      OPENCODE_GO_BASE_URL: 'https://opencode.example/v1',
-      OPENCODE_GO_MODEL: 'test-model',
+      AI_API_KEY: 'test-api-key',
+      AI_BASE_URL: 'https://opencode.example/v1',
+      AI_MODEL: 'test-model',
     };
     const executionContext = {
       waitUntil: vi.fn(),

@@ -22,3 +22,11 @@ migrations_dir = "drizzle"
 
 [triggers]
 crons = ["0 */3 * * *"]
+
+# AI プロバイダ（OpenAI 互換エンドポイント）の設定
+# 秘匿値である API キーは wrangler.toml には書き込まず、以下で設定する：
+#   npx wrangler secret put AI_API_KEY
+# 公開値（ベース URL・モデル名）は [vars] に記載する。
+[vars]
+AI_BASE_URL = "https://api.openai.com/v1"
+AI_MODEL = "gpt-4o-mini"

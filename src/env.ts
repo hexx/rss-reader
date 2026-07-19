@@ -1,9 +1,9 @@
 import type { D1Database } from '@cloudflare/workers-types';
 
 export interface RuntimeEnv {
-  OPENCODE_GO_API_KEY?: string;
-  OPENCODE_GO_BASE_URL?: string;
-  OPENCODE_GO_MODEL?: string;
+  AI_API_KEY?: string;
+  AI_BASE_URL?: string;
+  AI_MODEL?: string;
 }
 
 export interface Bindings extends RuntimeEnv {
