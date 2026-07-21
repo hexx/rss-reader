@@ -7,7 +7,10 @@ main = "src/worker.ts"
 # 認証アカウントが使われ、エラー 7403 (The given account is not valid...)
 # になることがある。
 account_id = "ACCOUNT_ID_PLACEHOLDER"
-compatibility_date = "2024-05-01"
+# 2024-09-23 以降にすると nodejs_compat が v2 として扱われ、node: プレフィックスなしで
+# Node.js ビルトイン（http/url/events/timers 等）を利用できる。rss-parser / xml2js が
+# プレフィックスなしでビルトインを require するため、これ未満だとビルドが失敗する。
+compatibility_date = "2024-09-23"
 compatibility_flags = [ "nodejs_compat" ]
 
 assets = { directory = "./dist-client", binding = "ASSETS" }
