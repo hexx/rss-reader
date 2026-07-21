@@ -276,7 +276,7 @@ export function App() {
         </header>
 
         <div className="flex flex-col md:flex-row flex-1 overflow-hidden">
-          <aside className="hidden md:block w-80 shrink-0 border-r bg-background/80 backdrop-blur-md overflow-y-auto">
+          <aside className="hidden md:block w-80 shrink-0 border-r bg-background/80 backdrop-blur-md">
             <SourceManager
               onAddSubscription={handleAddSubscription}
               onRemoveSubscription={handleRemoveSubscription}
@@ -287,7 +287,7 @@ export function App() {
             />
           </aside>
 
-          <main id="content" tabIndex={-1} className="flex-1 min-h-0 overflow-y-auto">
+          <main id="content" tabIndex={-1} className="relative flex-1 min-h-0 overflow-y-auto overscroll-contain">
             <div className="p-4 md:p-6">
               {displayedStatus && <StatusAlert status={displayedStatus} />}
 
