@@ -1,5 +1,6 @@
-import { generateText } from 'ai';
-import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
+import { contentText, createModels, createProvider } from '@earendil-works/pi-ai';
+import type { Context, Model } from '@earendil-works/pi-ai';
+import { openAICompletionsApi } from '@earendil-works/pi-ai/api/openai-completions.lazy';
 
 import type { RuntimeEnv } from '../env.js';
 import { sanitizeSummaryHtml } from '../utils/sanitizeHtml.js';
@@ -9,7 +10,27 @@ const defaultModelId = 'gpt-4o-mini';
 const articleContentLimit = 20_000;
 const articleContentTruncationSuffix = '\n...（以下省略）';
 
+// 任意の OpenAI 互換エンドポイントを pi-ai の Models 抽象に乗せるためのプロバイダ ID。
+const aiProviderId = 'rss-reader';
+
 type AiEnv = Pick<RuntimeEnv, 'AI_API_KEY' | 'AI_BASE_URL' | 'AI_MODEL'>;
+
+// 任意の OpenAI 互換エンドポイントに使う固定の既定メタデータ。
+// cost は未知なので 0、reasoning は使わないので false（thinking を有効化せず、
+// system プロンプトは system ロールで送られる）。compat は pi-ai が baseUrl から
+// 自動検出する（例: opencode.ai 経由なら supportsStore:false 等が正しく付く）。
+const fallbackModel: Model<'openai-completions'> = {
+  id: defaultModelId,
+  name: defaultModelId,
+  api: 'openai-completions',
+  provider: aiProviderId,
+  baseUrl: '',
+  reasoning: false,
+  input: ['text'],
+  cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+  contextWindow: 128_000,
+  maxTokens: 4096,
+};
 
 function requireEnv(env: AiEnv, name: keyof AiEnv): string {
   const value = env[name];
@@ -53,20 +74,67 @@ function buildHatenaSummaryPrompt(comments: HatenaBookmarkComment[]): string {
   ].join('\n');
 }
 
-function createAiProvider(env: AiEnv) {
-  const baseURL = requireEnv(env, 'AI_BASE_URL');
-  const apiKey = requireEnv(env, 'AI_API_KEY');
-
-  return createOpenAICompatible({
-    apiKey,
-    baseURL,
-    name: 'ai',
-  });
+/**
+ * 固定の既定メタデータから、指定のモデル ID と接続先を持つモデルを組み立てます。
+ * compat は設定せず、pi-ai の baseUrl 自動検出に任せます。
+ */
+function buildModel(baseUrl: string, modelId: string): Model<'openai-completions'> {
+  return { ...fallbackModel, id: modelId, name: modelId, baseUrl };
 }
 
-export function getChatModel(env: AiEnv = process.env) {
+/**
+ * 環境バインディングから pi-ai の Models コレクションとモデルを組み立てます。
+ * 認証は AI_API_KEY をそのまま使い（process.env に依存しない）、Cloudflare Workers の
+ * バインディング経由でも動作します。
+ */
+export function createAi(env: AiEnv) {
+  const baseUrl = requireEnv(env, 'AI_BASE_URL');
+  const apiKey = requireEnv(env, 'AI_API_KEY');
   const modelId = env.AI_MODEL?.trim() || defaultModelId;
-  return createAiProvider(env).chatModel(modelId);
+
+  const model = buildModel(baseUrl, modelId);
+
+  const provider = createProvider<'openai-completions'>({
+    id: aiProviderId,
+    name: 'RSS Reader AI',
+    baseUrl,
+    auth: {
+      apiKey: {
+        name: 'AI API key',
+        resolve: () => Promise.resolve({ auth: { apiKey }, source: 'AI_API_KEY' }),
+      },
+    },
+    models: [model],
+    api: openAICompletionsApi(),
+  });
+
+  const models = createModels();
+  models.setProvider(provider);
+
+  return { models, model };
+}
+
+/**
+ * system プロンプトと user プロンプトを OpenAI 互換エンドポイントへ非ストリーミングで送信し、
+ * 生成テキストを返します。API エラー時は ai-sdk 時代と同じく例外を投げます。
+ */
+async function completeText(env: AiEnv, systemPrompt: string, prompt: string): Promise<string> {
+  const { models, model } = createAi(env);
+
+  const context: Context = {
+    systemPrompt,
+    messages: [{ role: 'user', content: prompt, timestamp: Date.now() }],
+  };
+
+  const result = await models.complete(model, context);
+
+  // pi-ai は API エラー時も throw せず stopReason: 'error' のメッセージを返すため、
+  // 呼び出し側（sync ワークフローの try/catch）が期待する reject 挙動をここで再現する。
+  if (result.stopReason === 'error' || result.stopReason === 'aborted') {
+    throw new Error(result.errorMessage ?? `AI request failed: ${result.stopReason}`);
+  }
+
+  return contentText(result.content).trim();
 }
 
 /**
@@ -84,15 +152,14 @@ export async function generateArticleSummary(
   env: AiEnv = process.env,
 ): Promise<string> {
   const truncatedContent = truncateArticleContent(content);
-  const result = await generateText({
-    model: getChatModel(env),
-    prompt: buildArticleSummaryPrompt(title, truncatedContent),
-    system:
-      'あなたは日本語の要約アシスタントです。与えられた記事を簡潔に要約してください。記事本文が空で提供される場合もあります。その場合は、タイトルから推測できる範囲で要約を作成してください。出力は段落(<p>)やリスト(<ul>,<li>)、強調(<strong>)などのHTMLタグを用いて、見やすく構造化されたHTMLスニペットにしてください。',
-  });
+  const text = await completeText(
+    env,
+    'あなたは日本語の要約アシスタントです。与えられた記事を簡潔に要約してください。記事本文が空で提供される場合もあります。その場合は、タイトルから推測できる範囲で要約を作成してください。出力は段落(<p>)やリスト(<ul>,<li>)、強調(<strong>)などのHTMLタグを用いて、見やすく構造化されたHTMLスニペットにしてください。',
+    buildArticleSummaryPrompt(title, truncatedContent),
+  );
 
   // AI 出力は信頼できないので、保存前に許可タグ・許可属性のみにサニタイズする。
-  return sanitizeSummaryHtml(result.text.trim());
+  return sanitizeSummaryHtml(text);
 }
 
 /**
@@ -111,12 +178,11 @@ export async function generateHatenaSummary(
     return '';
   }
 
-  const result = await generateText({
-    model: getChatModel(env),
-    prompt: buildHatenaSummaryPrompt(comments),
-    system:
-      'あなたは日本語の要約アシスタントです。はてなブックマークのコメントの雰囲気を簡潔に要約してください。出力は段落(<p>)やリスト(<ul>,<li>)、強調(<strong>)などのHTMLタグを用いて、見やすく構造化されたHTMLスニペットにしてください。',
-  });
+  const text = await completeText(
+    env,
+    'あなたは日本語の要約アシスタントです。はてなブックマークのコメントの雰囲気を簡潔に要約してください。出力は段落(<p>)やリスト(<ul>,<li>)、強調(<strong>)などのHTMLタグを用いて、見やすく構造化されたHTMLスニペットにしてください。',
+    buildHatenaSummaryPrompt(comments),
+  );
 
-  return sanitizeSummaryHtml(result.text.trim());
+  return sanitizeSummaryHtml(text);
 }

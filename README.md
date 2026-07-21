@@ -41,13 +41,13 @@ cp .env.example .env
 ## AI プロバイダの設定
 
 要約生成には **OpenAI 互換（OpenAI-compatible）な任意のエンドポイント**を使います。
-裏側では `@ai-sdk/openai-compatible` の `createOpenAICompatible` を利用しており、
-特定のベンダーに依存しません。次の 3 つの環境変数で指定します。
+裏側では [`@earendil-works/pi-ai`](https://github.com/earendil-works/pi/tree/main/packages/ai) の
+`openai-completions` API を利用しており、特定のベンダーに依存しません。次の 3 つの環境変数で指定します。
 
 | 変数 | 説明 | 例 |
 | --- | --- | --- |
 | `AI_BASE_URL` | OpenAI 互換エンドポイントのベース URL | `https://api.openai.com/v1` |
-| `AI_API_KEY` | API キー（秘匿値） | `sk-...` |
+| `AI_API_KEY` | API キー（秘匿値）。キー不要なローカルサーバでもダミー値が必要 | `sk-...` |
 | `AI_MODEL` | 利用するモデル名（未設定時は `gpt-4o-mini`） | `gpt-4o-mini` |
 
 ### ローカル開発
@@ -89,10 +89,13 @@ AI_MODEL=llama3.2
 - **各社の OpenAI 互換ゲートウェイ**: OpenRouter / Azure OpenAI / LiteLLM など。
   Anthropic 等を OpenAI 互換でプロキシするゲートウェイを経由すれば、
   Anthropic モデルも `AI_BASE_URL` にそのまま指定できます。
-- **ローカルの Ollama**: `http://localhost:11434/v1`（`AI_API_KEY` は任意）
+- **OpenCode Go 経由の DeepSeek など**: `https://opencode.ai/zen/go/v1` に
+  `AI_MODEL=deepseek-v4-flash` のような指定。`opencode.ai` 経路は pi-ai が自動で
+  互換設定（`store` フィールドを送らない等）を判別します。
+- **ローカルの Ollama**: `http://localhost:11434/v1`（`AI_API_KEY` は必須ですが、
+  キー不要なサーバでは `replace-me` などのダミー値で構いません）
 - **ローカルの LM Studio / vLLM 等**: 同様に OpenAI 互換ポートを指定
 
 > **注意**: Anthropic の公式 API は OpenAI 互換ではありません。
 > そのまま `AI_BASE_URL` に `https://api.anthropic.com` を指定しても動きません。
-> Anthropic を直接使う場合は、(1) OpenAI 互換ゲートウェイでプロキシするか、
-> (2) `@ai-sdk/anthropic` などを追加して別プロバイダとして実装する必要があります。
+> Anthropic を直接使う場合は、OpenAI 互換ゲートウェイでプロキシしてください。
