@@ -78,19 +78,21 @@ async function syncBookmarksForExistingArticle(
 
 /** 手動同期: 1 サイトあたりの記事処理上限 */
 const MANUAL_MAX_PER_SITE = 2;
-/** Cron 同期: 1 サイトあたりの記事処理上限 */
-const CRON_MAX_PER_SITE = 10;
 /** 手動同期: 全体の記事処理上限（全サイト合計） */
 const MANUAL_MAX_TOTAL = 2;
 
 /**
  * 1つの購読サイトを同期し、記事本文・要約・はてブコメントを保存します。
- * 既存記事は重複登録せず、手動実行では1回あたりの処理件数を抑えてタイムアウトを避けます。
+ * 既存記事は重複登録しません。手動実行では1回あたりの処理件数を抑えてタイムアウトを避け、
+ * Cron 実行では新着記事を全件処理します（上限なし。記事単位の逐次 INSERT で冪等なため、
+ * Worker の実行時間上限に達しても次回実行で再開されます。詳細: docs/adr/0002-split-sync-cadences.md）。
  *
  * @param siteUrl 同期対象の購読サイトURL。
  * @param debug 失敗時に例外を再送出してデバッグしやすくするかどうか。
  * @param env DB、Vector、AI の各環境バインディング。
- * @param isCron Cron 実行かどうか。Cron の場合は1回あたりの処理上限が増えます。
+ * @param isCron Cron 実行かどうか。Cron の場合は1サイトあたりの新着記事上限を撤廃します。
+ * @param includeBookmarkBackfill 既存記事のはてなブックマーク再取得（バックフィル）を行うかどうか。
+ *   新着記事の取り込みに専念したい高頻度 Cron では false を渡します。
  * @returns 今回処理できた記事数。
  */
 export async function syncSite(
@@ -98,9 +100,10 @@ export async function syncSite(
   debug: boolean,
   env: RuntimeEnv,
   isCron: boolean,
+  includeBookmarkBackfill = true,
 ): Promise<number> {
   let processedCount = 0;
-  const maxProcessPerSync = isCron ? CRON_MAX_PER_SITE : MANUAL_MAX_PER_SITE;
+  const maxProcessPerSync = isCron ? Number.POSITIVE_INFINITY : MANUAL_MAX_PER_SITE;
 
   try {
     logger.info('サイト同期を開始します。', { siteUrl });
@@ -121,8 +124,10 @@ export async function syncSite(
         // 購読元が b.hatena.ne.jp かどうかは関係なく、常に試みる
         // (レート制御は hatena モジュール内のリミッターが行う)。
         const existing = existingArticle[0];
-        if (existing) {
+        if (existing && includeBookmarkBackfill) {
           await syncBookmarksForExistingArticle(database, existing.id, article.url);
+        }
+        if (existing) {
           continue;
         }
 
@@ -200,17 +205,20 @@ export async function syncSite(
 
 /**
  * 購読済みサイトを順番に同期します。
- * 手動実行では全体の処理件数が2件に達したところで止め、Cron ではより多く処理します。
+ * 手動実行では全体の処理件数が2件に達したところで止めます。Cron では各サイトの新着記事を
+ * 上限なく処理します（上限撤廃の詳細は docs/adr/0002-split-sync-cadences.md）。
  *
  * @param debug 失敗時に例外を再送出してデバッグしやすくするかどうか。
  * @param env DB、Vector、AI の各環境バインディング。
- * @param isCron Cron 実行かどうか。Cron の場合は各サイトの処理上限も増えます。
+ * @param isCron Cron 実行かどうか。Cron の場合は各サイトの処理上限を撤廃します。
+ * @param includeBookmarkBackfill 既存記事のはてなブックマーク再取得（バックフィル）を行うかどうか。
  * @returns 何も返しません。
  */
 export async function syncAllSubscriptions(
   debug: boolean,
   env: RuntimeEnv,
   isCron: boolean,
+  includeBookmarkBackfill = true,
 ): Promise<void> {
   const database = getDb(env);
   const subscribedSites = await database
@@ -227,7 +235,13 @@ export async function syncAllSubscriptions(
   let totalProcessedCount = 0;
 
   for (const subscription of subscribedSites) {
-    totalProcessedCount += await syncSite(subscription.siteUrl, debug, env, isCron);
+    totalProcessedCount += await syncSite(
+      subscription.siteUrl,
+      debug,
+      env,
+      isCron,
+      includeBookmarkBackfill,
+    );
     if (!isCron && totalProcessedCount >= MANUAL_MAX_TOTAL) {
       break;
     }

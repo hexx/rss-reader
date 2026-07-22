@@ -318,6 +318,27 @@ describe('syncSite', () => {
     });
   });
 
+  it('skips bookmark backfill for existing articles when includeBookmarkBackfill is false', async () => {
+    const { syncSite } = await import('./sync.js');
+
+    fetchRssOrFallbackMock.mockResolvedValue([article]);
+    fetchArticleContentMock.mockResolvedValue('本文');
+    fetchHatenaBookmarksMock.mockResolvedValue(bookmarks);
+    generateArticleSummaryMock.mockResolvedValue('要約文');
+    generateHatenaSummaryMock.mockResolvedValue('はてブ要約');
+
+    // 1 回目: 新着記事として取り込まれる（バックフィル flag に関係なく初回ブクマは取得される）
+    await expect(syncSite(siteUrl, false, testEnv, true, false)).resolves.toBe(1);
+    fetchHatenaBookmarksMock.mockClear();
+
+    // 2 回目: 既存記事。includeBookmarkBackfill=false なのでブクマ再取得は行われない
+    await expect(syncSite(siteUrl, false, testEnv, true, false)).resolves.toBe(0);
+    expect(fetchHatenaBookmarksMock).not.toHaveBeenCalled();
+
+    const savedArticles = await testDb.select().from(articles);
+    expect(savedArticles).toHaveLength(1);
+  });
+
   it('stops processing once the manual sync limit is reached', async () => {
     const { syncSite } = await import('./sync.js');
 
