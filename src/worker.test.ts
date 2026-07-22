@@ -492,7 +492,7 @@ describe('worker app', () => {
       executionContext as never,
     );
     expect(syncResponse.status).toBe(202);
-    expect(syncAllSubscriptionsMock).toHaveBeenCalledWith(false, env, false);
+    expect(syncAllSubscriptionsMock).toHaveBeenCalledWith(false, env);
     expect(executionContext.waitUntil).toHaveBeenCalledTimes(1);
   });
 
@@ -507,7 +507,7 @@ describe('worker app', () => {
     expect(sourcesResponse.status).toBe(500);
   });
 
-  it('uses cron mode for scheduled syncs', async () => {
+  it('runs ingestion-only sync (no bookmark backfill) for the 30-minute cron', async () => {
     const env = {
       AI_API_KEY: 'test-api-key',
       AI_BASE_URL: 'https://opencode.example/v1',
@@ -520,7 +520,34 @@ describe('worker app', () => {
     syncAllSubscriptionsMock.mockResolvedValue();
     const workerModule = await import('./worker.js');
 
-    await workerModule.default.scheduled({} as never, env as never, executionContext as never);
+    await workerModule.default.scheduled(
+      { cron: '*/30 * * * *' } as never,
+      env as never,
+      executionContext as never,
+    );
+
+    expect(syncAllSubscriptionsMock).toHaveBeenCalledWith(false, env, false);
+    expect(executionContext.waitUntil).toHaveBeenCalledTimes(1);
+  });
+
+  it('runs full sync (with bookmark backfill) for the 3-hour cron', async () => {
+    const env = {
+      AI_API_KEY: 'test-api-key',
+      AI_BASE_URL: 'https://opencode.example/v1',
+      AI_MODEL: 'test-model',
+    };
+    const executionContext = {
+      waitUntil: vi.fn(),
+    };
+
+    syncAllSubscriptionsMock.mockResolvedValue();
+    const workerModule = await import('./worker.js');
+
+    await workerModule.default.scheduled(
+      { cron: '0 */3 * * *' } as never,
+      env as never,
+      executionContext as never,
+    );
 
     expect(syncAllSubscriptionsMock).toHaveBeenCalledWith(false, env, true);
     expect(executionContext.waitUntil).toHaveBeenCalledTimes(1);

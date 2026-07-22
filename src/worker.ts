@@ -468,7 +468,7 @@ app.patch('/api/articles/:id', updateArticleReadState);
 app.patch('/api/articles/:id/read', updateArticleReadState);
 
 app.post('/api/sync', (c) => {
-  const syncTask = syncAllSubscriptions(false, c.env, false).catch((error: unknown) => {
+  const syncTask = syncAllSubscriptions(false, c.env).catch((error: unknown) => {
     console.error('同期APIの実行に失敗しました。', { error });
   });
   if (c.executionCtx) {
@@ -499,10 +499,21 @@ interface ScheduledContext {
   waitUntil: (promise: Promise<unknown>) => void;
 }
 
+interface ScheduledEvent {
+  cron: string;
+}
+
+/** フル同期（新着取り込み＋全フィード記事のはてブバックフィル）を起動する cron 式。 */
+const FULL_SYNC_CRON = '0 */3 * * *';
+
 function createScheduledHandler() {
-  return async (_event: unknown, env: Bindings, ctx: ScheduledContext) => {
+  return async (event: ScheduledEvent, env: Bindings, ctx: ScheduledContext) => {
+    // 3時間おきのフル同期のみ、既存記事のはてブバックフィルを行う。
+    // 30分おきの取り込み専用 cron ではバックフィルをスキップし、はてなへの負荷を抑える。
+    // 詳細: docs/adr/0002-split-sync-cadences.md
+    const includeBookmarkBackfill = event.cron === FULL_SYNC_CRON;
     ctx.waitUntil(
-      syncAllSubscriptions(false, env, true).catch((error: unknown) => {
+      syncAllSubscriptions(false, env, includeBookmarkBackfill).catch((error: unknown) => {
         console.error('定期同期に失敗しました。', { error });
       }),
     );
