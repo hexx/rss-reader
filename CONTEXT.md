@@ -26,3 +26,7 @@ _Avoid_: createdAt（DB上の実装名であり、取得時刻と誤読しやす
 **Hatena Summary（反応要約）**:
 はてなブックマークのコメント群から生成する、世間の反応・意見の日本語要約（表示用 HTML スニペット）。コメント0件では生成しない。
 _Avoid_: Reaction Summary
+
+**Issue（課題プロンプト）**:
+issue-logger スキルが `issues/issue-yyyyMMddHHmm.md` に生成する、後続の AI エージェントがそのまま実行できるプロンプト形式の課題ファイル。YAML フロントマターの `status`（TODO / IN_PROGRESS / DONE / WONTFIX）で生命周期を管理する。GitHub の Issue とは全く別の概念。
+_Avoid_: ticket, task, GitHub Issue
