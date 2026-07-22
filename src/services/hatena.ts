@@ -6,7 +6,10 @@ export interface HatenaBookmarkComment {
    * 空文字として保持する（カウント・並び替えで user を落とさないため）。
    */
   comment: string;
-  /** ユーザーがブックマークした日時（jsonlite の `timestamp` をミリ秒に展開）。 */
+  /**
+   * ユーザーがブックマークした日時（分精度）。jsonlite の `timestamp`
+   * （`"YYYY/MM/DD HH:MM"` 形式の JST 文字列）を `Date` に確定パースする。
+   */
   timestamp: Date;
   user: string;
 }
@@ -14,7 +17,10 @@ export interface HatenaBookmarkComment {
 interface HatenaBookmarkApiResponse {
   bookmarks?: {
     comment?: string;
-    /** jsonlite は epoch 秒を文字列で返す。欠落時は現在時刻をフォールバックとする。 */
+    /**
+     * jsonlite は `"YYYY/MM/DD HH:MM"` 形式の JST・分精度文字列を返す。
+     * 欠落時は現在時刻をフォールバックとする。
+     */
     timestamp?: string;
     user?: string;
   }[];
@@ -163,16 +169,34 @@ function normalizeComment(comment: string): string {
   return comment.replaceAll(/\s+/g, ' ').trim();
 }
 
-/** Jsonlite の `timestamp`（epoch 秒文字列）を `Date` に変換する。 */
+/**
+ * Jsonlite の `timestamp`（`"YYYY/MM/DD HH:MM"` 形式、JST・分精度）の厳密パターン。
+ * 歴代の jsonlite が返すこの形式だけを受理し、それ以外はフォールバックに落とす
+ * （`new Date` の曖昧パースに渡すと環境依存の解釈になるため）。
+ */
+const hatenaTimestampPattern = /^(\d{4})\/(\d{2})\/(\d{2}) (\d{2}):(\d{2})$/;
+
+/**
+ * Jsonlite の `timestamp`（`"YYYY/MM/DD HH:MM"` 形式、JST）を `Date` に変換する。
+ *
+ * はてなが返す時刻は日本時間なので、UTC 環境（Cloudflare Workers）でも
+ * 順序・表示がずれないよう `+09:00` を付与して確定パースする。
+ * 不正・欠落値は `fallback`（現在時刻）を返す。
+ */
 function parseHatenaTimestamp(value: string | undefined, fallback: Date): Date {
-  if (typeof value !== 'string' || value.length === 0) {
+  if (typeof value !== 'string') {
     return fallback;
   }
-  const seconds = Number.parseInt(value, 10);
-  if (!Number.isFinite(seconds) || seconds <= 0) {
+  const match = hatenaTimestampPattern.exec(value);
+  if (match === null) {
     return fallback;
   }
-  return new Date(seconds * 1000);
+  const iso = `${match[1]}-${match[2]}-${match[3]}T${match[4]}:${match[5]}:00+09:00`;
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) {
+    return fallback;
+  }
+  return date;
 }
 
 export async function fetchHatenaBookmarks(articleUrl: string): Promise<HatenaBookmarkComment[]> {

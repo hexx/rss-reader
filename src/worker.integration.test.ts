@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { articles, subscriptions } from './db/schema.js';
+import { articles, hatenaBookmarks, subscriptions } from './db/schema.js';
 import { createTestDatabase } from './test-utils/sqljs-db.js';
 
 // SyncAllSubscriptions の依存をモック（実際のネットワーク・AI呼び出しを避ける）
@@ -173,5 +173,40 @@ describe('worker integration: sync -> articles flow', () => {
       id: 'article-integration-read',
       isRead: true,
     });
+  });
+
+  it('returns bookmarks newest-first with a deterministic rowid tiebreak within the same minute (ADR-0003)', async () => {
+    const { fetchBookmarksByArticleIds } = await import('./worker.js');
+
+    await testDb.insert(articles).values({
+      content: '',
+      hatenaSummary: null,
+      id: 'article-ordering',
+      isRead: false,
+      publishedAt: new Date('2024-01-01T00:00:00.000Z'),
+      siteUrl: 'https://example.com/feed.xml',
+      summary: '',
+      title: 'Ordering Test',
+      url: 'https://example.com/articles/ordering',
+    });
+
+    // bob と carol は同一分（分精度 timestamp の tiebreak 検証）。
+    // jsonlite は新しい順で返りその順に INSERT されるので、同一分内は
+    // 先に挿入された bob（rowid 小）が先頭にくる。
+    const sameMinute = new Date('2024-01-01T09:00:00.000Z');
+    await testDb.insert(hatenaBookmarks).values([
+      { articleId: 'article-ordering', comment: 'newest', createdAt: new Date('2024-01-03T00:00:00.000Z'), id: 'b1', user: 'alice' },
+      { articleId: 'article-ordering', comment: 'same-minute-first', createdAt: sameMinute, id: 'b2', user: 'bob' },
+      { articleId: 'article-ordering', comment: 'same-minute-second', createdAt: sameMinute, id: 'b3', user: 'carol' },
+    ]);
+
+    // testDb は sql.js、関数型は D1 だが実行時の互換性は十分（他テストと同じく型だけキャスト）
+    const database = testDb as unknown as Parameters<typeof fetchBookmarksByArticleIds>[0];
+    const result = await fetchBookmarksByArticleIds(database, ['article-ordering']);
+    expect(result.get('article-ordering')?.map((bookmark) => bookmark.user)).toEqual([
+      'alice',
+      'bob',
+      'carol',
+    ]);
   });
 });

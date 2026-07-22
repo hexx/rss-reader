@@ -318,6 +318,35 @@ describe('syncSite', () => {
     });
   });
 
+  it('refreshes createdAt and comment of existing bookmarks on re-fetch (DO UPDATE self-healing)', async () => {
+    const { syncSite } = await import('./sync.js');
+
+    fetchRssOrFallbackMock.mockResolvedValue([article]);
+    fetchArticleContentMock.mockResolvedValue('本文');
+    // 1 回目: 壊れた古い createdAt と旧コメント、2 回目: 正しい最新値（自然治癒の想定）
+    fetchHatenaBookmarksMock
+      .mockResolvedValueOnce([
+        { comment: '古いコメント', timestamp: new Date('1970-01-01T00:33:45.000Z'), user: 'alice' },
+      ])
+      .mockResolvedValueOnce([
+        { comment: '編集後のコメント', timestamp: new Date('2024-01-05T00:00:00.000Z'), user: 'alice' },
+      ]);
+    generateArticleSummaryMock.mockResolvedValue('要約文');
+    generateHatenaSummaryMock.mockResolvedValue('はてブ要約');
+
+    await syncSite(siteUrl, false, testEnv);
+    await syncSite(siteUrl, false, testEnv);
+
+    const savedBookmarks = await testDb.select().from(hatenaBookmarks);
+    // 行は増えず、既存行が最新化される
+    expect(savedBookmarks).toHaveLength(1);
+    expect(savedBookmarks[0]).toMatchObject({
+      comment: '編集後のコメント',
+      createdAt: new Date('2024-01-05T00:00:00.000Z'),
+      user: 'alice',
+    });
+  });
+
   it('skips bookmark backfill for existing articles when includeBookmarkBackfill is false', async () => {
     const { syncSite } = await import('./sync.js');
 

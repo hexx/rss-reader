@@ -24,8 +24,8 @@ export const articles = sqliteTable('articles', {
  *
  * `(article_id, user)` に UNIQUE を張ることで、「同じユーザーが同じ記事に
  * 複数回ブックマークしても 1 行しか存在しない」ことを DB レベルで保証する。
- * これにより `INSERT ... ON CONFLICT (article_id, user) DO NOTHING` が
- * 冪等に動作し、再取得で重複行が増殖しない。
+ * これにより `INSERT ... ON CONFLICT (article_id, user) DO UPDATE` が
+ * 冪等に動作し、再取得で重複行が増殖しない（競合時は createdAt・comment を最新化する）。
  */
 export const hatenaBookmarks = sqliteTable(
   'hatena_bookmarks',
