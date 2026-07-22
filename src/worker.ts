@@ -468,7 +468,7 @@ app.patch('/api/articles/:id', updateArticleReadState);
 app.patch('/api/articles/:id/read', updateArticleReadState);
 
 app.post('/api/sync', (c) => {
-  const syncTask = syncAllSubscriptions(false, c.env, false).catch((error: unknown) => {
+  const syncTask = syncAllSubscriptions(false, c.env).catch((error: unknown) => {
     console.error('同期APIの実行に失敗しました。', { error });
   });
   if (c.executionCtx) {
@@ -513,7 +513,7 @@ function createScheduledHandler() {
     // 詳細: docs/adr/0002-split-sync-cadences.md
     const includeBookmarkBackfill = event.cron === FULL_SYNC_CRON;
     ctx.waitUntil(
-      syncAllSubscriptions(false, env, true, includeBookmarkBackfill).catch((error: unknown) => {
+      syncAllSubscriptions(false, env, includeBookmarkBackfill).catch((error: unknown) => {
         console.error('定期同期に失敗しました。', { error });
       }),
     );

@@ -492,7 +492,7 @@ describe('worker app', () => {
       executionContext as never,
     );
     expect(syncResponse.status).toBe(202);
-    expect(syncAllSubscriptionsMock).toHaveBeenCalledWith(false, env, false);
+    expect(syncAllSubscriptionsMock).toHaveBeenCalledWith(false, env);
     expect(executionContext.waitUntil).toHaveBeenCalledTimes(1);
   });
 
@@ -526,7 +526,7 @@ describe('worker app', () => {
       executionContext as never,
     );
 
-    expect(syncAllSubscriptionsMock).toHaveBeenCalledWith(false, env, true, false);
+    expect(syncAllSubscriptionsMock).toHaveBeenCalledWith(false, env, false);
     expect(executionContext.waitUntil).toHaveBeenCalledTimes(1);
   });
 
@@ -549,7 +549,7 @@ describe('worker app', () => {
       executionContext as never,
     );
 
-    expect(syncAllSubscriptionsMock).toHaveBeenCalledWith(false, env, true, true);
+    expect(syncAllSubscriptionsMock).toHaveBeenCalledWith(false, env, true);
     expect(executionContext.waitUntil).toHaveBeenCalledTimes(1);
   });
 

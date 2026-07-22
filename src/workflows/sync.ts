@@ -50,7 +50,7 @@ async function persistBookmarks(
  * 既存記事に対しはてなブックマークのみを冪等に再取得・保存する。
  * 主に 2 つの取りこぼしケースの補完を目的とする：
  *  - jsonlite の取得件数上限を超えた分の取りこぼし
- *  - 手動同期の `MANUAL_MAX_*` に引っかかって当該記事分のブックマークが
+ *  - 初回取得時の一時的なネットワーク失敗等で当該記事分のブックマークが
  *    まだ保存されていないケース
  * 取得失敗は best-effort で握り潰し、既存記事のメタデータ更新は阻害しない。
  * 同一ユーザー重複は schema の UNIQUE 制約 `hatena_bookmarks_article_id_user_unique`
@@ -76,21 +76,15 @@ async function syncBookmarksForExistingArticle(
   await persistBookmarks(database, articleId, bookmarks);
 }
 
-/** 手動同期: 1 サイトあたりの記事処理上限 */
-const MANUAL_MAX_PER_SITE = 2;
-/** 手動同期: 全体の記事処理上限（全サイト合計） */
-const MANUAL_MAX_TOTAL = 2;
-
 /**
  * 1つの購読サイトを同期し、記事本文・要約・はてブコメントを保存します。
- * 既存記事は重複登録しません。手動実行では1回あたりの処理件数を抑えてタイムアウトを避け、
- * Cron 実行では新着記事を全件処理します（上限なし。記事単位の逐次 INSERT で冪等なため、
- * Worker の実行時間上限に達しても次回実行で再開されます。詳細: docs/adr/0002-split-sync-cadences.md）。
+ * 既存記事は重複登録せず、新着記事を1回あたりの上限なく全件処理します。記事単位の逐次 INSERT で
+ * 冪等なため、Worker の実行時間上限（Cron: wall 15分、手動: waitUntil 30秒）に達しても
+ * 次回実行で再開されます。詳細: docs/adr/0002-split-sync-cadences.md。
  *
  * @param siteUrl 同期対象の購読サイトURL。
  * @param debug 失敗時に例外を再送出してデバッグしやすくするかどうか。
  * @param env DB、Vector、AI の各環境バインディング。
- * @param isCron Cron 実行かどうか。Cron の場合は1サイトあたりの新着記事上限を撤廃します。
  * @param includeBookmarkBackfill 既存記事のはてなブックマーク再取得（バックフィル）を行うかどうか。
  *   新着記事の取り込みに専念したい高頻度 Cron では false を渡します。
  * @returns 今回処理できた記事数。
@@ -99,11 +93,9 @@ export async function syncSite(
   siteUrl: string,
   debug: boolean,
   env: RuntimeEnv,
-  isCron: boolean,
   includeBookmarkBackfill = true,
 ): Promise<number> {
   let processedCount = 0;
-  const maxProcessPerSync = isCron ? Number.POSITIVE_INFINITY : MANUAL_MAX_PER_SITE;
 
   try {
     logger.info('サイト同期を開始します。', { siteUrl });
@@ -166,10 +158,6 @@ export async function syncSite(
         await persistBookmarks(database, articleId, bookmarks);
 
         processedCount += 1;
-        if (processedCount >= maxProcessPerSync) {
-          logger.info('タイムアウト防止のため、記事の同期を中断して次回に回します。');
-          break;
-        }
       } catch (error) {
         if (debug) {
           console.error(error instanceof Error ? error.stack || error : error);
@@ -204,20 +192,17 @@ export async function syncSite(
 }
 
 /**
- * 購読済みサイトを順番に同期します。
- * 手動実行では全体の処理件数が2件に達したところで止めます。Cron では各サイトの新着記事を
- * 上限なく処理します（上限撤廃の詳細は docs/adr/0002-split-sync-cadences.md）。
+ * 購読済みサイトを順番に同期します。各サイトの新着記事を1回あたりの上限なく処理します
+ * （上限撤廃の詳細は docs/adr/0002-split-sync-cadences.md）。
  *
  * @param debug 失敗時に例外を再送出してデバッグしやすくするかどうか。
  * @param env DB、Vector、AI の各環境バインディング。
- * @param isCron Cron 実行かどうか。Cron の場合は各サイトの処理上限を撤廃します。
  * @param includeBookmarkBackfill 既存記事のはてなブックマーク再取得（バックフィル）を行うかどうか。
  * @returns 何も返しません。
  */
 export async function syncAllSubscriptions(
   debug: boolean,
   env: RuntimeEnv,
-  isCron: boolean,
   includeBookmarkBackfill = true,
 ): Promise<void> {
   const database = getDb(env);
@@ -232,18 +217,7 @@ export async function syncAllSubscriptions(
     return;
   }
 
-  let totalProcessedCount = 0;
-
   for (const subscription of subscribedSites) {
-    totalProcessedCount += await syncSite(
-      subscription.siteUrl,
-      debug,
-      env,
-      isCron,
-      includeBookmarkBackfill,
-    );
-    if (!isCron && totalProcessedCount >= MANUAL_MAX_TOTAL) {
-      break;
-    }
+    await syncSite(subscription.siteUrl, debug, env, includeBookmarkBackfill);
   }
 }

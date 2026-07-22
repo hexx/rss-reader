@@ -109,7 +109,7 @@ describe('syncSite', () => {
     generateArticleSummaryMock.mockResolvedValue('要約文');
     generateHatenaSummaryMock.mockResolvedValue('はてブ要約');
 
-    await expect(syncSite(siteUrl, false, testEnv, false)).resolves.toBe(1);
+    await expect(syncSite(siteUrl, false, testEnv)).resolves.toBe(1);
 
     const savedArticles = await testDb.select().from(articles);
     const savedBookmarks = await testDb.select().from(hatenaBookmarks);
@@ -151,7 +151,7 @@ describe('syncSite', () => {
     // 可能性があるため、常に取得を試みる。返ってきた結果が空でも問題なし。
     fetchHatenaBookmarksMock.mockResolvedValue([]);
 
-    await syncSite(nonHatenaSiteUrl, false, testEnv, false);
+    await syncSite(nonHatenaSiteUrl, false, testEnv);
 
     expect(fetchHatenaBookmarksMock).toHaveBeenCalledWith(article.url);
     // ブックマークが 0 件なので、generateHatenaSummary は呼ばれない
@@ -180,7 +180,7 @@ describe('syncSite', () => {
     fetchHatenaBookmarksMock.mockRejectedValueOnce(new Error('Hatena rate limited: 429 Too Many Requests'));
     generateArticleSummaryMock.mockResolvedValue('要約文');
 
-    await syncSite(siteUrl, false, testEnv, false);
+    await syncSite(siteUrl, false, testEnv);
     // 記事 INSERT は bookmarks.fetch 失敗で巻き戻されるので 0 件
     const savedArticles = await testDb.select().from(articles);
     expect(savedArticles).toHaveLength(0);
@@ -197,7 +197,7 @@ describe('syncSite', () => {
     generateArticleSummaryMock.mockResolvedValue('要約文');
     generateHatenaSummaryMock.mockResolvedValue('反応の要約');
 
-    await expect(syncSite(siteUrl, false, testEnv, false)).resolves.toBe(1);
+    await expect(syncSite(siteUrl, false, testEnv)).resolves.toBe(1);
 
     const savedArticles = await testDb.select().from(articles);
     expect(savedArticles).toHaveLength(1);
@@ -235,7 +235,7 @@ describe('syncSite', () => {
     fetchArticleContentMock.mockResolvedValue('本文の内容です。');
     generateArticleSummaryMock.mockRejectedValue(new Error('summary failed'));
 
-    await expect(syncSite(siteUrl, true, testEnv, false)).rejects.toThrow('summary failed');
+    await expect(syncSite(siteUrl, true, testEnv)).rejects.toThrow('summary failed');
 
     expect(fetchHatenaBookmarksMock).toHaveBeenCalledWith(article.url);
     expect(generateHatenaSummaryMock).not.toHaveBeenCalled();
@@ -256,7 +256,7 @@ describe('syncSite', () => {
       .mockResolvedValueOnce('2件目の要約');
     generateHatenaSummaryMock.mockResolvedValue('はてブ要約');
 
-    await expect(syncSite(siteUrl, false, testEnv, false)).resolves.toBe(1);
+    await expect(syncSite(siteUrl, false, testEnv)).resolves.toBe(1);
 
     const savedArticles = await testDb.select().from(articles);
     expect(savedArticles).toHaveLength(1);
@@ -276,8 +276,8 @@ describe('syncSite', () => {
     generateArticleSummaryMock.mockResolvedValue('要約文');
     generateHatenaSummaryMock.mockResolvedValue('はてブ要約');
 
-    await syncSite(siteUrl, false, testEnv, false);
-    await syncSite(siteUrl, false, testEnv, false);
+    await syncSite(siteUrl, false, testEnv);
+    await syncSite(siteUrl, false, testEnv);
 
     const savedArticles = await testDb.select().from(articles);
     expect(savedArticles).toHaveLength(1);
@@ -299,8 +299,8 @@ describe('syncSite', () => {
     generateArticleSummaryMock.mockResolvedValue('要約文');
     generateHatenaSummaryMock.mockResolvedValue('はてブ要約');
 
-    await syncSite(siteUrl, false, testEnv, false);
-    await syncSite(siteUrl, false, testEnv, false);
+    await syncSite(siteUrl, false, testEnv);
+    await syncSite(siteUrl, false, testEnv);
 
     const savedArticles = await testDb.select().from(articles);
     // 記事は 1 件のまま変わらない
@@ -328,18 +328,18 @@ describe('syncSite', () => {
     generateHatenaSummaryMock.mockResolvedValue('はてブ要約');
 
     // 1 回目: 新着記事として取り込まれる（バックフィル flag に関係なく初回ブクマは取得される）
-    await expect(syncSite(siteUrl, false, testEnv, true, false)).resolves.toBe(1);
+    await expect(syncSite(siteUrl, false, testEnv, false)).resolves.toBe(1);
     fetchHatenaBookmarksMock.mockClear();
 
     // 2 回目: 既存記事。includeBookmarkBackfill=false なのでブクマ再取得は行われない
-    await expect(syncSite(siteUrl, false, testEnv, true, false)).resolves.toBe(0);
+    await expect(syncSite(siteUrl, false, testEnv, false)).resolves.toBe(0);
     expect(fetchHatenaBookmarksMock).not.toHaveBeenCalled();
 
     const savedArticles = await testDb.select().from(articles);
     expect(savedArticles).toHaveLength(1);
   });
 
-  it('stops processing once the manual sync limit is reached', async () => {
+  it('processes all new articles without a per-run cap', async () => {
     const { syncSite } = await import('./sync.js');
 
     fetchRssOrFallbackMock.mockResolvedValue([article, secondArticle, thirdArticle]);
@@ -348,23 +348,7 @@ describe('syncSite', () => {
     generateArticleSummaryMock.mockResolvedValue('要約文');
     generateHatenaSummaryMock.mockResolvedValue('はてブ要約');
 
-    await expect(syncSite(siteUrl, false, testEnv, false)).resolves.toBe(2);
-
-    const savedArticles = await testDb.select().from(articles);
-    expect(savedArticles).toHaveLength(2);
-    expect(loggerMock.info).toHaveBeenCalledWith('タイムアウト防止のため、記事の同期を中断して次回に回します。');
-  });
-
-  it('continues processing in cron mode without the manual limit', async () => {
-    const { syncSite } = await import('./sync.js');
-
-    fetchRssOrFallbackMock.mockResolvedValue([article, secondArticle, thirdArticle]);
-    fetchArticleContentMock.mockResolvedValue('本文');
-    fetchHatenaBookmarksMock.mockResolvedValue(bookmarks);
-    generateArticleSummaryMock.mockResolvedValue('要約文');
-    generateHatenaSummaryMock.mockResolvedValue('はてブ要約');
-
-    await expect(syncSite(siteUrl, false, testEnv, true)).resolves.toBe(3);
+    await expect(syncSite(siteUrl, false, testEnv)).resolves.toBe(3);
 
     const savedArticles = await testDb.select().from(articles);
     expect(savedArticles).toHaveLength(3);
@@ -392,7 +376,7 @@ describe('syncAllSubscriptions', () => {
   it('returns early when there are no subscriptions', async () => {
     const { syncAllSubscriptions } = await import('./sync.js');
 
-    await syncAllSubscriptions(false, testEnv, false);
+    await syncAllSubscriptions(false, testEnv);
 
     expect(fetchRssOrFallbackMock).not.toHaveBeenCalled();
     expect(loggerMock.info).toHaveBeenCalledWith('購読サイトがありません。');
@@ -416,7 +400,7 @@ describe('syncAllSubscriptions', () => {
     generateHatenaSummaryMock.mockResolvedValue('はてブ要約');
 
     const { syncAllSubscriptions } = await import('./sync.js');
-    await syncAllSubscriptions(false, testEnv, false);
+    await syncAllSubscriptions(false, testEnv);
 
     const savedBookmarks = await testDb.select().from(hatenaBookmarks);
     expect(savedBookmarks).toHaveLength(25);
@@ -437,7 +421,7 @@ describe('syncAllSubscriptions', () => {
     generateHatenaSummaryMock.mockResolvedValue('はてブ要約');
 
     const { syncAllSubscriptions } = await import('./sync.js');
-    await syncAllSubscriptions(false, testEnv, true);
+    await syncAllSubscriptions(false, testEnv);
 
     const savedArticles = await testDb.select().from(articles);
     expect(savedArticles).toHaveLength(2);
