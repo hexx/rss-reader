@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 
 import type { RuntimeEnv } from '../env.js';
 import { getDb } from '../db/index.js';
@@ -14,9 +14,13 @@ const bookmarkChunkSize = 20;
 type AppDatabase = ReturnType<typeof getDb>;
 
 /**
- * 1 記事分のはてなブックマークをチャンクで INSERT する。
+ * 1 記事分のはてなブックマークをチャンクで upsert する。
  * `(article_id, user)` の UNIQUE 制約で重複行の増殖を防ぎ、timestamp は
  * jsonlite が返す値（=ユーザーがブックマークした実時刻）をそのまま保存する。
+ *
+ * 競合時は `DO UPDATE` で `createdAt`（ブックマーク日時）と `comment` を
+ * 最新化し、再取得で既存行が自然治癒するようにする（ADR-0003）。
+ * `set` は `excluded.*` を参照し、複数行 INSERT でも行ごとに正しい値が入る。
  */
 async function persistBookmarks(
   database: AppDatabase,
@@ -39,8 +43,12 @@ async function persistBookmarks(
           user: bookmark.user,
         })),
       )
-      .onConflictDoNothing({
+      .onConflictDoUpdate({
         target: [hatenaBookmarks.articleId, hatenaBookmarks.user],
+        set: {
+          comment: sql`excluded.comment`,
+          createdAt: sql`excluded.created_at`,
+        },
       })
       .run();
   }

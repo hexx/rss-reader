@@ -23,24 +23,30 @@ const hatenaResponse = {
   bookmarks: [
     {
       comment: '  良記事  ',
-      timestamp: '1704067200', // 2024-01-01T00:00:00Z
+      timestamp: '2024/01/01 09:00', // JST → 2024-01-01T00:00:00Z
       user: 'alice',
     },
     {
       // コメント空（タグだけ）のブックマークは保持する
       user: 'bob',
       comment: '',
-      timestamp: '1704153600', // 2024-01-02T00:00:00Z
+      timestamp: '2024/01/02 09:00', // JST → 2024-01-02T00:00:00Z
     },
     {
       comment: '参考になる',
-      timestamp: '1704240000', // 2024-01-03T00:00:00Z
+      timestamp: '2024/01/03 09:00', // JST → 2024-01-03T00:00:00Z
       user: 'carol',
     },
     {
       // User 欠落エントリは破棄する
       comment: 'no user here',
-      timestamp: '1704326400',
+      timestamp: '2024/01/04 09:00',
+    },
+    {
+      user: 'dave',
+      // 旧形式（epoch 秒）は現行 jsonlite が返さないため不正値としてフォールバック
+      comment: 'legacy epoch format',
+      timestamp: '1704067200',
     },
     {
       user: 'eve',
@@ -110,9 +116,34 @@ describe('fetchHatenaBookmarks', () => {
         user: 'carol',
       },
       {
+        comment: 'legacy epoch format',
+        timestamp: expect.any(Date),
+        user: 'dave',
+      },
+      {
         comment: 'no timestamp',
         timestamp: expect.any(Date),
         user: 'eve',
+      },
+    ]);
+  });
+
+  it('parses the JST timestamp with an explicit +09:00 offset', async () => {
+    server.use(
+      http.get(hatenaApiBaseUrl, () =>
+        HttpResponse.json(
+          { bookmarks: [{ comment: 'c', timestamp: '2025/07/21 09:41', user: 'u' }] },
+          { headers: { 'Content-Type': 'application/json' } },
+        ),
+      ),
+    );
+
+    await expect(fetchHatenaBookmarks(articleUrl)).resolves.toEqual([
+      {
+        comment: 'c',
+        // JST 09:41 = UTC 00:41。環境のローカルタイムゾーンに依存しないこと。
+        timestamp: new Date('2025-07-21T00:41:00.000Z'),
+        user: 'u',
       },
     ]);
   });

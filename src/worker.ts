@@ -230,7 +230,10 @@ export async function fetchBookmarksByArticleIds(
       })
       .from(hatenaBookmarks)
       .where(inArray(hatenaBookmarks.articleId, chunk))
-      .orderBy(asc(hatenaBookmarks.createdAt));
+      // 時系列・新しい順（本家「新着順」と同じ）。timestamp は分精度なので
+      // 同一分内は SQLite の暗黙 rowid 昇順（＝jsonlite 生順序＝挿入順）で
+      // tiebreak し、決定的な並びにする。ADR-0003 参照。
+      .orderBy(desc(hatenaBookmarks.createdAt), asc(sql`rowid`));
 
     for (const row of rows) {
       const bookmark: Bookmark = {
