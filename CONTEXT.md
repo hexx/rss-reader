@@ -28,5 +28,9 @@ _Avoid_: createdAt（DB上の実装名であり、取得時刻と誤読しやす
 _Avoid_: Reaction Summary
 
 **Issue（課題プロンプト）**:
-issue-logger スキルが `issues/issue-yyyyMMddHHmm.md` に生成する、後続の AI エージェントがそのまま実行できるプロンプト形式の課題ファイル。YAML フロントマターの `status`（TODO / IN_PROGRESS / DONE / WONTFIX）で生命周期を管理する。GitHub の Issue とは全く別の概念。
+issue-logger スキルが `issues/issue-yyyyMMddHHmm.md` に生成する、後続の AI エージェントがそのまま実行できるプロンプト形式の課題ファイル。GitHub の Issue とは全く別の概念。フロントマターは `title` / `status` / `created` の 3 字段のみで、状態遷移の根拠は本文末尾の「## 解決記録」に記す（ADR 0005）。
 _Avoid_: ticket, task, GitHub Issue
+
+**Issue Status（課題ステータス）**:
+Issue の生命周期を表す 4 値。`TODO`=未着手で有効な要求、`IN_PROGRESS`=作業中、`DONE`=要求が満たされた（別 Issue 経由での達成を含む）、`WONTFIX`=対応しないと確定（価値喪失または前提の陳腐化による。要求は未達）。達成済みだが別 Issue で実現したものは DONE とし、SUPERSEDED のような 5 値目は設けない。
+_Avoid_: SUPERSEDED, DUPLICATE（語彙を増やさず 4 値で表現する）
