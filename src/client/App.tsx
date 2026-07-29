@@ -22,7 +22,7 @@ import {
   Menu,
   RefreshCw,
 } from 'lucide-react';
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 
 import { applyReadStateChange } from './articleState.js';
 import { ArticleCard } from './components/ArticleCard.js';
@@ -109,13 +109,25 @@ export function App() {
   const sync = useSync({ onAfterSync: refresh });
 
   const [readStateStatus, setReadStateStatus] = useState<Status | null>(null);
+  // 既読化リクエストが進行中の記事 ID。`m` 連打等で同一記事が二重発火した際の
+  // 二重減算・二重 PATCH を防ぐ（ADR 0007）。
+  const inFlightReadsRef = useRef(new Set<string>());
 
   const handleMarkAsRead = useCallback(
     async (articleId: string) => {
+      const target = articles.find((article) => article.id === articleId);
+      // 既に既読、またはリクエスト進行中の記事はスキップ（二重減算ガード）。
+      if (!target || target.isRead || inFlightReadsRef.current.has(articleId)) {
+        return;
+      }
+      inFlightReadsRef.current.add(articleId);
+
       const previousArticles = articles;
 
-      // Optimistic UI: 即座に既読化 / 未読のみモードでは削除。
-      // UnreadCount の減算は sources.reload() 後に再計算されるためここでは行わない。
+      // Optimistic UI: 即座に既読化 / 未読のみモードでは削除し、
+      // 該当ソースの未読数も楽観的に -1 する（ヘッダーの総未読数はキャッシュから派生するため自動で追従する）。
+      // PATCH 成功後の sources.reload() はサイレントにサーバ真値と突き合わせる（ADR 0007）。
+      const previousSources = sources.decrementUnreadCount(target.siteUrl);
       setArticles((current) => applyReadStateChange(current, articleId, true, showUnreadOnly));
       setReadStateStatus({ kind: 'loading', message: '既読にしています...' });
 
@@ -131,12 +143,15 @@ export function App() {
         await sources.reload();
         setReadStateStatus({ kind: 'success', message: '既読にしました。' });
       } catch (error) {
-        // 失敗時は optimistic update を巻き戻す
+        // 失敗時は optimistic update を巻き戻す（記事リストと未読数の両方）。
         setArticles(previousArticles);
+        sources.restoreSources(previousSources);
         setReadStateStatus({
           kind: 'error',
           message: normalizeError(error, '既読状態の更新に失敗しました。'),
         });
+      } finally {
+        inFlightReadsRef.current.delete(articleId);
       }
     },
     [articles, setArticles, showUnreadOnly, sources],

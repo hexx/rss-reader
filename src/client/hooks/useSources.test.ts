@@ -93,6 +93,42 @@ describe('useSources', () => {
     expect(callCount).toBe(2);
   });
 
+  it('keeps isLoading false and retains stale data during background refetch', async () => {
+    let callCount = 0;
+
+    server.use(
+      http.get('*/api/sources', () => {
+        callCount++;
+        return HttpResponse.json({
+          sources: callCount === 1 ? [mockSources[0]] : mockSources,
+        });
+      }),
+    );
+
+    const { result } = renderHook(() => useSources(), { wrapper });
+
+    await waitFor(() => {
+      expect(result.current.sources).toHaveLength(1);
+    });
+    expect(result.current.isLoading).toBe(false);
+
+    // 背景 refetch 中も isLoading は false のまま、旧データを表示し続ける
+    let reloadPromise: Promise<void> | undefined;
+    act(() => {
+      reloadPromise = result.current.reload();
+    });
+    expect(result.current.isLoading).toBe(false);
+    expect(result.current.sources).toHaveLength(1);
+
+    await act(async () => {
+      await reloadPromise;
+    });
+    await waitFor(() => {
+      expect(result.current.sources).toHaveLength(2);
+    });
+    expect(result.current.isLoading).toBe(false);
+  });
+
   it('handles API errors', async () => {
     server.use(
       http.get('*/api/sources', () => 
