@@ -171,19 +171,54 @@ describe('syncSite', () => {
     expect(savedBookmarks).toHaveLength(0);
   });
 
-  it('swallows a 429 (rate-limited) error when re-fetching existing articles', async () => {
+  it('keeps the article when bookmark fetch is rate-limited (backfill later)', async () => {
     const { syncSite } = await import('./sync.js');
 
     fetchRssOrFallbackMock.mockResolvedValue([article]);
     fetchArticleContentMock.mockResolvedValue('本文');
-    // 1 回目: 失敗 (429) → 記事は保存されない
+    // 1 回目: 失敗 (429) → レートリミッターが backoff を更新し、
+    // 記事自体はコメントなしで保存される（次のフル同期でバックフィルされる）。
     fetchHatenaBookmarksMock.mockRejectedValueOnce(new Error('Hatena rate limited: 429 Too Many Requests'));
     generateArticleSummaryMock.mockResolvedValue('要約文');
 
     await syncSite(siteUrl, false, testEnv);
-    // 記事 INSERT は bookmarks.fetch 失敗で巻き戻されるので 0 件
+    // 本文・要約は成功しているので、記事はコメントなしで保存される
     const savedArticles = await testDb.select().from(articles);
-    expect(savedArticles).toHaveLength(0);
+    expect(savedArticles).toHaveLength(1);
+    expect(savedArticles[0]).toMatchObject({
+      content: '本文',
+      hatenaSummary: null,
+      summary: '要約文',
+    });
+    // ブックマークは保存されない
+    const savedBookmarks = await testDb.select().from(hatenaBookmarks);
+    expect(savedBookmarks).toHaveLength(0);
+  });
+
+  it('regenerates the missing hatena summary during bookmark backfill', async () => {
+    const { syncSite } = await import('./sync.js');
+
+    fetchRssOrFallbackMock.mockResolvedValue([article]);
+    fetchArticleContentMock.mockResolvedValue('本文');
+    generateArticleSummaryMock.mockResolvedValue('要約文');
+    // 1 回目: ブクマ取得失敗 → hatenaSummary は null のまま保存
+    fetchHatenaBookmarksMock.mockRejectedValueOnce(new Error('Hatena rate limited: 429 Too Many Requests'));
+    generateHatenaSummaryMock.mockResolvedValue('はてブ要約');
+
+    await syncSite(siteUrl, false, testEnv);
+    let savedArticles = await testDb.select().from(articles);
+    expect(savedArticles).toHaveLength(1);
+    expect(savedArticles[0]?.hatenaSummary).toBeNull();
+
+    // 2 回目 (フル同期 = バックフィル有効): ブクマ取得成功 → 要約も再生成される
+    fetchHatenaBookmarksMock.mockResolvedValue(bookmarks);
+    await syncSite(siteUrl, false, testEnv);
+
+    savedArticles = await testDb.select().from(articles);
+    expect(savedArticles).toHaveLength(1);
+    expect(savedArticles[0]?.hatenaSummary).toBe('はてブ要約');
+    // バックフィルでは記事要約は再生成しない
+    expect(generateArticleSummaryMock).toHaveBeenCalledTimes(1);
   });
 
   it('falls back to empty content when article fetch fails', async () => {

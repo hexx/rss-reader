@@ -32,4 +32,9 @@ describe('getHatenaEntryUrl', () => {
       'https://b.hatena.ne.jp/entry/s/example.com/',
     );
   });
+
+  it('handles uppercase scheme URLs', () => {
+    expect(getHatenaEntryUrl('HTTPS://EXAMPLE.COM/a')).toBe('https://b.hatena.ne.jp/entry/s/EXAMPLE.COM/a');
+    expect(getHatenaEntryUrl('HTTP://EXAMPLE.COM/a')).toBe('https://b.hatena.ne.jp/entry/EXAMPLE.COM/a');
+  });
 });

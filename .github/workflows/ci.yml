@@ -6,10 +6,20 @@ on:
   pull_request:
     branches: [main]
 
+# 既定の GITHUB_TOKEN は広い書き込み権限を持つため、読み取りのみに絞る
+permissions:
+  contents: read
+
+# 同じブランチへの連続 push で CI が重複実行されないようにする
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   lint:
     name: Lint
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
@@ -22,6 +32,7 @@ jobs:
   build:
     name: Build
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
@@ -34,6 +45,7 @@ jobs:
   test:
     name: Unit Tests
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7

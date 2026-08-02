@@ -22,12 +22,13 @@ import {
   Menu,
   RefreshCw,
 } from 'lucide-react';
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { applyReadStateChange } from './articleState.js';
 import { ArticleCard } from './components/ArticleCard.js';
 import { SourceManager } from './components/SourceManager.js';
 import { useArticles } from './hooks/useArticles.js';
+import { useLatestRef } from './hooks/useLatestRef.js';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts.js';
 import { useSources } from './hooks/useSources.js';
 import { useSubscriptions } from './hooks/useSubscriptions.js';
@@ -35,6 +36,9 @@ import { useSync } from './hooks/useSync.js';
 import type { ArticleSortDirection } from './types.js';
 import { normalizeError } from './utils/status.js';
 import type { Status } from './utils/status.js';
+
+/** 既読化ステータスの自動クリアまでの時間（ミリ秒）。 */
+const READ_STATE_STATUS_DURATION_MS = 4000;
 
 function ArticleCardSkeleton() {
   return (
@@ -98,10 +102,9 @@ export function App() {
   });
 
   const refreshAll = useCallback(() => {
-    sources.reload().catch((error: unknown) => {
-      // UseSources 側で status が更新されるため、ここでは何もしない
-      void normalizeError(error, '購読ソースの読み込みに失敗しました。');
-    });
+    // useSources 側で status が更新されるため、ここではエラー処理しない。
+    // reload() は内部で reject を握り潰すため、追加の catch は不要。
+    void sources.reload();
     refresh();
   }, [refresh, sources]);
 
@@ -112,6 +115,55 @@ export function App() {
   // 既読化リクエストが進行中の記事 ID。`m` 連打等で同一記事が二重発火した際の
   // 二重減算・二重 PATCH を防ぐ（ADR 0007）。
   const inFlightReadsRef = useRef(new Set<string>());
+  // ステータス自動クリア用タイマーの ID（アンマウント時のクリーンアップ用）。
+  const readStateTimerRef = useRef<number | null>(null);
+  // アンマウント後の非同期継続（PATCH 完了後の status 更新等）を防ぐ。
+  const mountedRef = useRef(true);
+  // ロールバック時に「現在の」フィルタ値を使うための最新値 ref（クロージャの陳腐化対策）。
+  const filterParamsRef = useLatestRef({ selectedSourceUrl, showUnreadOnly, sortOrder });
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  // 既読化ステータスは成功/エラーの場合、一定時間で自動的に消す。
+  // 残留したままにすると displayedStatus の優先順位（先頭）で後続のステータスを
+  // 隠し続けるため。ローディングは処理の完了で必ず置き換わるため自動クリアしない
+  // （時間経過で「処理中」表示が消えると進行中なのか不明瞭になる）。
+  const showReadStateStatus = useCallback((nextStatus: Status) => {
+    if (!mountedRef.current) {
+      return;
+    }
+    setReadStateStatus(nextStatus);
+    if (nextStatus.kind === 'loading') {
+      return;
+    }
+    if (readStateTimerRef.current !== null) {
+      window.clearTimeout(readStateTimerRef.current);
+    }
+    const timerId = window.setTimeout(() => {
+      // 自分自身のタイマーだけを破棄する（後続の showReadStateStatus が
+      // 登録したタイマーの ID を壊さない）。
+      if (readStateTimerRef.current === timerId) {
+        readStateTimerRef.current = null;
+      }
+      setReadStateStatus((current) => (current === nextStatus ? null : current));
+    }, READ_STATE_STATUS_DURATION_MS);
+    readStateTimerRef.current = timerId;
+  }, []);
+
+  useEffect(() => {
+    // アンマウント後にタイマーが発火して setState しないようクリアする
+    return () => {
+      if (readStateTimerRef.current !== null) {
+        window.clearTimeout(readStateTimerRef.current);
+        readStateTimerRef.current = null;
+      }
+    };
+  }, []);
 
   const handleMarkAsRead = useCallback(
     async (articleId: string) => {
@@ -129,7 +181,7 @@ export function App() {
       // PATCH 成功後の sources.reload() はサイレントにサーバ真値と突き合わせる（ADR 0007）。
       const previousSources = sources.decrementUnreadCount(target.siteUrl);
       setArticles((current) => applyReadStateChange(current, articleId, true, showUnreadOnly));
-      setReadStateStatus({ kind: 'loading', message: '既読にしています...' });
+      showReadStateStatus({ kind: 'loading', message: '既読にしています...' });
 
       try {
         const response = await fetch(`/api/articles/${articleId}`, {
@@ -141,12 +193,54 @@ export function App() {
           throw new Error('既読状態の更新に失敗しました。');
         }
         await sources.reload();
-        setReadStateStatus({ kind: 'success', message: '既読にしました。' });
+        showReadStateStatus({ kind: 'success', message: '既読にしました。' });
       } catch (error) {
+        if (!mountedRef.current) {
+          // アンマウント後のロールバックは UI に反映されないため行わない
+          // （inFlightReadsRef のクリーンアップは finally で実行される）
+          return;
+        }
         // 失敗時は optimistic update を巻き戻す（記事リストと未読数の両方）。
-        setArticles(previousArticles);
+        // リスト全体を取得時点のスナップショットへ戻すと、その間に読み込んだ
+        // 追加ページ等の更新が失われるため、対象記事のみを巻き戻す。
+        // フィルタ・並び順はロールバック実行時点の値（ref）を使う。
+        const { selectedSourceUrl: currentSourceUrl, showUnreadOnly: currentUnreadOnly, sortOrder: currentSortOrder } =
+          filterParamsRef.current;
+        setArticles((current) => {
+          if (current.some((article) => article.id === articleId)) {
+            // 一覧に残っている場合（全記事表示モード等）は isRead だけ戻す
+            return current.map((article) =>
+              article.id === articleId ? { ...article, isRead: false } : article,
+            );
+          }
+          // 未読のみモードで楽観的に削除済みの場合のみ、元の位置に戻す。
+          // リクエスト中にフィルタ（ソース切替・未読のみトグル等）が変わっていたら
+          // 現在の一覧に属さない記事なので、再挿入しない。
+          const belongsToCurrentFilter =
+            (currentSourceUrl === undefined || currentSourceUrl === target.siteUrl) &&
+            (!currentUnreadOnly || !target.isRead);
+          if (!belongsToCurrentFilter) {
+            return current;
+          }
+          const previousIndex = previousArticles.findIndex((article) => article.id === articleId);
+          if (previousIndex === -1) {
+            return current;
+          }
+          const restored = { ...previousArticles[previousIndex]!, isRead: false };
+          // 現在の並び順（古い順/新しい順）に沿った位置に再挿入する。
+          // リクエスト中に並び順が変わっていた場合、スナップショット上の
+          // 位置は現在のリストと整合しないため。
+          const targetKey = target.publishedAt || target.createdAt;
+          const insertIndex = current.findIndex((article) => {
+            const articleKey = article.publishedAt || article.createdAt;
+            return currentSortOrder === 'asc' ? targetKey < articleKey : targetKey > articleKey;
+          });
+          const next = [...current];
+          next.splice(insertIndex === -1 ? next.length : insertIndex, 0, restored);
+          return next;
+        });
         sources.restoreSources(previousSources);
-        setReadStateStatus({
+        showReadStateStatus({
           kind: 'error',
           message: normalizeError(error, '既読状態の更新に失敗しました。'),
         });
@@ -154,7 +248,7 @@ export function App() {
         inFlightReadsRef.current.delete(articleId);
       }
     },
-    [articles, setArticles, showUnreadOnly, sources],
+    [articles, filterParamsRef, setArticles, showReadStateStatus, showUnreadOnly, sources],
   );
 
   useKeyboardShortcuts(articles, { onMarkAsRead: (id) => void handleMarkAsRead(id) });
@@ -246,7 +340,7 @@ export function App() {
                 <span className="text-sm text-muted-foreground">未読のみ</span>
               </label>
               <DropdownMenu>
-                <DropdownMenuTrigger render={<Button variant="outline" size="sm" />}>
+                <DropdownMenuTrigger render={<Button variant="outline" size="sm" aria-label={`並び替え（現在: ${sortOrder === 'asc' ? '古い順' : '新しい順'}）`} />}>
                   <ArrowUpDown className="size-4" />
                   <span className="hidden sm:inline ml-1">
                     {sortOrder === 'asc' ? '古い順' : '新しい順'}
@@ -276,6 +370,7 @@ export function App() {
               <Button
                 variant="outline"
                 size="sm"
+                aria-label="同期"
                 onClick={() => void sync.sync()}
                 disabled={sync.isSyncing}
               >

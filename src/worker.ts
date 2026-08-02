@@ -146,21 +146,48 @@ function sourceDisplayTitle(source: Pick<SourceRow, 'siteUrl' | 'title'>, titleC
   return `${base} (${suffix})`;
 }
 
-function normalizeSiteUrl(siteUrl: string): string {
-  return new URL(siteUrl).toString();
+/**
+ * ユーザー入力の URL を正規化する。不正な URL や http(s) 以外のスキームは null を返す。
+ * ルートハンドラでは例外を 500 にせず、400 で返すために使う。
+ * ユーザー情報（user:pass@）とフラグメントは購読キーや fetch ターゲットに
+ * 残すと漏洩・不一致の原因になるため除去する。
+ */
+function tryNormalizeSiteUrl(siteUrl: string): string | null {
+  try {
+    const url = new URL(siteUrl);
+    if (!['http:', 'https:'].includes(url.protocol)) {
+      return null;
+    }
+    url.username = '';
+    url.password = '';
+    url.hash = '';
+    return url.toString();
+  } catch {
+    return null;
+  }
 }
 
-function parsePaginationParam(value: string | undefined, fallback: number, minimum: number): number {
+/** ページネーションの limit 上限（過剰な応答サイズによる DoS を防ぐ）。 */
+const maxArticlePageSize = 200;
+/** ページネーションの offset 上限（過剰な行スキップによる DoS を防ぐ）。 */
+const maxArticleOffset = 10_000;
+
+function parsePaginationParam(
+  value: string | undefined,
+  fallback: number,
+  minimum: number,
+  maximum?: number,
+): number {
   if (value === undefined) {
     return fallback;
   }
 
   const parsed = Number.parseInt(value, 10);
   if (!Number.isFinite(parsed) || Number.isNaN(parsed) || parsed < minimum) {
-    return fallback;
+    return maximum === undefined ? fallback : Math.min(fallback, maximum);
   }
 
-  return parsed;
+  return maximum === undefined ? parsed : Math.min(parsed, maximum);
 }
 
 type AppDatabase = ReturnType<typeof getDb>;
@@ -204,7 +231,7 @@ async function fetchArticles(
     : desc(sql`coalesce(${articles.publishedAt}, ${articles.createdAt})`);
 
   return await filteredQuery
-    .orderBy(orderDirection)
+    .orderBy(orderDirection, asc(sql`rowid`))
     .limit(limit)
     .offset(offset);
 }
@@ -256,8 +283,8 @@ app.get('/health', (c) => c.text('ok'));
 app.get('/api/articles', async (c) => {
   const sourceUrl = c.req.query('source')?.trim() || undefined;
   const unreadOnly = c.req.query('unread_only') === undefined ? true : c.req.query('unread_only') === 'true';
-  const limit = parsePaginationParam(c.req.query('limit'), articlePageSize, 1);
-  const offset = parsePaginationParam(c.req.query('offset'), 0, 0);
+  const limit = parsePaginationParam(c.req.query('limit'), articlePageSize, 1, maxArticlePageSize);
+  const offset = parsePaginationParam(c.req.query('offset'), 0, 0, maxArticleOffset);
   const sortParam = c.req.query('sort');
   const sortDirection: ArticleSortDirection = sortParam === 'desc' ? 'desc' : 'asc';
   const database = getDb(c.env);
@@ -347,7 +374,10 @@ app.delete('/api/subscriptions', async (c) => {
     return c.json({ error: 'siteUrl is required.' }, 400);
   }
 
-  const normalizedSiteUrl = normalizeSiteUrl(siteUrl);
+  const normalizedSiteUrl = tryNormalizeSiteUrl(siteUrl);
+  if (normalizedSiteUrl === null) {
+    return c.json({ error: 'siteUrl が不正です。' }, 400);
+  }
   const database = getDb(c.env);
   const existingSubscription = await database
     .select({ id: subscriptions.id })
@@ -359,7 +389,30 @@ app.delete('/api/subscriptions', async (c) => {
     return c.json({ error: 'Subscription not found.' }, 404);
   }
 
-  await database.delete(subscriptions).where(eq(subscriptions.siteUrl, normalizedSiteUrl)).run();
+  // 購読解除に伴い、そのサイトの記事とはてブコメントも削除する（孤児データを残さない）。
+  // はてブコメントは記事の FK で CASCADE されるが、D1 の FK 有効化状況に依存しないよう
+  // 明示的に削除する（サブクエリで ID 列挙も不要）。
+  // 並行同期（cron / POST /api/sync）との競合で途中状態が残らないよう、
+  // D1 では batch（トランザクション）で一括実行する。テスト用 sql.js には batch が
+  // 無いため、その場合は子 → 親の順（はてブ → 記事 → 購読）で逐次実行し、
+  // 途中失敗でも購読行が残って再実行で追完できるようにする。
+  const siteArticleIds = database
+    .select({ id: articles.id })
+    .from(articles)
+    .where(eq(articles.siteUrl, normalizedSiteUrl));
+  const deleteStatements = [
+    database.delete(hatenaBookmarks).where(inArray(hatenaBookmarks.articleId, siteArticleIds)),
+    database.delete(articles).where(eq(articles.siteUrl, normalizedSiteUrl)),
+    database.delete(subscriptions).where(eq(subscriptions.siteUrl, normalizedSiteUrl)),
+  ];
+  const batchable = database as { batch?: (items: unknown[]) => Promise<unknown> };
+  if (typeof batchable.batch === 'function') {
+    await batchable.batch(deleteStatements);
+  } else {
+    for (const statement of deleteStatements) {
+      await statement.run();
+    }
+  }
 
   return c.json({ siteUrl: normalizedSiteUrl });
 });
@@ -380,7 +433,10 @@ app.post('/api/subscriptions', async (c) => {
     return c.json({ error: 'siteUrl is required.' }, 400);
   }
 
-  const normalizedSiteUrl = normalizeSiteUrl(siteUrl);
+  const normalizedSiteUrl = tryNormalizeSiteUrl(siteUrl);
+  if (normalizedSiteUrl === null) {
+    return c.json({ error: 'siteUrl が不正です。' }, 400);
+  }
 
   // 入力 URL から実際の RSS/Atom フィード URL を自動検出する。
   // 入力が既にフィード URL の場合はそのまま、そうでない場合は HTML 内の
@@ -460,7 +516,10 @@ async function updateArticleReadState(c: ArticleContext) {
     return c.json({ error: 'Request body must be a JSON object.' }, 400);
   }
   const parsed = body as { isRead?: unknown };
-  const isRead = typeof parsed.isRead === 'boolean' ? parsed.isRead : true;
+  if (typeof parsed.isRead !== 'boolean') {
+    return c.json({ error: 'isRead must be a boolean.' }, 400);
+  }
+  const isRead = parsed.isRead;
   await database.update(articles).set({ isRead }).where(eq(articles.id, articleId)).run();
 
   const response: ArticleReadStateResponse = { id: articleId, isRead };
@@ -534,7 +593,6 @@ export { app };
 export {
   formatDate,
   isHatenaSource,
-  normalizeSiteUrl,
   parsePaginationParam,
   sourceDisplayTitle,
   sourceHostname,

@@ -191,6 +191,8 @@ describe('App', () => {
       expect(screen.getByText('既読状態の更新に失敗しました。')).toBeInTheDocument();
     });
     expect(screen.getByText('1 未読')).toBeInTheDocument();
+    // 未読のみモードで楽観的に削除された記事も、リストへ再挿入される
+    expect(screen.getByText('最初の記事')).toBeInTheDocument();
   });
 
   it('decrements only once when the same article is marked read twice rapidly', async () => {

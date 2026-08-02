@@ -51,6 +51,28 @@ describe('worker app', () => {
     await expect(response.text()).resolves.toBe('ok');
   });
 
+  it('caps the limit parameter to prevent oversized responses', async () => {
+    await testDb.insert(subscriptions).values({
+      addedAt: new Date('2024-01-03T00:00:00.000Z'),
+      id: 'subscription-limit',
+      siteUrl: 'https://example.com/feed.xml',
+      title: 'Example Feed',
+    });
+
+    const { parsePaginationParam } = await import('./worker.js');
+    // 上限 200 でクランプされる
+    expect(parsePaginationParam('999999999', 50, 1, 200)).toBe(200);
+    expect(parsePaginationParam('10', 50, 1, 200)).toBe(10);
+    // 上限を渡さない場合はそのまま
+    expect(parsePaginationParam('999999999', 50, 1)).toBe(999999999);
+    // 下限未満・不正値は fallback
+    expect(parsePaginationParam('0', 50, 1)).toBe(50);
+    expect(parsePaginationParam('abc', 50, 1)).toBe(50);
+    // offset も同様に上限でクランプされる
+    expect(parsePaginationParam('999999999', 0, 0, 10_000)).toBe(10_000);
+    expect(parsePaginationParam('100', 0, 0, 10_000)).toBe(100);
+  });
+
   it('returns articles and sources from the worker database', async () => {
     await testDb.insert(subscriptions).values([
       {
@@ -507,7 +529,7 @@ describe('worker app', () => {
     expect(sourcesResponse.status).toBe(500);
   });
 
-  it('runs ingestion-only sync (no bookmark backfill) for the 30-minute cron', async () => {
+  it('runs ingestion-only sync (no bookmark backfill) for the intake cron', async () => {
     const env = {
       AI_API_KEY: 'test-api-key',
       AI_BASE_URL: 'https://opencode.example/v1',
@@ -521,7 +543,7 @@ describe('worker app', () => {
     const workerModule = await import('./worker.js');
 
     await workerModule.default.scheduled(
-      { cron: '*/30 * * * *' } as never,
+      { cron: '15,45 * * * *' } as never,
       env as never,
       executionContext as never,
     );
@@ -579,6 +601,117 @@ describe('worker app', () => {
       id: 'article-read',
       isRead: true,
     });
+  });
+
+  it('deletes the site\'s articles and bookmarks when a subscription is removed', async () => {
+    await testDb.insert(subscriptions).values({
+      addedAt: new Date('2024-01-01T00:00:00.000Z'),
+      id: 'sub-delete',
+      siteUrl: 'https://example.com/feed.xml',
+      title: 'Example',
+    });
+    await testDb.insert(articles).values({
+      content: '本文',
+      hatenaSummary: null,
+      id: 'article-delete-1',
+      isRead: false,
+      publishedAt: new Date('2024-01-01T00:00:00.000Z'),
+      siteUrl: 'https://example.com/feed.xml',
+      summary: '要約',
+      title: 'article 1',
+      url: 'https://example.com/articles/1',
+    });
+    await testDb.insert(hatenaBookmarks).values({
+      articleId: 'article-delete-1',
+      comment: 'nice',
+      createdAt: new Date('2024-01-02T00:00:00.000Z'),
+      id: 'bookmark-delete-1',
+      user: 'alice',
+    });
+
+    const response = await app.fetch(
+      new Request('http://localhost/api/subscriptions', {
+        body: JSON.stringify({ siteUrl: 'https://example.com/feed.xml' }),
+        headers: { 'Content-Type': 'application/json' },
+        method: 'DELETE',
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(await testDb.select().from(subscriptions)).toHaveLength(0);
+    expect(await testDb.select().from(articles)).toHaveLength(0);
+    expect(await testDb.select().from(hatenaBookmarks)).toHaveLength(0);
+  });
+
+  it('uses a single batch (transaction) for the unsubscribe cascade when supported', async () => {
+    await testDb.insert(subscriptions).values({
+      addedAt: new Date('2024-01-01T00:00:00.000Z'),
+      id: 'sub-batch',
+      siteUrl: 'https://example.com/feed.xml',
+      title: 'Example',
+    });
+
+    // D1 のように batch を持つドライバを模擬する（メソッドは prototype 経由のため Object.create で継承）
+    const batchFn = vi.fn().mockResolvedValue([]);
+    const batchableDb = Object.create(testDb) as typeof testDb & { batch: typeof batchFn };
+    batchableDb.batch = batchFn;
+    getDbMock.mockImplementation(() => batchableDb);
+
+    const response = await app.fetch(
+      new Request('http://localhost/api/subscriptions', {
+        body: JSON.stringify({ siteUrl: 'https://example.com/feed.xml' }),
+        headers: { 'Content-Type': 'application/json' },
+        method: 'DELETE',
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    // 3 つの DELETE（はてブ・記事・購読）が 1 回の batch で実行される
+    expect(batchFn).toHaveBeenCalledTimes(1);
+    // 3 つの DELETE ステートメント（はてブ・記事・購読）が渡される
+    const statements = batchFn.mock.calls[0]?.[0] as { run?: unknown }[];
+    expect(statements).toHaveLength(3);
+    expect(statements.every((stmt) => typeof stmt.run === 'function')).toBe(true);
+  });
+
+  it('returns 400 when deleting a subscription with an invalid siteUrl', async () => {
+    const response = await app.fetch(
+      new Request('http://localhost/api/subscriptions', {
+        body: JSON.stringify({ siteUrl: 'not a url' }),
+        headers: { 'Content-Type': 'application/json' },
+        method: 'DELETE',
+      }),
+    );
+
+    expect(response.status).toBe(400);
+  });
+
+  it('returns 400 when the PATCH body isRead is not a boolean', async () => {
+    await testDb.insert(articles).values({
+      content: '本文',
+      hatenaSummary: null,
+      id: 'article-read-invalid',
+      isRead: false,
+      publishedAt: new Date('2024-01-01T00:00:00.000Z'),
+      siteUrl: 'https://example.com/feed.xml',
+      summary: '要約',
+      title: 'read article',
+      url: 'https://example.com/articles/read-invalid',
+    });
+
+    const response = await app.fetch(
+      new Request('http://localhost/api/articles/article-read-invalid', {
+        body: JSON.stringify({ isRead: 'false' }),
+        headers: { 'Content-Type': 'application/json' },
+        method: 'PATCH',
+      }),
+    );
+
+    expect(response.status).toBe(400);
+
+    // 不正リクエストでは既読状態が変わらない
+    const saved = await testDb.select().from(articles);
+    expect(saved[0]?.isRead).toBe(false);
   });
 
   it('returns 404 when deleting a non-existent subscription', async () => {
