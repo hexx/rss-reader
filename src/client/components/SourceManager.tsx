@@ -58,6 +58,13 @@ export function SourceManager({
         return;
       }
 
+      // type="url" は ftp: 等の http(s) 以外のスキームも受理するため、
+      // ここで http(s) に限定する（サーバー側でも検証済み）。
+      if (!/^https?:\/\//iu.test(normalizedSiteUrl)) {
+        setError('http(s):// で始まるURLを入力してください。');
+        return;
+      }
+
       setIsAdding(true);
       setError('');
 
@@ -182,6 +189,11 @@ export function SourceManager({
                   role="button"
                   tabIndex={0}
                   onKeyDown={(e) => {
+                    // 行内の削除ボタン等にフォーカスしているときのキーイベントは
+                    // 行の選択操作として扱わない（バブリングで二重発火するのを防ぐ）。
+                    if (e.target !== e.currentTarget) {
+                      return;
+                    }
                     if (e.key === 'Enter' || e.key === ' ') {
                       e.preventDefault();
                       onSelectSource?.(isSelected ? undefined : source.siteUrl);
@@ -209,7 +221,7 @@ export function SourceManager({
                     )}
 
                     <Tooltip>
-                      <TooltipTrigger>
+                      <TooltipTrigger render={<span />}>
                         <Button
                           variant="ghost"
                           size="icon"

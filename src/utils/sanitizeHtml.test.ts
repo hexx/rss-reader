@@ -79,4 +79,40 @@ describe('sanitizeSummaryHtml', () => {
     expect(result).not.toContain('svg');
     expect(result).toContain('<p>ok</p>');
   });
+
+  it('keeps entity-encoded markup as text (no re-parsing XSS)', () => {
+    // replaceWith に文字列を渡すと HTML として再パースされ、エンティティ化された
+    // <img onerror> が実タグとして復活する XSS があった。テキストのまま残すこと。
+    const html = '<div>&lt;img src=x onerror=alert(1)&gt;</div><p>ok</p>';
+    const result = sanitizeSummaryHtml(html);
+    // エスケープされたテキストとしては残るが、実タグとしては復活しない
+    expect(result).not.toMatch(/<img\b/u);
+    expect(result).not.toMatch(/<\w[^>]*\sonerror\s*=/iu);
+    expect(result).toContain('&lt;img src=x onerror=alert(1)&gt;');
+    expect(result).toContain('<p>ok</p>');
+  });
+
+  it('keeps entity-encoded SVG as text', () => {
+    const html = '<div>hello &lt;svg onload=alert(1)&gt;&lt;/svg&gt;</div>';
+    const result = sanitizeSummaryHtml(html);
+    expect(result).not.toMatch(/<svg\b/u);
+    expect(result).not.toMatch(/<\w[^>]*\sonload\s*=/iu);
+    expect(result).toContain('hello &lt;svg onload=alert(1)&gt;&lt;/svg&gt;');
+  });
+
+  it('blocks backslash protocol-relative URLs (/\\evil.com)', () => {
+    // WHATWG URL パーサは特別スキームでバックスラッシュをスラッシュと同等に扱うため、
+    // /\\evil.com は //evil.com として別オリジンへ遷移し得る。ブロックすること。
+    const html = '<p><a href="/\\evil.com">x</a></p>';
+    expect(sanitizeSummaryHtml(html)).toBe('<p><a>x</a></p>');
+  });
+
+  it('blocks tab/newline-injected protocol-relative URLs', () => {
+    // WHATWG URL パーサはパース前に ASCII タブ・改行を除去するため、
+    // `/\n/evil.com` や `/\t/evil.com` は `//evil.com` に正規化され得る。ブロックすること。
+    expect(sanitizeSummaryHtml('<p><a href="/\n/evil.com">x</a></p>')).toBe('<p><a>x</a></p>');
+    expect(sanitizeSummaryHtml('<p><a href="/\t/evil.com">x</a></p>')).toBe('<p><a>x</a></p>');
+    // 通常の相対パスは引き続き許可される
+    expect(sanitizeSummaryHtml('<p><a href="/foo">x</a></p>')).toBe('<p><a href="/foo">x</a></p>');
+  });
 });

@@ -4,6 +4,9 @@ dist-client
 .env
 .env.*
 !.env.example
+.dev.vars
+.dev.vars.*
+!.dev.vars.example
 *.sqlite
 *.sqlite3
 *.db

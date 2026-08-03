@@ -38,6 +38,28 @@ describe('useSubscriptions', () => {
     expect(result.current.status?.message).toBe('購読に追加しました。');
   });
 
+  it('keeps the success status when onAfterChange rejects', async () => {
+    server.use(
+      http.post('*/api/subscriptions', () =>
+        HttpResponse.json(
+          { alreadyAFeed: true, feedType: 'rss', id: 'sub-1', siteUrl: 'https://example.com/feed', title: 'example.com' },
+          { status: 201 },
+        ),
+      ),
+    );
+
+    // 一覧再読込（onAfterChange）が失敗しても、購読操作自体は成功として扱う
+    const onAfterChange = vi.fn().mockRejectedValue(new Error('reload failed'));
+    const { result } = renderHook(() => useSubscriptions({ onAfterChange }));
+
+    await act(async () => {
+      await result.current.add('https://example.com/feed');
+    });
+
+    expect(result.current.status?.kind).toBe('success');
+    expect(result.current.status?.message).toBe('購読に追加しました。');
+  });
+
   it('shows auto-discovery message when alreadyAFeed is false', async () => {
     server.use(
       http.post('*/api/subscriptions', () => 

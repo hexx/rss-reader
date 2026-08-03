@@ -1,4 +1,4 @@
-import { browserRequestHeaders } from './scraper.js';
+import { browserRequestHeaders, extractMediaType, readBoundedText } from './scraper.js';
 
 export interface HatenaBookmarkComment {
   /**
@@ -92,18 +92,32 @@ function jitteredDelayMs(): number {
   return minimumHatenaRequestDelayMs + Math.floor(randomFn() * range);
 }
 
+/** はてな API リクエストのタイムアウト（ミリ秒）。接続が詰まっても同期全体を止めない。 */
+const hatenaFetchTimeoutMs = 15_000;
+/** はてな API レスポンスボディのサイズ上限（バイト）。bot ブロック等の巨大ページ対策。 */
+const maxHatenaResponseBytes = 1024 * 1024;
+/** タイムアウトを表すエラーメッセージ（二重ラップ防止のため定数化）。 */
+const hatenaTimeoutMessage = 'Hatena API request timed out.';
+
+/** HTML 系のメディアタイプかどうか（bot ブロック等のエラーページ判定用）。 */
+function isHtmlMediaType(contentType: string): boolean {
+  const mediaType = extractMediaType(contentType);
+  return mediaType === 'text/html' || mediaType === 'application/xhtml+xml';
+}
+
 /**
  * 次回リクエストが許可されるまで sleep する。
- * 許可されたあと、礼儀として次のリクエストまでの最短間隔を `nextAllowedAtMs`
- * に書き込む（次回の `acquireRequestSlot` で再度この値を見る）。
+ * 並行呼び出しがあっても間隔を守れるよう、sleep の前に予約時刻を先へ
+ * 進めておく（check-then-sleep-then-reserve の非原子な順序を避ける）。
  */
 async function acquireRequestSlot(): Promise<void> {
   const now = Date.now();
-  if (nextAllowedAtMs > now) {
-    await sleepFn(nextAllowedAtMs - now);
-  }
+  const waitUntil = Math.max(now, nextAllowedAtMs);
   // 礼儀のジッターを反映して次回予約時刻を更新
-  nextAllowedAtMs = Date.now() + jitteredDelayMs();
+  nextAllowedAtMs = waitUntil + jitteredDelayMs();
+  if (waitUntil > now) {
+    await sleepFn(waitUntil - now);
+  }
 }
 
 /**
@@ -202,27 +216,83 @@ function parseHatenaTimestamp(value: string | undefined, fallback: Date): Date {
 export async function fetchHatenaBookmarks(articleUrl: string): Promise<HatenaBookmarkComment[]> {
   await acquireRequestSlot();
 
-  const response = await fetch(`${hatenaEntryJsonLiteBaseUrl}${encodeURIComponent(articleUrl)}`, {
-    headers: {
-      ...browserRequestHeaders,
-      accept: 'application/json',
-    },
-  });
+  // タイムアウトはレスポンスヘッダー到着だけでなく、ボディ読み取り
+  // （response.json()）まで含めて適用する（ヘッダーだけ返して本文を
+  // 送らない bot ブロック等で同期が止まらないようにする）。
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), hatenaFetchTimeoutMs);
 
-  // 429 / 503: Retry-After を尊重して backoff を更新してから例外を投げる。
-  // 呼び出し側は warn ログで握り潰し、次の同期 run でリトライする想定。
-  if (response.status === 429 || response.status === 503) {
-    applyRetryAfter(response.headers.get('Retry-After'));
-    throw new Error(`Hatena rate limited: ${response.status} ${response.statusText}`);
+  let payload: HatenaBookmarkApiResponse | null | undefined;
+  try {
+    const response = await fetch(`${hatenaEntryJsonLiteBaseUrl}${encodeURIComponent(articleUrl)}`, {
+      headers: {
+        ...browserRequestHeaders,
+        accept: 'application/json',
+      },
+      signal: controller.signal,
+    });
+
+    // 429 / 503: Retry-After を尊重して backoff を更新してから例外を投げる。
+    // 呼び出し側は warn ログで握り潰し、次の同期 run でリトライする想定。
+    if (response.status === 429 || response.status === 503) {
+      applyRetryAfter(response.headers.get('Retry-After'));
+      throw new Error(`Hatena rate limited: ${response.status} ${response.statusText}`);
+    }
+
+    if (!response.ok) {
+      throw new Error(`Failed to fetch Hatena bookmarks for ${articleUrl}: ${response.status} ${response.statusText}`);
+    }
+
+    // 200 でも HTML エラーページ（bot ブロック等）を返すことがあるため、
+    // HTML 系の Content-Type は明確なエラーにしてバックオフを昇格させる。
+    // それ以外（ヘッダー欠落や text/plain 等）は JSON としてパースを試み、
+    // 失敗時は下の catch で不正 JSON エラーにする（プロキシ等がヘッダーを
+    // 落とすケースで正常レスポンスを壊さないため）。
+    if (isHtmlMediaType(response.headers.get('content-type') ?? '')) {
+      applyRetryAfter(null);
+      throw new Error(`Unexpected response from Hatena API for ${articleUrl}: received HTML instead of JSON.`);
+    }
+
+    // ボディはサイズ上限付きで読み込む（Content-Length ヘッダーに依存しないハードな上限）。
+    // 巨大な bot ブロックページを丸ごとメモリに載せるのを防ぐ。
+    let bodyText: string;
+    try {
+      bodyText = await readBoundedText(response, maxHatenaResponseBytes);
+    } catch (error) {
+      // サイズ超過のみ bot ブロックの兆候としてバックオフを昇格させる。
+      // それ以外の読み取りエラーは外側の catch で abort 判定等を行う。
+      if (error instanceof Error && error.message.includes('exceeded the size limit')) {
+        applyRetryAfter(null);
+        throw new Error(`Hatena API response for ${articleUrl} exceeded the size limit.`, { cause: error });
+      }
+      throw error;
+    }
+    try {
+      payload = JSON.parse(bodyText) as HatenaBookmarkApiResponse | null | undefined;
+    } catch (error) {
+      applyRetryAfter(null);
+      throw new Error(`Invalid JSON response from Hatena API for ${articleUrl}.`, { cause: error });
+    }
+  } catch (error) {
+    // タイムアウトによる中断（AbortError）はそのまま呼び出し側に渡さず、
+    // 分かりやすいメッセージに置き換える。タイムアウトも bot ブロック等の
+    // 異常の兆候なので、バックオフを昇格させる。
+    // 判定は controller.signal.aborted ではなくエラー型で行う
+    // （タイマー発火と別エラーの競合をタイムアウトと誤分類しないため）。
+    if (error instanceof DOMException && error.name === 'AbortError') {
+      applyRetryAfter(null);
+      throw new Error(`${hatenaTimeoutMessage} (${articleUrl})`, { cause: error });
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
   }
 
-  if (!response.ok) {
-    throw new Error(`Failed to fetch Hatena bookmarks for ${articleUrl}: ${response.status} ${response.statusText}`);
-  }
-
+  // 正常に JSON としてパースできた応答のみ成功扱いとし、バックオフをリセットする。
+  // （HTML エラーページ・本文停滞・不正 JSON は bot ブロックの兆候のため、
+  //   バックオフを維持する方が防御的に安全）
   resetBackoff();
 
-  const payload = (await response.json()) as HatenaBookmarkApiResponse | null | undefined;
   const bookmarks = payload && Array.isArray(payload.bookmarks) ? payload.bookmarks : [];
 
   const now = new Date();

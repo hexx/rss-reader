@@ -219,11 +219,12 @@ describe('fetchHatenaBookmarks', () => {
     const state = _getRateLimiterStateForTest();
     const now = Date.now();
     // 1 回目の exponential backoff は 1s (= 1000 ms) ベース × ジッター 50%
-    // → randomFn = () => 0 のとき 500ms になる
+    // → randomFn = () => 0 のとき 500ms になる。ただし acquireRequestSlot の
+    // 礼儀予約（最小 1s）が max() で優先されるため、実効的な待機は 500–1000ms。
     expect(state.consecutiveBackoffs).toBe(1);
     const wait = state.nextAllowedAtMs - now;
-    expect(wait).toBeGreaterThan(0);
-    expect(wait).toBeLessThan(1000);
+    expect(wait).toBeGreaterThanOrEqual(500);
+    expect(wait).toBeLessThanOrEqual(1000);
   });
 
   it('resets backoff counter on successful response', async () => {
@@ -281,6 +282,56 @@ describe('fetchHatenaBookmarks', () => {
     const wait2 = state2.nextAllowedAtMs - now2;
     expect(state2.nextAllowedAtMs).toBeGreaterThanOrEqual(state1.nextAllowedAtMs);
     expect(wait2).toBeLessThanOrEqual(maximumBackoffAllowedForTest());
+  });
+
+  it('rejects HTML error pages served with a 200 status', async () => {
+    server.use(
+      http.get(hatenaApiBaseUrl, () =>
+        new HttpResponse('<html><body>bot check</body></html>', {
+          headers: { 'Content-Type': 'text/html' },
+          status: 200,
+        }),
+      ),
+    );
+
+    await expect(fetchHatenaBookmarks(articleUrl)).rejects.toThrow(/HTML instead of JSON/i);
+  });
+
+  it('rejects invalid JSON bodies with a descriptive error', async () => {
+    server.use(
+      http.get(hatenaApiBaseUrl, () =>
+        new HttpResponse('<not-json>', {
+          headers: { 'Content-Type': 'application/json' },
+          status: 200,
+        }),
+      ),
+    );
+
+    await expect(fetchHatenaBookmarks(articleUrl)).rejects.toThrow(/Invalid JSON response/i);
+  });
+
+  it('translates a request timeout into a descriptive error', async () => {
+    vi.useFakeTimers();
+    // fetch が解決せず、abort シグナルで reject するスタブに差し替える
+    const hangingFetch = ((_input: RequestInfo | URL, init?: RequestInit) =>
+      new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener('abort', () => {
+          reject(new DOMException('The operation was aborted.', 'AbortError'));
+        });
+      })) as typeof fetch;
+    vi.stubGlobal('fetch', hangingFetch);
+
+    try {
+      const promise = fetchHatenaBookmarks(articleUrl);
+      // rejection ハンドラを先にアタッチしてから 15s のタイムアウトを経過させる
+      // （先に進めると unhandled rejection になるため）
+      const assertion = expect(promise).rejects.toThrow(/timed out/i);
+      await vi.advanceTimersByTimeAsync(15_000 + 10);
+      await assertion;
+    } finally {
+      vi.unstubAllGlobals();
+      vi.useRealTimers();
+    }
   });
 });
 

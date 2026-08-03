@@ -110,6 +110,39 @@ describe('useArticles', () => {
     expect(callCount).toBe(2);
   });
 
+  it('ignores a second loadMore call before the first fetch completes', async () => {
+    let callCount = 0;
+
+    server.use(
+      http.get('*/api/articles', () => {
+        callCount++;
+        return HttpResponse.json({ articles: createArticles(ARTICLE_PAGE_SIZE, 0) });
+      }),
+    );
+
+    const { result } = renderHook(() => useArticles(defaultParams));
+
+    await waitFor(() => {
+      expect(result.current.isLoading).toBe(false);
+    });
+    expect(callCount).toBe(1);
+
+    // 同じ act 内で連続して loadMore を呼んでも（effect 実行前の窓でも）、
+    // リクエストは 1 回しか発行されず offset も 1 ページ分しか進まない
+    act(() => {
+      result.current.loadMore();
+      result.current.loadMore();
+      result.current.loadMore();
+    });
+
+    await waitFor(() => {
+      expect(result.current.isLoading).toBe(false);
+    });
+
+    expect(callCount).toBe(2);
+    expect(result.current.articles).toHaveLength(ARTICLE_PAGE_SIZE * 2);
+  });
+
   it('refresh resets articles and starts from scratch', async () => {
     let callCount = 0;
 

@@ -23,6 +23,17 @@ describe('sanitizeClientHtml', () => {
     expect(result).toContain('contact');
   });
 
+  it('blocks tab/newline-injected protocol-relative URLs', () => {
+    // WHATWG URL パーサはパース前に ASCII タブ・改行を除去するため、
+    // `/\n/evil.com` や `/\t/evil.com` は `//evil.com` に正規化され得る。
+    const result1 = sanitizeClientHtml('<p><a href="/\n/evil.com">x</a></p>');
+    expect(result1).not.toContain('href');
+    const result2 = sanitizeClientHtml('<p><a href="/\t/evil.com">x</a></p>');
+    expect(result2).not.toContain('href');
+    // 通常の相対パスは引き続き許可される
+    expect(sanitizeClientHtml('<p><a href="/foo">x</a></p>')).toBe('<p><a href="/foo">x</a></p>');
+  });
+
   it('blocks protocol-relative URLs (//evil.com)', () => {
     const html = '<p><a href="//evil.com">x</a></p>';
     const result = sanitizeClientHtml(html);
@@ -73,17 +84,33 @@ describe('sanitizeClientHtml', () => {
     expect(sanitizeClientHtml('')).toBe('');
   });
 
-  // SVG 要素は HTMLElement ではないためサニタイザの対象外です。
-  // Onload 属性は除去されずそのまま残ります（サーバー側の cheerio ベース
-  // サニタイザはタグ名で判定するため別の挙動となります）。
-  // クライアント側サニタイザの将来の改善ポイントです。
-  it('does not sanitize onload attributes on SVG elements', () => {
+  // SVG / MathML などの foreign content は HTMLElement ではないため、
+  // `instanceof HTMLElement` で判定すると allowlist をすり抜けていた。
+  // タグ名ベースの判定に変更し、onload 等の属性も除去されることを保証する。
+  it('sanitizes onload attributes on SVG elements', () => {
     const html = '<svg onload="alert(1)"><circle r="5"/></svg><p>ok</p>';
     const result = sanitizeClientHtml(html);
-    // SVG の onload は現状除去されない
-    expect(result).toContain('onload');
-    expect(result).toContain('svg');
+    expect(result).not.toContain('onload');
+    expect(result).not.toContain('svg');
     expect(result).toContain('<p>ok</p>');
+  });
+
+  it('keeps entity-encoded markup as text (no re-parsing XSS)', () => {
+    const html = '<div>&lt;img src=x onerror=alert(1)&gt;</div><p>ok</p>';
+    const result = sanitizeClientHtml(html);
+    // エスケープされたテキストとしては残るが、実タグとしては復活しない
+    expect(result).not.toMatch(/<img\b/u);
+    expect(result).not.toMatch(/<\w[^>]*\sonerror\s*=/iu);
+    expect(result).toContain('&lt;img src=x onerror=alert(1)&gt;');
+    expect(result).toContain('<p>ok</p>');
+  });
+
+  it('keeps content after a stray closing div', () => {
+    // ラッパー div 方式だと余分な </div> でラッパーが閉じ、後続が切り捨てられた。
+    // body 直接パースでは HTML5 パーサが余分な終了タグを無視するため保持される。
+    const html = '</div><p>legit</p><div>';
+    const result = sanitizeClientHtml(html);
+    expect(result).toContain('<p>legit</p>');
   });
 
   it('preserves br tags', () => {

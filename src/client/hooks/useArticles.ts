@@ -39,6 +39,8 @@ export function useArticles({
   // 最新の入力パラメータを ref 経由で参照することで、loadArticles のクロージャ問題を回避する。
   const paramsRef = useLatestRef({ selectedSourceUrl, showUnreadOnly, sortOrder });
   const requestIdRef = useRef(0);
+  // リクエスト進行中フラグ（loadMore の二重発火でページが飛ばないようにする）
+  const isLoadingRef = useRef(false);
 
   const refresh = useCallback(() => {
     setOffset(0);
@@ -47,6 +49,12 @@ export function useArticles({
   }, []);
 
   const loadMore = useCallback(() => {
+    if (isLoadingRef.current) {
+      return;
+    }
+    // effect 実行前に連続で呼ばれても二重発火しないよう、ここで同期的にアームする
+    // （effect 内でもアームするが、offset 変更のコミット前の窓を塞ぐのが目的）。
+    isLoadingRef.current = true;
     setOffset((current) => current + ARTICLE_PAGE_SIZE);
   }, []);
 
@@ -59,6 +67,7 @@ export function useArticles({
     const { selectedSourceUrl: sourceUrl, showUnreadOnly: unreadOnly, sortOrder: sort } = paramsRef.current;
 
     setIsLoading(true);
+    isLoadingRef.current = true;
     setStatus({
       kind: 'loading',
       message: isFirstPage
@@ -121,6 +130,7 @@ export function useArticles({
         setStatus({ kind: 'error', message: normalizeError(error, '記事の読み込みに失敗しました。') });
       } finally {
         if (requestIdRef.current === requestId) {
+          isLoadingRef.current = false;
           setIsLoading(false);
         }
       }

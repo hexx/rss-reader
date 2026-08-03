@@ -1,4 +1,4 @@
-import { eq, sql } from 'drizzle-orm';
+import { and, eq, isNull, sql } from 'drizzle-orm';
 
 import type { RuntimeEnv } from '../env.js';
 import { getDb } from '../db/index.js';
@@ -10,6 +10,21 @@ import { fetchArticleContent, fetchRssOrFallback } from '../services/scraper.js'
 import { logger } from '../utils/logger.js';
 
 const bookmarkChunkSize = 20;
+
+/** 任意のエラーをログ用メッセージに正規化する。 */
+function toErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+/** 1 回の syncSite 実行でバックフィル生成するはてブ要約の上限（AI 呼び出しのバースト防止）。 */
+const maxHatenaSummaryBackfillsPerRun = 20;
+
+/** syncSite 1 回の実行内で共有するバックフィル状態（並行実行間で共有しない）。 */
+interface BackfillState {
+  /** この実行で generateHatenaSummary を試行した回数（失敗も含む。AI バースト防止）。 */
+  count: number;
+  /** 上限到達のログを 1 回だけ出すためのフラグ。 */
+  capNotified: boolean;
+}
 
 type AppDatabase = ReturnType<typeof getDb>;
 
@@ -63,17 +78,23 @@ async function persistBookmarks(
  * 取得失敗は best-effort で握り潰し、既存記事のメタデータ更新は阻害しない。
  * 同一ユーザー重複は schema の UNIQUE 制約 `hatena_bookmarks_article_id_user_unique`
  * によって DB レベルで除外される。
+ *
+ * 初回同期時にブックマーク取得が失敗して `hatena_summary` が NULL のままの記事は、
+ * バックフィルが成功したタイミングで要約を生成して埋める（ADR 0002 のフル同期経由）。
  */
 async function syncBookmarksForExistingArticle(
   database: AppDatabase,
   articleId: string,
   articleUrl: string,
+  env: RuntimeEnv,
+  nullSummaryArticleIds: Set<string>,
+  backfillState: BackfillState,
 ): Promise<void> {
   let bookmarks: HatenaBookmarkComment[];
   try {
     bookmarks = await fetchHatenaBookmarks(articleUrl);
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
+    const message = toErrorMessage(error);
     logger.warn('既存記事のはてなブックマーク再取得に失敗したため、スキップします。', {
       articleId,
       articleUrl,
@@ -82,6 +103,35 @@ async function syncBookmarksForExistingArticle(
     return;
   }
   await persistBookmarks(database, articleId, bookmarks);
+
+  // 記事ごとの SELECT を避けるため、syncSite 冒頭で事前ロードした
+  // hatena_summary が NULL の記事 ID セットで判定する。
+  if (nullSummaryArticleIds.has(articleId) && bookmarks.length > 0) {
+    if (backfillState.count >= maxHatenaSummaryBackfillsPerRun) {
+      if (!backfillState.capNotified) {
+        backfillState.capNotified = true;
+        logger.info('はてブ要約のバックフィル上限に達したため、残りは次のフル同期に持ち越します。');
+      }
+      return;
+    }
+    backfillState.count += 1;
+    try {
+      const hatenaSummary = await generateHatenaSummary(bookmarks, env);
+      await database
+        .update(articles)
+        .set({ hatenaSummary })
+        .where(eq(articles.id, articleId))
+        .run();
+      nullSummaryArticleIds.delete(articleId);
+      logger.info('取りこぼしていたはてブ要約をバックフィルで生成しました。', { articleId });
+    } catch (error) {
+      const message = toErrorMessage(error);
+      logger.warn('はてブ要約の再生成に失敗したため、次のフル同期で再試行します。', {
+        articleId,
+        error: message,
+      });
+    }
+  }
 }
 
 /**
@@ -105,10 +155,27 @@ export async function syncSite(
 ): Promise<number> {
   let processedCount = 0;
 
+  // この実行内で共有するバックフィル状態（並行実行と干渉しないよう引数で受け渡す）。
+  const backfillState: BackfillState = { capNotified: false, count: 0 };
+
   try {
     logger.info('サイト同期を開始します。', { siteUrl });
     const database = getDb(env);
     const siteArticles = await fetchRssOrFallback(siteUrl);
+
+    // バックフィル対象（hatena_summary が NULL）の記事 ID を事前に 1 回だけ読み込む。
+    // 記事ごとの追加 SELECT を避けるためのもの。対象はこのサイトの記事に絞る
+    // （site_url インデックスを使用）。取り込み専用 cron では不要なのでスキップする。
+    const nullSummaryArticleIds = includeBookmarkBackfill
+      ? new Set(
+          (
+            await database
+              .select({ id: articles.id })
+              .from(articles)
+              .where(and(eq(articles.siteUrl, siteUrl), isNull(articles.hatenaSummary)))
+          ).map((row) => row.id),
+        )
+      : new Set<string>();
 
     for (const article of siteArticles) {
       try {
@@ -125,7 +192,14 @@ export async function syncSite(
         // (レート制御は hatena モジュール内のリミッターが行う)。
         const existing = existingArticle[0];
         if (existing && includeBookmarkBackfill) {
-          await syncBookmarksForExistingArticle(database, existing.id, article.url);
+          await syncBookmarksForExistingArticle(
+            database,
+            existing.id,
+            article.url,
+            env,
+            nullSummaryArticleIds,
+            backfillState,
+          );
         }
         if (existing) {
           continue;
@@ -133,11 +207,18 @@ export async function syncSite(
 
         logger.info('記事の同期処理を実行します。', { title: article.title, url: article.url });
 
-        let content = '';
-        try {
-          content = await fetchArticleContent(article.url);
-        } catch (error) {
-          const message = error instanceof Error ? error.message : String(error);
+        // 本文取得とはてブ取得は独立したネットワーク呼び出しなので並列化する。
+        // はてブ側のレート制御は hatena モジュール内のリミッターが担当する。
+        // どちらかが失敗しても記事の同期自体は継続する（本文失敗 → 本文なしで保存、
+        // はてブ失敗 → コメントなしで保存。取りこぼしたはてブは 3 時間おきのフル同期の
+        // バックフィルで補完される）。
+        const [contentResult, bookmarksResult] = await Promise.allSettled([
+          fetchArticleContent(article.url),
+          fetchHatenaBookmarks(article.url),
+        ]);
+
+        if (contentResult.status === 'rejected') {
+          const message = toErrorMessage(contentResult.reason);
           logger.warn('本文の取得に失敗したため、本文なしで処理を継続します。', {
             articleUrl: article.url,
             error: message,
@@ -145,10 +226,34 @@ export async function syncSite(
             title: article.title,
           });
         }
-        const bookmarks = await fetchHatenaBookmarks(article.url);
+        if (bookmarksResult.status === 'rejected') {
+          const message = toErrorMessage(bookmarksResult.reason);
+          logger.warn('はてなブックマークの取得に失敗したため、コメントなしで処理を継続します。', {
+            articleUrl: article.url,
+            error: message,
+            siteUrl,
+            title: article.title,
+          });
+        }
+        const content = contentResult.status === 'fulfilled' ? contentResult.value : '';
+        const bookmarks = bookmarksResult.status === 'fulfilled' ? bookmarksResult.value : [];
         const summary = await generateArticleSummary(article.title, content, env);
-        const hatenaSummary =
-          bookmarks.length > 0 ? await generateHatenaSummary(bookmarks, env) : null;
+        // はてブ要約の生成失敗は記事の保存を阻害しない（コメントなしで保存し、
+        // 次のフル同期のバックフィルで要約を再生成する）。
+        let hatenaSummary: string | null = null;
+        if (bookmarks.length > 0) {
+          try {
+            hatenaSummary = await generateHatenaSummary(bookmarks, env);
+          } catch (error) {
+            const message = toErrorMessage(error);
+            logger.warn('はてブ要約の生成に失敗したため、要約なしで記事を保存します（コメント自体は保存されます）。', {
+              articleUrl: article.url,
+              error: message,
+              siteUrl,
+              title: article.title,
+            });
+          }
+        }
         const articleId = crypto.randomUUID();
 
         await database.insert(articles).values({
@@ -163,6 +268,13 @@ export async function syncSite(
           url: article.url,
         }).run();
 
+        // 要約なし（はてブ取得失敗等）で保存された新着記事は、バックフィル対象に加える。
+        // 通常は次のフル同期の事前ロードで拾われるが、同一実行内に同じ URL の項目が
+        // 重複して現れた場合に備えて、実行中に挿入した記事もセットへ追加しておく。
+        if (hatenaSummary === null) {
+          nullSummaryArticleIds.add(articleId);
+        }
+
         await persistBookmarks(database, articleId, bookmarks);
 
         processedCount += 1;
@@ -172,7 +284,7 @@ export async function syncSite(
           throw error;
         }
 
-        const message = error instanceof Error ? error.message : String(error);
+        const message = toErrorMessage(error);
         logger.warn('記事の同期に失敗しました。', {
           articleUrl: article.url,
           error: message,
@@ -190,7 +302,7 @@ export async function syncSite(
       throw error;
     }
 
-    const message = error instanceof Error ? error.message : String(error);
+    const message = toErrorMessage(error);
     logger.warn('サイト同期に失敗しました。', {
       error: message,
       siteUrl,

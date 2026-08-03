@@ -41,7 +41,10 @@ export const REMOVE_CONTENT_TAGS = new Set([
 /**
  * 許可する URL スキーム。
  *
- * 重要: 先頭の "/" の後に "/" を続けるプロトコル相対 URL (//evil.com 等) は
- * 別オリジンへの遷移を許してしまうため、明示的にブロックする。
+ * 重要: 先頭の "/" の後に "/" や "\\" を続けるプロトコル相対 URL
+ * (//evil.com や /\\evil.com 等) は別オリジンへの遷移を許してしまうため、
+ * 明示的にブロックする。WHATWG URL パーサは特別スキームではバックスラッシュを
+ * スラッシュと同等に扱い、パース前に ASCII タブ・改行を無条件に除去するため、
+ * それらも含めてブロックする（例: `/\n/evil.com` は `//evil.com` に正規化される）。
  */
-export const SAFE_URL_PATTERN = /^(?:https?:|mailto:|\/(?!\/)|#)/i;
+export const SAFE_URL_PATTERN = /^(?:https?:|mailto:|\/(?![/\\\t\n\r])|#)/iu;

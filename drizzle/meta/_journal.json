@@ -29,6 +29,13 @@
       "when": 1778600000000,
       "tag": "0003_hatena_bookmarks_unique",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1785680284463,
+      "tag": "0004_youthful_white_tiger",
+      "breakpoints": true
     }
   ]
 }

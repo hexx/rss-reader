@@ -1,6 +1,6 @@
 import { load } from 'cheerio';
 import type { CheerioAPI } from 'cheerio';
-import { isTag } from 'domhandler';
+import { isTag, Text } from 'domhandler';
 import type { Element } from 'domhandler';
 
 import { ALLOWED_TAGS, REMOVE_CONTENT_TAGS, SAFE_URL_PATTERN } from '../shared/sanitize-constants.js';
@@ -37,9 +37,12 @@ function sanitizeNode($: CheerioAPI, element: Element): void {
   }
 
   if (!ALLOWED_TAGS.has(tagName)) {
-    // 許可されていないタグは中身のテキストだけ残す
+    // 許可されていないタグは中身のテキストだけ残す。
+    // 注意: replaceWith に文字列を渡すと HTML として再パースされるため、
+    // テキストノードとして置換する。エンティティエンコードされたマークアップ
+    // (例: `&lt;img onerror=...&gt;`) が実タグとして復活する XSS を防ぐ。
     const text = $(element).text();
-    $(element).replaceWith(text);
+    $(element).replaceWith(new Text(text));
     return;
   }
 

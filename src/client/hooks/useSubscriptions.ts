@@ -20,6 +20,16 @@ export function useSubscriptions({
   const [removingSiteUrl, setRemovingSiteUrl] = useState<string | null>(null);
   const [status, setStatus] = useState<Status | null>(null);
 
+  // 後続処理（一覧再読込）の失敗は購読操作自体の失敗ではないため、
+  // 成功ステータスを維持したままログに残すだけにする（add / remove で共用）。
+  const runAfterChange = useCallback(async () => {
+    try {
+      await onAfterChange();
+    } catch (error) {
+      console.warn('購読変更後の再読み込みに失敗しました。', error);
+    }
+  }, [onAfterChange]);
+
   const add = useCallback(
     async (siteUrl: string) => {
       setIsAdding(true);
@@ -45,8 +55,7 @@ export function useSubscriptions({
           message = `${typeLabel}フィードを自動検出して購読に追加しました。`;
         }
         setStatus({ kind: 'success', message });
-
-        await onAfterChange();
+        await runAfterChange();
       } catch (error) {
         setStatus({ kind: 'error', message: normalizeError(error, '購読の追加に失敗しました。') });
         throw error;
@@ -54,7 +63,7 @@ export function useSubscriptions({
         setIsAdding(false);
       }
     },
-    [onAfterChange],
+    [runAfterChange],
   );
 
   const remove = useCallback(
@@ -72,7 +81,7 @@ export function useSubscriptions({
           throw new Error(payload.error || '購読解除に失敗しました。');
         }
         setStatus({ kind: 'success', message: '購読を解除しました。' });
-        await onAfterChange();
+        await runAfterChange();
       } catch (error) {
         setStatus({ kind: 'error', message: normalizeError(error, '購読解除に失敗しました。') });
         throw error;
@@ -80,7 +89,7 @@ export function useSubscriptions({
         setRemovingSiteUrl(null);
       }
     },
-    [onAfterChange],
+    [runAfterChange],
   );
 
   return { add, isAdding, remove, removingSiteUrl, status };

@@ -111,6 +111,22 @@ describe('scraper service', () => {
     await expect(fetchArticleContent(articleOneUrl)).resolves.toBe('First article Article body text.');
   });
 
+  it('rejects internal article URLs to prevent SSRF', async () => {
+    await expect(fetchArticleContent('http://127.0.0.1/')).rejects.toThrow(/internal/iu);
+    await expect(fetchArticleContent('http://169.254.169.254/latest/meta-data/')).rejects.toThrow(/internal/iu);
+    await expect(fetchArticleContent('http://[::ffff:127.0.0.1]/')).rejects.toThrow(/internal/iu);
+  });
+
+  it('rejects redirects to internal addresses when fetching article content', async () => {
+    server.use(
+      http.get('https://public.example.com/article', () =>
+        HttpResponse.text('', { headers: { Location: 'http://127.0.0.1/private' }, status: 302 }),
+      ),
+    );
+
+    await expect(fetchArticleContent('https://public.example.com/article')).rejects.toThrow(/internal/iu);
+  });
+
   it('returns empty content when no article body can be extracted', async () => {
     server.use(
       http.get(
@@ -120,6 +136,30 @@ describe('scraper service', () => {
     );
 
     await expect(fetchArticleContent(articleTwoUrl)).resolves.toBe('');
+  });
+
+  it('drops feed items with non-http(s) URLs (javascript: etc.)', async () => {
+    server.use(
+      http.get(feedUrl, () =>
+        HttpResponse.text(feedXml, { headers: { 'Content-Type': 'application/rss+xml' } }),
+      ),
+    );
+
+    parseStringMock.mockResolvedValueOnce({
+      items: [
+        { link: 'javascript:alert(1)', title: 'evil' },
+        { link: 'data:text/html,<h1>x</h1>', title: 'data url' },
+        { link: articleOneUrl, title: 'First article' },
+      ],
+    });
+
+    await expect(fetchRssOrFallback(feedUrl)).resolves.toEqual([
+      {
+        pubDate: null,
+        title: 'First article',
+        url: articleOneUrl,
+      },
+    ]);
   });
 
   it('parses RSS feeds before falling back to HTML link discovery', async () => {
@@ -257,6 +297,69 @@ describe('scraper service', () => {
       });
     });
 
+    it('treats generic XML with an <rss> root as an already-a-feed', async () => {
+      server.use(
+        http.get('https://example.com/generic-feed', () =>
+          HttpResponse.text('<?xml version="1.0"?><rss version="2.0"><channel></channel></rss>', {
+            headers: { 'Content-Type': 'application/xml' },
+          }),
+        ),
+      );
+
+      await expect(discoverRssFeedUrl('https://example.com/generic-feed')).resolves.toEqual({
+        alreadyAFeed: true,
+        feedUrl: 'https://example.com/generic-feed',
+        type: 'rss',
+      });
+    });
+
+    it('treats generic XML with an <feed> root as an Atom feed', async () => {
+      server.use(
+        http.get('https://example.com/generic-atom', () =>
+          HttpResponse.text('<?xml version="1.0"?><feed xmlns="http://www.w3.org/2005/Atom"></feed>', {
+            headers: { 'Content-Type': 'text/xml' },
+          }),
+        ),
+      );
+
+      await expect(discoverRssFeedUrl('https://example.com/generic-atom')).resolves.toEqual({
+        alreadyAFeed: true,
+        feedUrl: 'https://example.com/generic-atom',
+        type: 'atom',
+      });
+    });
+
+    it('treats generic XML with an <rdf:RDF> root (RSS 1.0) as a feed', async () => {
+      server.use(
+        http.get('https://example.com/rss10', () =>
+          HttpResponse.text(
+            '<?xml version="1.0"?><rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#" xmlns="http://purl.org/rss/1.0/"><channel><title>RSS 1.0</title></channel></rdf:RDF>',
+            { headers: { 'Content-Type': 'application/xml' } },
+          ),
+        ),
+      );
+
+      await expect(discoverRssFeedUrl('https://example.com/rss10')).resolves.toEqual({
+        alreadyAFeed: true,
+        feedUrl: 'https://example.com/rss10',
+        type: 'rss',
+      });
+    });
+
+    it('falls back to link discovery for generic XML that is not a feed (sitemap)', async () => {
+      // sitemap.xml 等の非フィード XML はフィードとして登録せず、
+      // 後段の <link rel=alternate> 探索へフォールバックする
+      server.use(
+        http.get('https://example.com/sitemap.xml', () =>
+          HttpResponse.text('<?xml version="1.0"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"></urlset>', {
+            headers: { 'Content-Type': 'application/xml' },
+          }),
+        ),
+      );
+
+      await expect(discoverRssFeedUrl('https://example.com/sitemap.xml')).resolves.toBeNull();
+    });
+
     it('discovers an RSS feed URL from a normal HTML page', async () => {
       const blogHtml = `<!doctype html>
 <html>
@@ -355,21 +458,96 @@ describe('scraper service', () => {
     });
 
     it('rejects localhost to prevent SSRF', async () => {
-      await expect(discoverRssFeedUrl('http://localhost/')).rejects.toThrow(/internal/i);
+      await expect(discoverRssFeedUrl('http://localhost/')).rejects.toThrow(/internal/iu);
     });
 
     it('rejects 127.0.0.1 to prevent SSRF', async () => {
-      await expect(discoverRssFeedUrl('http://127.0.0.1/')).rejects.toThrow(/internal/i);
+      await expect(discoverRssFeedUrl('http://127.0.0.1/')).rejects.toThrow(/internal/iu);
     });
 
     it('rejects private IPv4 ranges to prevent SSRF', async () => {
-      await expect(discoverRssFeedUrl('http://10.0.0.1/')).rejects.toThrow(/internal/i);
-      await expect(discoverRssFeedUrl('http://192.168.1.1/')).rejects.toThrow(/internal/i);
-      await expect(discoverRssFeedUrl('http://172.16.0.1/')).rejects.toThrow(/internal/i);
+      await expect(discoverRssFeedUrl('http://10.0.0.1/')).rejects.toThrow(/internal/iu);
+      await expect(discoverRssFeedUrl('http://192.168.1.1/')).rejects.toThrow(/internal/iu);
+      await expect(discoverRssFeedUrl('http://172.16.0.1/')).rejects.toThrow(/internal/iu);
     });
 
     it('rejects the cloud metadata endpoint to prevent SSRF', async () => {
-      await expect(discoverRssFeedUrl('http://169.254.169.254/')).rejects.toThrow(/internal/i);
+      await expect(discoverRssFeedUrl('http://169.254.169.254/')).rejects.toThrow(/internal/iu);
+    });
+
+    it('rejects IPv4-mapped IPv6 addresses to prevent SSRF', async () => {
+      await expect(discoverRssFeedUrl('http://[::ffff:169.254.169.254]/')).rejects.toThrow(/internal/iu);
+      await expect(discoverRssFeedUrl('http://[::ffff:127.0.0.1]/')).rejects.toThrow(/internal/iu);
+    });
+
+    it('rejects numeric IPv4 representations to prevent SSRF', async () => {
+      // 2130706433 = 127.0.0.1, 0x7f000001 = 127.0.0.1
+      await expect(discoverRssFeedUrl('http://2130706433/')).rejects.toThrow(/internal/iu);
+      await expect(discoverRssFeedUrl('http://0x7f000001/')).rejects.toThrow(/internal/iu);
+    });
+
+    it('rejects expanded IPv6 loopback and ULA to prevent SSRF', async () => {
+      await expect(discoverRssFeedUrl('http://[0:0:0:0:0:0:0:1]/')).rejects.toThrow(/internal/iu);
+      await expect(discoverRssFeedUrl('http://[fd00::1]/')).rejects.toThrow(/internal/iu);
+      await expect(discoverRssFeedUrl('http://[fe80::1]/')).rejects.toThrow(/internal/iu);
+    });
+
+    it('rejects IPv4-compatible and translated IPv6 forms to prevent SSRF', async () => {
+      // WHATWG URL は [::127.0.0.1] を [::7f00:1] に正規化する（IPv4 互換）。
+      // ::ffff:0:a.b.c.d（IPv4 トランスレーテッド）も同様にブロックする。
+      await expect(discoverRssFeedUrl('http://[::127.0.0.1]/')).rejects.toThrow(/internal/iu);
+      await expect(discoverRssFeedUrl('http://[::ffff:0:127.0.0.1]/')).rejects.toThrow(/internal/iu);
+      await expect(discoverRssFeedUrl('http://[::ffff:0:169.254.169.254]/')).rejects.toThrow(/internal/iu);
+    });
+
+    it('rejects octal and hex IPv4 literals to prevent SSRF', async () => {
+      // WHATWG URL パーサは 8進/16進オクテットや単一数値を解釈する。
+      // 末尾ドット付きは正規化されず残るため、パーサ側でも解釈してブロックする。
+      await expect(discoverRssFeedUrl('http://0177.0.0.1./')).rejects.toThrow(/internal/iu);
+      await expect(discoverRssFeedUrl('http://0x7f.0.0.1./')).rejects.toThrow(/internal/iu);
+      await expect(discoverRssFeedUrl('http://017700000001./')).rejects.toThrow(/internal/iu);
+    });
+
+    it('rejects abbreviated IPv4 forms to prevent SSRF', async () => {
+      // WHATWG URL パーサは 127.1 を 127.0.0.1 に展開する
+      await expect(discoverRssFeedUrl('http://127.1./')).rejects.toThrow(/internal/iu);
+      await expect(discoverRssFeedUrl('http://127.0.1./')).rejects.toThrow(/internal/iu);
+    });
+
+    it('rejects NAT64 and 6to4 addresses embedding private IPv4', async () => {
+      // NAT64 well-known プレフィックス (64:ff9b::/96) に 127.0.0.1 を埋め込んだ形
+      await expect(discoverRssFeedUrl('http://[64:ff9b::7f00:1]/')).rejects.toThrow(/internal/iu);
+      // 6to4 (2002::/16) に 127.0.0.1 を埋め込んだ形
+      await expect(discoverRssFeedUrl('http://[2002:7f00:1::]/')).rejects.toThrow(/internal/iu);
+    });
+
+    it('allows NAT64 addresses embedding a public IPv4', async () => {
+      // 公開 IPv4 (8.8.8.8) を埋め込んだ NAT64 はブロックせず、通常の検出フローに進む。
+      // （msw は IPv6 ホストのルートパターンを扱えないため fetch をスタブする）
+      const fetchMock = vi.fn().mockResolvedValue(
+        new Response('<html><body>no feed</body></html>', {
+          headers: { 'Content-Type': 'text/html' },
+          status: 200,
+        }),
+      );
+      vi.stubGlobal('fetch', fetchMock);
+
+      try {
+        // フィードが見つからないだけで、内部アドレスとしては拒否されない
+        await expect(discoverRssFeedUrl('http://[64:ff9b::808:808]/')).resolves.toBeNull();
+      } finally {
+        vi.unstubAllGlobals();
+      }
+      // 検証を通過して実際に fetch が呼ばれたことを確認する
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    it('rejects trailing-dot FQDN hostnames to prevent SSRF', async () => {
+      // WHATWG URL は末尾ドットを保持するため、127.0.0.1. / localhost. は
+      // そのままではブロックリストに一致しないが、DNS は同一ホストに解決される。
+      await expect(discoverRssFeedUrl('http://127.0.0.1./')).rejects.toThrow(/internal/iu);
+      await expect(discoverRssFeedUrl('http://169.254.169.254./')).rejects.toThrow(/internal/iu);
+      await expect(discoverRssFeedUrl('http://localhost./')).rejects.toThrow(/internal/iu);
     });
 
     it('rejects invalid URLs', async () => {
@@ -383,7 +561,7 @@ describe('scraper service', () => {
         ),
       );
 
-      await expect(discoverRssFeedUrl('https://public.example.com/')).rejects.toThrow(/internal/i);
+      await expect(discoverRssFeedUrl('https://public.example.com/')).rejects.toThrow(/internal/iu);
     });
 
     it('rejects redirect loops', async () => {

@@ -19,24 +19,26 @@ function isSafeHref(value: string): boolean {
 }
 
 function sanitizeElement(element: Element): Node | null {
-  // 許可されていないタグや、内容ごと除去するタグはここで処理
-  if (element instanceof HTMLElement) {
-    const tag = element.tagName.toLowerCase();
-    if (REMOVE_CONTENT_TAGS.has(tag)) {
-      return null;
-    }
-    if (!ALLOWED_TAGS.has(tag)) {
-      // 許可外のタグはテキストノードに置き換える
-      return document.createTextNode(element.textContent ?? '');
-    }
+  const tag = element.tagName.toLowerCase();
 
-    // 許可タグでも属性は全削除
-    const attrs = [...element.attributes];
-    for (const attr of attrs) {
-      const keep = tag === 'a' && attr.name === 'href' && isSafeHref(attr.value);
-      if (!keep) {
-        element.removeAttribute(attr.name);
-      }
+  // 許可されていないタグや、内容ごと除去するタグはここで処理する。
+  // 注意: SVG / MathML などの foreign content は HTMLElement ではないため、
+  // `instanceof HTMLElement` で判定すると allowlist をすり抜けてしまう
+  // (例: `<svg onload=...>`)。タグ名ベースの判定で全ての要素を扱う。
+  if (REMOVE_CONTENT_TAGS.has(tag)) {
+    return null;
+  }
+  if (!ALLOWED_TAGS.has(tag)) {
+    // 許可外のタグはテキストノードに置き換える
+    return document.createTextNode(element.textContent ?? '');
+  }
+
+  // 許可タグでも属性は全削除（a タグの href だけ例外的に再付与する）
+  const attrs = [...element.attributes];
+  for (const attr of attrs) {
+    const keep = tag === 'a' && attr.name === 'href' && isSafeHref(attr.value);
+    if (!keep) {
+      element.removeAttribute(attr.name);
     }
   }
 
@@ -68,12 +70,17 @@ export function sanitizeClientHtml(html: string): string {
     // DOMParser が無い環境（例: 一部のテストランナー）はフォールバックとして
     // 全タグをテキストとして除去する。サーバー側サニタイズが第一防御だが、
     // DangerouslySetInnerHTML に生 HTML を絶対に渡さないための保険。
-    return html.replaceAll(/<[^>]*>/g, '');
+    // 閉じタグの無い断片（例: `<img onerror=...`）が残らないよう、
+    // 除去後に残った '<' はエスケープしてタグとして解釈されないようにする。
+    return html.replaceAll(/<[^>]*>/gu, '').replaceAll('<', '&lt;');
   }
 
   const parser = new DOMParser();
-  const doc = parser.parseFromString(`<div id="__root__">${html}</div>`, 'text/html');
-  const root = doc.querySelector('#__root__');
+  // サーバー側実装と同じく body を直接使う。入力に含まれる余分な `</div>` 等の
+  // 終了タグは HTML5 パーサが無視するため、ラッパー要素を割って内容が
+  // 切り捨てられる問題を避けられる。
+  const doc = parser.parseFromString(html, 'text/html');
+  const root = doc.body;
   if (!root) {
     return '';
   }

@@ -20,16 +20,19 @@ interface ArticleCardProps {
   onMarkAsRead: (articleId: string) => void | Promise<void>;
 }
 
+// カードごとに Intl.DateTimeFormat を作り直さないようモジュールレベルで一度だけ生成する
+const dateFormatter = new Intl.DateTimeFormat('ja-JP', {
+  dateStyle: 'medium',
+  timeStyle: 'short',
+});
+
 function formatDate(value: string): string {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) {
     return '日時不明';
   }
 
-  return new Intl.DateTimeFormat('ja-JP', {
-    dateStyle: 'medium',
-    timeStyle: 'short',
-  }).format(date);
+  return dateFormatter.format(date);
 }
 
 function sourceLabel(siteUrl: string): string {
@@ -120,7 +123,7 @@ export function ArticleCard({ article, onMarkAsRead }: ArticleCardProps) {
           {/* Mark as read button */}
           {!article.isRead && (
             <Tooltip>
-              <TooltipTrigger>
+              <TooltipTrigger render={<span />}>
                 <Button
                   variant="ghost"
                   size="icon"
@@ -146,7 +149,7 @@ export function ArticleCard({ article, onMarkAsRead }: ArticleCardProps) {
                 記事の要約
               </h3>
               <div
-                className="text-sm leading-relaxed overflow-wrap-anywhere overflow-x-auto min-w-0 w-full"
+                className="text-sm leading-relaxed wrap-anywhere overflow-x-auto min-w-0 w-full"
                 dangerouslySetInnerHTML={{ __html: safeSummary }}
               />
             </div>
@@ -158,7 +161,7 @@ export function ArticleCard({ article, onMarkAsRead }: ArticleCardProps) {
                 はてブの反応
               </h3>
               <div
-                className="text-sm leading-relaxed overflow-wrap-anywhere overflow-x-auto min-w-0 w-full"
+                className="text-sm leading-relaxed wrap-anywhere overflow-x-auto min-w-0 w-full"
                 dangerouslySetInnerHTML={{ __html: safeHatenaSummary }}
               />
             </div>

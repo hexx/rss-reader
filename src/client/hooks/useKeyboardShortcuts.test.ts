@@ -133,6 +133,63 @@ describe('useKeyboardShortcuts', () => {
     expect(onMarkAsRead).toHaveBeenCalledWith('article-1');
   });
 
+  it('marks an article as read even when its URL is not http(s)', () => {
+    // 'm' は URL を開かないため、スキーム検証の対象外（v/b のみ対象）
+    const onMarkAsRead = vi.fn();
+    const weirdArticle: Article = { ...mockArticle, url: 'javascript:alert(1)' };
+
+    renderHook(() => useKeyboardShortcuts([weirdArticle], { onMarkAsRead }));
+
+    act(() => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'm' }));
+    });
+
+    expect(onMarkAsRead).toHaveBeenCalledWith('article-1');
+  });
+
+  it('does not open a non-http(s) article URL when pressing "v"', () => {
+    const onMarkAsRead = vi.fn();
+    const weirdArticle: Article = { ...mockArticle, url: 'javascript:alert(1)' };
+
+    renderHook(() => useKeyboardShortcuts([weirdArticle], { onMarkAsRead }));
+
+    act(() => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'v' }));
+    });
+
+    expect(window.open).not.toHaveBeenCalled();
+    expect(onMarkAsRead).not.toHaveBeenCalled();
+  });
+
+  it('ignores key events with modifier keys (Ctrl/Cmd/Alt/Shift)', () => {
+    const onMarkAsRead = vi.fn();
+
+    renderHook(() => useKeyboardShortcuts([mockArticle], { onMarkAsRead }));
+
+    act(() => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'm', ctrlKey: true }));
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'm', metaKey: true }));
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'm', altKey: true }));
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'M', shiftKey: true }));
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'v', ctrlKey: true }));
+    });
+
+    expect(onMarkAsRead).not.toHaveBeenCalled();
+    expect(window.open).not.toHaveBeenCalled();
+  });
+
+  it('ignores key repeat events (holding a key down)', () => {
+    const onMarkAsRead = vi.fn();
+
+    renderHook(() => useKeyboardShortcuts([mockArticle], { onMarkAsRead }));
+
+    act(() => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'm', repeat: true }));
+    });
+
+    expect(onMarkAsRead).not.toHaveBeenCalled();
+  });
+
   it('does nothing for unrelated keys', () => {
     const onMarkAsRead = vi.fn();
 

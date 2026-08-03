@@ -1,5 +1,3 @@
-"use client"
-
 import * as React from "react"
 import { Avatar as AvatarPrimitive } from "@base-ui/react/avatar"
 
@@ -25,9 +23,10 @@ function Avatar({
   )
 }
 
-function AvatarImage({ className, ...props }: AvatarPrimitive.Image.Props) {
+function AvatarImage({ alt = "", className, ...props }: AvatarPrimitive.Image.Props) {
   return (
     <AvatarPrimitive.Image
+      alt={alt}
       data-slot="avatar-image"
       className={cn(
         "aspect-square size-full rounded-full object-cover",

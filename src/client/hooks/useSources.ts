@@ -36,7 +36,9 @@ export function useSources(): UseSourcesResult {
   });
 
   const reload = useCallback((): Promise<void> => {
-    return query.refetch().then(() => {});
+    // refetch はクエリ失敗時に reject し得るため、呼び出し側が常に安全に
+    // await できるようここで握り潰す（エラー表示は query の status が担う）。
+    return query.refetch().then(() => {}).catch(() => {});
   }, [query]);
 
   const decrementUnreadCount = useCallback(
