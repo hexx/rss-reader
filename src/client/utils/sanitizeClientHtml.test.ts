@@ -99,8 +99,8 @@ describe('sanitizeClientHtml', () => {
     const html = '<div>&lt;img src=x onerror=alert(1)&gt;</div><p>ok</p>';
     const result = sanitizeClientHtml(html);
     // エスケープされたテキストとしては残るが、実タグとしては復活しない
-    expect(result).not.toMatch(/<img\b/);
-    expect(result).not.toMatch(/<\w[^>]*\sonerror\s*=/i);
+    expect(result).not.toMatch(/<img\b/u);
+    expect(result).not.toMatch(/<\w[^>]*\sonerror\s*=/iu);
     expect(result).toContain('&lt;img src=x onerror=alert(1)&gt;');
     expect(result).toContain('<p>ok</p>');
   });

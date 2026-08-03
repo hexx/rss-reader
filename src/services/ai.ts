@@ -73,7 +73,7 @@ function wrapAsData(content: string): string {
   // データ内にデリミタ文字列が含まれるとデータ境界を突破されるため、
   // 先に除去してから包む（大文字小文字・空白・アンダースコア等の亜種も含めて除去し、
   // 攻撃者が <<<DATA_END>>> で境界を偽装するのを防ぐ）。
-  const escaped = content.replace(/<<<[^>]{0,40}>>>/gi, '');
+  const escaped = content.replaceAll(/<<<[^>]{0,40}>>>/giu, '');
   return `${dataDelimiterOpen}\n${escaped}\n${dataDelimiterClose}`;
 }
 
@@ -122,7 +122,7 @@ function buildHatenaSummaryPrompt(comments: HatenaBookmarkComment[]): string {
   const totalCount = comments.length;
   const trimmedComments = comments.slice(0, maxHatenaCommentsInPrompt).map((comment) => ({
     // 改行は箇条書きの構造を壊すため空白に置き換える（表示名・本文とも）。
-    comment: truncateByCodePoints(comment.comment, maxHatenaCommentLength, '…').replaceAll(/\s+/g, ' '),
+    comment: truncateByCodePoints(comment.comment, maxHatenaCommentLength, '…').replaceAll(/\s+/gu, ' '),
     user: truncateByCodePoints(comment.user, maxHatenaUserNameLength, '…').replaceAll(/\s+/g, ' '),
   }));
   const commentBlock =

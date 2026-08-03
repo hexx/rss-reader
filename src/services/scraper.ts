@@ -204,7 +204,7 @@ export async function fetchArticleContent(url: string): Promise<string> {
 const FEED_CONTENT_TYPE_PATTERN = /application\/(?:rss|atom)\+xml/i;
 /** 汎用 XML の Content-Type。ルート要素を確認してからフィード判定する。
  * RSS 1.0 の登録 MIME (application/rdf+xml) もルート要素確認の対象に含める。 */
-const GENERIC_XML_CONTENT_TYPE_PATTERN = /^(?:(?:application|text)\/xml|application\/rdf\+xml)$/i;
+const GENERIC_XML_CONTENT_TYPE_PATTERN = /^(?:(?:application|text)\/xml|application\/rdf\+xml)$/iu;
 
 /** フィードの type として許可する MIME タイプ。 */
 const FEED_TYPE_RSS = 'application/rss+xml';
@@ -250,17 +250,17 @@ const WILDCARD_DNS_SUFFIXES = ['.nip.io', '.sslip.io', '.sspi.io'];
  * 8進として不正（例: '08'）な場合はドメイン名として扱うため null を返す。
  */
 function parseIpv4Part(part: string): number | null {
-  if (/^0[xX][0-9a-fA-F]{1,8}$/.test(part)) {
+  if (/^0[xX][0-9a-fA-F]{1,8}$/u.test(part)) {
     return Number.parseInt(part.slice(2), 16);
   }
-  if (/^0[0-7]{1,11}$/.test(part)) {
+  if (/^0[0-7]{1,11}$/u.test(part)) {
     return Number.parseInt(part, 8);
   }
   // 先頭ゼロだが 8進として不正 → WHATWG では IPv4 としてパースされない
-  if (/^0\d/.test(part)) {
+  if (/^0\d/u.test(part)) {
     return null;
   }
-  if (/^\d{1,10}$/.test(part)) {
+  if (/^\d{1,10}$/u.test(part)) {
     return Number.parseInt(part, 10);
   }
   return null;
@@ -361,7 +361,7 @@ function expandIpv6(value: string): string[] | null {
     groups = rest.split(':');
   }
 
-  if (groups.length !== 8 || groups.some((group) => !/^[0-9a-f]{1,4}$/.test(group))) {
+  if (groups.length !== 8 || groups.some((group) => !/^[0-9a-f]{1,4}$/u.test(group))) {
     return null;
   }
   return groups;
@@ -442,7 +442,7 @@ function isUnsafeIpv6(value: string): boolean {
 
   const first = Number.parseInt(g0 ?? '', 16);
   // fc00::/7 (ULA) と fe80::/10 (リンクローカル)・fec0::/10 (サイトローカル)
-  return (first & 0xfe00) === 0xfc00 || (first & 0xfe00) === 0xfe00;
+  return (first & 0xFE00) === 0xFC00 || (first & 0xFE00) === 0xFE00;
 }
 
 export type DiscoveredFeedType = 'rss' | 'atom';
@@ -629,7 +629,7 @@ export async function discoverRssFeedUrl(
     }
 
     // HTML / テキスト（およびルート要素を確認する必要がある汎用 XML）のみ自動検出を試みる。
-    if (mediaType.length > 0 && !isGenericXml && !/text\/html|application\/xhtml\+xml/.test(mediaType)) {
+    if (mediaType.length > 0 && !isGenericXml && !/text\/html|application\/xhtml\+xml/u.test(mediaType)) {
       return null;
     }
 
@@ -644,7 +644,7 @@ export async function discoverRssFeedUrl(
     // 文書途中の同名要素による誤検知も防げる。RSS 1.0 は <rdf:RDF> ルートを持つ。
     if (isGenericXml) {
       const rootTagMatch =
-        /^\uFEFF?\s*(?:<\?xml[^>]*\?>\s*)?(?:<!DOCTYPE[^>]*>\s*)?<([a-zA-Z][a-zA-Z0-9:_-]*)/.exec(html);
+        /^\uFEFF?\s*(?:<\?xml[^>]*\?>\s*)?(?:<!DOCTYPE[^>]*>\s*)?<([a-zA-Z][a-zA-Z0-9:_-]*)/u.exec(html);
       const rootTagName = rootTagMatch?.[1]?.toLowerCase() ?? '';
       if (rootTagName === 'rss' || rootTagName === 'rdf:rdf') {
         return { alreadyAFeed: true, feedUrl: safeUrl.toString(), type: 'rss' };

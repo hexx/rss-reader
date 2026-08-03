@@ -117,7 +117,7 @@ self.addEventListener('fetch', (event) => {
               // それ以外の同一オリジン GET（将来の動的エンドポイント等）を無期限キャッシュしない。
               const isStaticAsset =
                 url.pathname.startsWith('/assets/') ||
-                /\.(?:js|css|woff2?|png|jpe?g|gif|webp|svg|ico)$/.test(url.pathname);
+                /\.(?:js|css|woff2?|png|jpe?g|gif|webp|svg|ico)$/u.test(url.pathname);
               if (url.origin === self.location.origin && isStaticAsset) {
                 const copy = response.clone();
                 const writePromise = putWithEviction(event.request, copy).catch(() => {});

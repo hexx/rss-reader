@@ -47,4 +47,4 @@ export const REMOVE_CONTENT_TAGS = new Set([
  * スラッシュと同等に扱い、パース前に ASCII タブ・改行を無条件に除去するため、
  * それらも含めてブロックする（例: `/\n/evil.com` は `//evil.com` に正規化される）。
  */
-export const SAFE_URL_PATTERN = /^(?:https?:|mailto:|\/(?![/\\\t\n\r])|#)/i;
+export const SAFE_URL_PATTERN = /^(?:https?:|mailto:|\/(?![/\\\t\n\r])|#)/iu;

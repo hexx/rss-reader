@@ -60,7 +60,7 @@ export function SourceManager({
 
       // type="url" は ftp: 等の http(s) 以外のスキームも受理するため、
       // ここで http(s) に限定する（サーバー側でも検証済み）。
-      if (!/^https?:\/\//i.test(normalizedSiteUrl)) {
+      if (!/^https?:\/\//iu.test(normalizedSiteUrl)) {
         setError('http(s):// で始まるURLを入力してください。');
         return;
       }

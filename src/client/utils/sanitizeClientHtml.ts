@@ -72,7 +72,7 @@ export function sanitizeClientHtml(html: string): string {
     // DangerouslySetInnerHTML に生 HTML を絶対に渡さないための保険。
     // 閉じタグの無い断片（例: `<img onerror=...`）が残らないよう、
     // 除去後に残った '<' はエスケープしてタグとして解釈されないようにする。
-    return html.replaceAll(/<[^>]*>/g, '').replaceAll('<', '&lt;');
+    return html.replaceAll(/<[^>]*>/gu, '').replaceAll('<', '&lt;');
   }
 
   const parser = new DOMParser();

@@ -12,7 +12,7 @@ interface ShortcutHandler {
 const TARGET_KEYS = new Set(['INPUT', 'TEXTAREA']);
 
 /** 記事 URL として開いてよいスキーム（フィード由来の URL は信頼できないため二重防御）。 */
-const SAFE_ARTICLE_URL_PATTERN = /^https?:\/\//i;
+const SAFE_ARTICLE_URL_PATTERN = /^https?:\/\//iu;
 
 /** 'm' / 'v' / 'b' のキーボードショートカット。 */
 export function useKeyboardShortcuts(articles: Article[], handler: ShortcutHandler) {

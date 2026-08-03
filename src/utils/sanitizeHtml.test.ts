@@ -86,8 +86,8 @@ describe('sanitizeSummaryHtml', () => {
     const html = '<div>&lt;img src=x onerror=alert(1)&gt;</div><p>ok</p>';
     const result = sanitizeSummaryHtml(html);
     // エスケープされたテキストとしては残るが、実タグとしては復活しない
-    expect(result).not.toMatch(/<img\b/);
-    expect(result).not.toMatch(/<\w[^>]*\sonerror\s*=/i);
+    expect(result).not.toMatch(/<img\b/u);
+    expect(result).not.toMatch(/<\w[^>]*\sonerror\s*=/iu);
     expect(result).toContain('&lt;img src=x onerror=alert(1)&gt;');
     expect(result).toContain('<p>ok</p>');
   });
@@ -95,8 +95,8 @@ describe('sanitizeSummaryHtml', () => {
   it('keeps entity-encoded SVG as text', () => {
     const html = '<div>hello &lt;svg onload=alert(1)&gt;&lt;/svg&gt;</div>';
     const result = sanitizeSummaryHtml(html);
-    expect(result).not.toMatch(/<svg\b/);
-    expect(result).not.toMatch(/<\w[^>]*\sonload\s*=/i);
+    expect(result).not.toMatch(/<svg\b/u);
+    expect(result).not.toMatch(/<\w[^>]*\sonload\s*=/iu);
     expect(result).toContain('hello &lt;svg onload=alert(1)&gt;&lt;/svg&gt;');
   });
 
