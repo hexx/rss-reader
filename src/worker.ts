@@ -226,6 +226,8 @@ async function fetchArticles(
 
   const filteredQuery = filters.length > 0 ? query.where(and(...filters)) : query;
 
+  // 並び順の式は schema.ts の式インデックス articles_sort_idx と同一に保つこと
+  // （ずれると SQLite がインデックスを使えなくなる）。
   const orderDirection = sortDirection === 'asc'
     ? asc(sql`coalesce(${articles.publishedAt}, ${articles.createdAt})`)
     : desc(sql`coalesce(${articles.publishedAt}, ${articles.createdAt})`);

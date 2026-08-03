@@ -80,6 +80,18 @@ function extractLinkTitle($: CheerioAPI, element: Element): string {
   return title;
 }
 
+/** ログ・エラーメッセージ用に URL から認証情報（userinfo）を除去する。 */
+function redactUrl(url: string): string {
+  try {
+    const parsed = new URL(url);
+    parsed.username = '';
+    parsed.password = '';
+    return parsed.toString();
+  } catch {
+    return url;
+  }
+}
+
 async function fetchHtml(url: string): Promise<string> {
   // SSRF 対策: 初期 URL のスキーム・ホストを検証する。
   // 記事 URL はフィード由来（信頼できない入力）のため、内部アドレス宛の
@@ -92,14 +104,14 @@ async function fetchHtml(url: string): Promise<string> {
     // リダイレクトは safeFetch が手動で追随し、各ホップで安全性を再検証する。
     const response = await safeFetch(url, controller.signal);
     if (!response.ok) {
-      throw new Error(`Failed to fetch ${url}: ${response.status} ${response.statusText}`);
+      throw new Error(`Failed to fetch ${redactUrl(url)}: ${response.status} ${response.statusText}`);
     }
     return await readBoundedText(response, DEFAULT_MAX_HTML_BYTES);
   } catch (error) {
     // タイムアウトによる中断は AbortError のまま呼び出し側に渡さず、
     // 分かりやすいメッセージに置き換える。
-    if (controller.signal.aborted) {
-      throw new Error(`Fetch timed out: ${url}`, { cause: error });
+    if (error instanceof DOMException && error.name === 'AbortError') {
+      throw new Error(`Fetch timed out: ${redactUrl(url)}`, { cause: error });
     }
     throw error;
   } finally {
@@ -190,8 +202,9 @@ export async function fetchArticleContent(url: string): Promise<string> {
 
 /** RSS / Atom フィードの Content-Type として扱う値。 */
 const FEED_CONTENT_TYPE_PATTERN = /application\/(?:rss|atom)\+xml/i;
-/** 汎用 XML の Content-Type。ルート要素を確認してからフィード判定する。 */
-const GENERIC_XML_CONTENT_TYPE_PATTERN = /^(?:application|text)\/xml$/i;
+/** 汎用 XML の Content-Type。ルート要素を確認してからフィード判定する。
+ * RSS 1.0 の登録 MIME (application/rdf+xml) もルート要素確認の対象に含める。 */
+const GENERIC_XML_CONTENT_TYPE_PATTERN = /^(?:(?:application|text)\/xml|application\/rdf\+xml)$/i;
 
 /** フィードの type として許可する MIME タイプ。 */
 const FEED_TYPE_RSS = 'application/rss+xml';
@@ -222,6 +235,14 @@ const BLOCKED_HOSTNAMES = new Set([
   'metadata.google.internal',
   'metadata',
 ]);
+
+/**
+ * ワイルドカード DNS サービス（nip.io / sspi.io / sslip.io 等）のホスト名サフィックス。
+ * これらは任意の IP アドレスに解決されるため、`169.254.169.254.nip.io` のように
+ * メタデータアドレスを包んだホスト名が内部宛先への SSRF になり得る。
+ * 文字列レベルの追加防御としてブロックする（DNS rebinding 全般には対応できない）。
+ */
+const WILDCARD_DNS_SUFFIXES = ['.nip.io', '.sslip.io', '.sspi.io'];
 
 /**
  * IPv4 リテラルの 1 つの構成要素（オクテット or マルチバイト部）を 10進 / 16進 / 8進で解釈する。
@@ -450,6 +471,9 @@ function isUnsafeHostname(hostname: string): boolean {
     lower = lower.slice(0, -1);
   }
   if (BLOCKED_HOSTNAMES.has(lower)) {
+    return true;
+  }
+  if (WILDCARD_DNS_SUFFIXES.some((suffix) => lower.endsWith(suffix))) {
     return true;
   }
   // 角括弧で囲まれた IPv6 表記 (例: [::1]) を除去してから評価。

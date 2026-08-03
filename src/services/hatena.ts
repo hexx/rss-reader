@@ -259,9 +259,13 @@ export async function fetchHatenaBookmarks(articleUrl: string): Promise<HatenaBo
     try {
       bodyText = await readBoundedText(response, maxHatenaResponseBytes);
     } catch (error) {
-      // サイズ超過も bot ブロックの兆候としてバックオフを昇格させる
-      applyRetryAfter(null);
-      throw new Error(`Hatena API response for ${articleUrl} exceeded the size limit.`, { cause: error });
+      // サイズ超過のみ bot ブロックの兆候としてバックオフを昇格させる。
+      // それ以外の読み取りエラーは外側の catch で abort 判定等を行う。
+      if (error instanceof Error && error.message.includes('exceeded the size limit')) {
+        applyRetryAfter(null);
+        throw new Error(`Hatena API response for ${articleUrl} exceeded the size limit.`, { cause: error });
+      }
+      throw error;
     }
     try {
       payload = JSON.parse(bodyText) as HatenaBookmarkApiResponse | null | undefined;
@@ -270,10 +274,12 @@ export async function fetchHatenaBookmarks(articleUrl: string): Promise<HatenaBo
       throw new Error(`Invalid JSON response from Hatena API for ${articleUrl}.`, { cause: error });
     }
   } catch (error) {
-    // タイムアウトによる中断は AbortError のまま呼び出し側に渡さず、
-    // 分かりやすいメッセージに置き換える（ここで一括して 1 回だけラップする）。
-    // タイムアウトも bot ブロック等の異常の兆候なので、バックオフを昇格させる。
-    if (controller.signal.aborted) {
+    // タイムアウトによる中断（AbortError）はそのまま呼び出し側に渡さず、
+    // 分かりやすいメッセージに置き換える。タイムアウトも bot ブロック等の
+    // 異常の兆候なので、バックオフを昇格させる。
+    // 判定は controller.signal.aborted ではなくエラー型で行う
+    // （タイマー発火と別エラーの競合をタイムアウトと誤分類しないため）。
+    if (error instanceof DOMException && error.name === 'AbortError') {
       applyRetryAfter(null);
       throw new Error(`${hatenaTimeoutMessage} (${articleUrl})`, { cause: error });
     }

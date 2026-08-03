@@ -111,7 +111,7 @@ self.addEventListener('fetch', (event) => {
           // （fetch イベントの dispatch は respondWith の Promise が解決するまで継続するため、
           //  この時点での waitUntil 呼び出しは有効）。
           try {
-            if (response.ok && !response.redirected && event.request.method === 'GET') {
+            if (response.status === 200 && !response.redirected && event.request.method === 'GET') {
               const url = new URL(event.request.url);
               // ランタイムキャッシュはビルド成果物（/assets/* と静的ファイル拡張子）に限定する。
               // それ以外の同一オリジン GET（将来の動的エンドポイント等）を無期限キャッシュしない。

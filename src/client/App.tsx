@@ -118,7 +118,8 @@ export function App() {
   // ステータス自動クリア用タイマーの ID（アンマウント時のクリーンアップ用）。
   const readStateTimerRef = useRef<number | null>(null);
   // アンマウント後の非同期継続（PATCH 完了後の status 更新等）を防ぐ。
-  const mountedRef = useRef(true);
+  // 初期値 false（マウント effect 実行後に true になる。StrictMode の二重マウントでも安全）。
+  const mountedRef = useRef(false);
   // ロールバック時に「現在の」フィルタ値を使うための最新値 ref（クロージャの陳腐化対策）。
   const filterParamsRef = useLatestRef({ selectedSourceUrl, showUnreadOnly, sortOrder });
 

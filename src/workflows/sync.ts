@@ -268,7 +268,9 @@ export async function syncSite(
           url: article.url,
         }).run();
 
-        // 要約なし（はてブ取得失敗等）で保存された新着記事は、バックフィル対象に加える
+        // 要約なし（はてブ取得失敗等）で保存された新着記事は、バックフィル対象に加える。
+        // 通常は次のフル同期の事前ロードで拾われるが、同一実行内に同じ URL の項目が
+        // 重複して現れた場合に備えて、実行中に挿入した記事もセットへ追加しておく。
         if (hatenaSummary === null) {
           nullSummaryArticleIds.add(articleId);
         }

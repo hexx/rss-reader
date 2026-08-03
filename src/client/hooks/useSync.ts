@@ -25,7 +25,8 @@ export function useSync({ onAfterSync }: { onAfterSync: () => void }): UseSyncRe
   const [status, setStatus] = useState<Status | null>(null);
   // 二重起動ガード（ボタンの disabled 反映前の連打等で /api/sync を並行実行しない）
   const inFlightRef = useRef(false);
-  const mountedRef = useRef(true);
+  // マウント後かどうか（初期値 false: StrictMode の二重マウントでも安全）
+  const mountedRef = useRef(false);
   const onAfterSyncRef = useLatestRef(onAfterSync);
 
   useEffect(() => {
@@ -40,8 +41,8 @@ export function useSync({ onAfterSync }: { onAfterSync: () => void }): UseSyncRe
       return;
     }
     inFlightRef.current = true;
-    setIsSyncing(true);
     if (mountedRef.current) {
+      setIsSyncing(true);
       setStatus({ kind: 'loading', message: '同期を開始しました。' });
     }
 

@@ -73,7 +73,7 @@ function wrapAsData(content: string): string {
   // データ内にデリミタ文字列が含まれるとデータ境界を突破されるため、
   // 先に除去してから包む（大文字小文字・空白・アンダースコア等の亜種も含めて除去し、
   // 攻撃者が <<<DATA_END>>> で境界を偽装するのを防ぐ）。
-  const escaped = content.replace(/<<<\s*data[\s_-]*(?:start|end)[\s_-]*>>>/gi, '');
+  const escaped = content.replace(/<<<[^>]{0,40}>>>/gi, '');
   return `${dataDelimiterOpen}\n${escaped}\n${dataDelimiterClose}`;
 }
 
