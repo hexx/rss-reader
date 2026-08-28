@@ -1,9 +1,11 @@
 import type { D1Database } from '@cloudflare/workers-types';
 
 export interface RuntimeEnv {
+  AI_API?: string;
   AI_API_KEY?: string;
   AI_BASE_URL?: string;
   AI_MODEL?: string;
+  AI_REASONING_EFFORT?: string;
 }
 
 export interface Bindings extends RuntimeEnv {

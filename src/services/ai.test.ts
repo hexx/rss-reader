@@ -10,6 +10,13 @@ const completionsUrl = `${baseUrl}/chat/completions`;
 type ChatRequestBody = {
   model?: string;
   messages?: { role: string; content: string }[];
+  reasoning_effort?: string;
+};
+
+type ResponsesRequestBody = {
+  model?: string;
+  input?: unknown;
+  reasoning?: { effort?: string; summary?: string };
 };
 
 /** OpenAI 互換のストリーミング（SSE）応答を組み立てる。 */
@@ -44,11 +51,54 @@ function handleCompletions(onRequest: (body: ChatRequestBody, headers: Headers) 
   );
 }
 
+function sseResponsesResponse(content: string): string {
+  const message = {
+    content: [{ annotations: [], text: content, type: 'output_text' }],
+    id: 'msg_test',
+    role: 'assistant',
+    status: 'completed',
+    type: 'message',
+  };
+  const response = {
+    id: 'resp_test',
+    output: [message],
+    status: 'completed',
+    usage: {
+      input_tokens: 10,
+      input_tokens_details: { cached_tokens: 0 },
+      output_tokens: 5,
+      output_tokens_details: { reasoning_tokens: 0 },
+      total_tokens: 15,
+    },
+  };
+  const events = [
+    {
+      response: { id: 'resp_test', object: 'response', output: [], status: 'in_progress' },
+      type: 'response.created',
+    },
+    { output_index: 0, item: { ...message, content: [] }, type: 'response.output_item.added' },
+    {
+      content_index: 0,
+      output_index: 0,
+      part: { annotations: [], text: '', type: 'output_text' },
+      type: 'response.content_part.added',
+    },
+    { content_index: 0, delta: content, output_index: 0, type: 'response.output_text.delta' },
+    { item: message, output_index: 0, type: 'response.output_item.done' },
+    { response, type: 'response.completed' },
+  ];
+  return `${events
+    .map((event) => `event: ${event.type}\ndata: ${JSON.stringify(event)}`)
+    .join('\n\n')}\n\ndata: [DONE]\n\n`;
+}
+
 describe('generateArticleSummary', () => {
   beforeEach(() => {
     vi.stubEnv('AI_BASE_URL', baseUrl);
+    vi.stubEnv('AI_API', 'openai-completions');
     vi.stubEnv('AI_API_KEY', 'test-api-key');
     vi.stubEnv('AI_MODEL', 'test-model');
+    vi.stubEnv('AI_REASONING_EFFORT', 'medium');
   });
 
   afterEach(() => {
@@ -68,10 +118,13 @@ describe('generateArticleSummary', () => {
     expect(captured).toBeDefined();
     expect(captured?.model).toBe('test-model');
 
-    const system = captured?.messages?.find((message) => message.role === 'system');
-    expect(system?.content).toContain('日本語の要約アシスタント');
-    expect(system?.content).toContain('記事本文が空で提供される場合もあります');
-    expect(system?.content).toContain('HTMLタグを用いて、見やすく構造化されたHTMLスニペット');
+    const instruction = captured?.messages?.find(
+      (message) => message.role === 'system' || message.role === 'developer',
+    );
+    expect(instruction?.content).toContain('日本語の要約アシスタント');
+    expect(instruction?.content).toContain('記事本文が空で提供される場合もあります');
+    expect(instruction?.content).toContain('HTMLタグを用いて、見やすく構造化されたHTMLスニペット');
+    expect(captured?.reasoning_effort).toBe('medium');
 
     const user = captured?.messages?.find((message) => message.role === 'user');
     expect(user?.content).toContain('記事タイトル');
@@ -79,6 +132,107 @@ describe('generateArticleSummary', () => {
 
     // AI_API_KEY が Bearer 認証として送られる
     expect(capturedHeaders?.get('authorization')).toBe('Bearer test-api-key');
+  });
+
+  it('uses the configured Responses API and reasoning effort', async () => {
+    const responsesUrl = `${baseUrl}/responses`;
+    let captured: ResponsesRequestBody | undefined;
+    let capturedHeaders: Headers | undefined;
+    server.use(
+      http.post(responsesUrl, async ({ request }) => {
+        captured = (await request.json()) as ResponsesRequestBody;
+        capturedHeaders = request.headers;
+        return new HttpResponse(sseResponsesResponse('Responses要約'), {
+          headers: { 'content-type': 'text/event-stream' },
+        });
+      }),
+    );
+
+    await expect(
+      generateArticleSummary('記事タイトル', '本文', {
+        AI_API: 'openai-responses',
+        AI_API_KEY: 'test-api-key',
+        AI_BASE_URL: baseUrl,
+        AI_MODEL: 'gpt-5.6-luna',
+        AI_REASONING_EFFORT: 'high',
+      }),
+    ).resolves.toBe('Responses要約');
+
+    expect(captured?.model).toBe('gpt-5.6-luna');
+    expect(captured?.reasoning?.effort).toBe('high');
+    expect(capturedHeaders?.get('authorization')).toBe('Bearer test-api-key');
+  });
+
+  it('uses GPT-5.6 Luna, Completions, and medium reasoning by default when optional settings are omitted', async () => {
+    let captured: ChatRequestBody | undefined;
+    handleCompletions((body) => {
+      captured = body;
+    });
+
+    await expect(
+      generateArticleSummary('記事タイトル', '本文', {
+        AI_API_KEY: 'test-api-key',
+        AI_BASE_URL: baseUrl,
+      }),
+    ).resolves.toBe('要約文');
+
+    expect(captured?.model).toBe('gpt-5.6-luna');
+    expect(captured?.reasoning_effort).toBe('medium');
+  });
+
+  it('maps off reasoning to none for the Responses API', async () => {
+    const responsesUrl = `${baseUrl}/responses`;
+    let captured: ResponsesRequestBody | undefined;
+    server.use(
+      http.post(responsesUrl, async ({ request }) => {
+        captured = (await request.json()) as ResponsesRequestBody;
+        return new HttpResponse(sseResponsesResponse('Responses要約'), {
+          headers: { 'content-type': 'text/event-stream' },
+        });
+      }),
+    );
+
+    await expect(
+      generateArticleSummary('記事タイトル', '本文', {
+        AI_API: 'openai-responses',
+        AI_API_KEY: 'test-api-key',
+        AI_BASE_URL: baseUrl,
+        AI_MODEL: 'gpt-5.6-luna',
+        AI_REASONING_EFFORT: 'off',
+      }),
+    ).resolves.toBe('Responses要約');
+
+    expect(captured?.reasoning?.effort).toBe('none');
+  });
+
+  it('rejects unsupported API and reasoning-effort values before making a request', async () => {
+    let called = false;
+    server.use(
+      http.post(completionsUrl, async () => {
+        called = true;
+        return new HttpResponse(sseCompletionResponse('要約文'), {
+          headers: { 'content-type': 'text/event-stream' },
+        });
+      }),
+    );
+
+    await expect(
+      generateArticleSummary('記事タイトル', '本文', {
+        AI_API: 'responses',
+        AI_API_KEY: 'test-api-key',
+        AI_BASE_URL: baseUrl,
+        AI_REASONING_EFFORT: 'medium',
+      } as never),
+    ).rejects.toThrow('Invalid environment variable AI_API');
+    await expect(
+      generateArticleSummary('記事タイトル', '本文', {
+        AI_API: 'openai-completions',
+        AI_API_KEY: 'test-api-key',
+        AI_BASE_URL: baseUrl,
+        AI_REASONING_EFFORT: 'minimal',
+      } as never),
+    ).rejects.toThrow('Invalid environment variable AI_REASONING_EFFORT');
+    expect(called).toBe(false);
   });
 
   it('truncates overly long article content before generating a summary', async () => {
@@ -155,9 +309,11 @@ describe('generateArticleSummary', () => {
       ]),
     ).resolves.toBe('要約文');
 
-    const system = captured?.messages?.find((message) => message.role === 'system');
-    expect(system?.content).toContain('はてなブックマークのコメントの雰囲気');
-    expect(system?.content).toContain('HTMLタグを用いて、見やすく構造化されたHTMLスニペット');
+    const instruction = captured?.messages?.find(
+      (message) => message.role === 'system' || message.role === 'developer',
+    );
+    expect(instruction?.content).toContain('はてなブックマークのコメントの雰囲気');
+    expect(instruction?.content).toContain('HTMLタグを用いて、見やすく構造化されたHTMLスニペット');
 
     const user = captured?.messages?.find((message) => message.role === 'user');
     expect(user?.content).toContain('参考になる');

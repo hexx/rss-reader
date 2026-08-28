@@ -4,7 +4,13 @@ import type { RuntimeEnv } from '../env.js';
 import { articles, hatenaBookmarks, subscriptions } from '../db/schema.js';
 import { createTestDatabase } from '../test-utils/sqljs-db.js';
 
-const testEnv = {} as RuntimeEnv;
+const testEnv: RuntimeEnv = {
+  AI_API: 'openai-responses',
+  AI_API_KEY: 'test-api-key',
+  AI_BASE_URL: 'https://api.openai.com/v1',
+  AI_MODEL: 'gpt-5.6-luna',
+  AI_REASONING_EFFORT: 'medium',
+};
 
 vi.mock('../services/scraper.js', () => ({
   fetchArticleContent: vi.fn(),
@@ -262,9 +268,8 @@ describe('syncSite', () => {
     );
   });
 
-  it('fails fast in debug mode when an article sync fails', async () => {
+  it('fails fast when an article summary generation fails', async () => {
     const { syncSite } = await import('./sync.js');
-    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
     fetchRssOrFallbackMock.mockResolvedValue([article]);
     fetchArticleContentMock.mockResolvedValue('本文の内容です。');
@@ -275,31 +280,21 @@ describe('syncSite', () => {
     expect(fetchHatenaBookmarksMock).toHaveBeenCalledWith(article.url);
     expect(generateHatenaSummaryMock).not.toHaveBeenCalled();
     expect(loggerMock.warn).not.toHaveBeenCalled();
-    expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining('summary failed'));
-
-    consoleErrorSpy.mockRestore();
   });
 
-  it('continues with subsequent articles when an article fails in non-debug mode', async () => {
+  it('stops subsequent articles when an article summary fails in non-debug mode', async () => {
     const { syncSite } = await import('./sync.js');
 
     fetchRssOrFallbackMock.mockResolvedValue([article, secondArticle]);
     fetchArticleContentMock.mockResolvedValue('本文');
     fetchHatenaBookmarksMock.mockResolvedValue(bookmarks);
-    generateArticleSummaryMock
-      .mockRejectedValueOnce(new Error('first failed'))
-      .mockResolvedValueOnce('2件目の要約');
-    generateHatenaSummaryMock.mockResolvedValue('はてブ要約');
+    generateArticleSummaryMock.mockRejectedValueOnce(new Error('first failed'));
 
-    await expect(syncSite(siteUrl, false, testEnv)).resolves.toBe(1);
+    await expect(syncSite(siteUrl, false, testEnv)).rejects.toThrow('first failed');
 
     const savedArticles = await testDb.select().from(articles);
-    expect(savedArticles).toHaveLength(1);
-    expect(savedArticles[0]?.title).toBe(secondArticle.title);
-    expect(loggerMock.warn).toHaveBeenCalledWith(
-      '記事の同期に失敗しました。',
-      expect.objectContaining({ error: 'first failed' }),
-    );
+    expect(savedArticles).toHaveLength(0);
+    expect(generateArticleSummaryMock).toHaveBeenCalledTimes(1);
   });
 
   it('does not re-insert articles that already exist', async () => {
@@ -490,5 +485,26 @@ describe('syncAllSubscriptions', () => {
     const savedArticles = await testDb.select().from(articles);
     expect(savedArticles).toHaveLength(2);
     expect(savedArticles.map((row) => row.title).toSorted()).toEqual([article.title, secondArticle.title].toSorted());
+  });
+
+  it('stops all subscribed sites when AI generation fails', async () => {
+    await testDb.insert(subscriptions).values([
+      { id: 'subscription-1', siteUrl },
+      { id: 'subscription-2', siteUrl: nonHatenaSiteUrl },
+    ]);
+
+    fetchRssOrFallbackMock.mockImplementation(async (targetUrl) =>
+      targetUrl === siteUrl ? [article] : [secondArticle],
+    );
+    fetchArticleContentMock.mockResolvedValue('本文');
+    fetchHatenaBookmarksMock.mockResolvedValue([]);
+    generateArticleSummaryMock.mockRejectedValue(new Error('AI unavailable'));
+
+    const { syncAllSubscriptions } = await import('./sync.js');
+    await expect(syncAllSubscriptions(false, testEnv)).rejects.toThrow('AI unavailable');
+
+    expect(fetchRssOrFallbackMock).toHaveBeenCalledTimes(1);
+    expect(generateArticleSummaryMock).toHaveBeenCalledTimes(1);
+    await expect(testDb.select().from(articles)).resolves.toHaveLength(0);
   });
 });

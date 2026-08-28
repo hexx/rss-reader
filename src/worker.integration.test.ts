@@ -17,6 +17,7 @@ vi.mock('./services/hatena.js', () => ({
 vi.mock('./services/ai.js', () => ({
   generateArticleSummary: vi.fn(),
   generateHatenaSummary: vi.fn(),
+  validateAiConfiguration: vi.fn(),
 }));
 
 vi.mock('./utils/logger.js', () => ({
@@ -43,6 +44,14 @@ const generateArticleSummaryMock = vi.mocked(generateArticleSummary);
 const generateHatenaSummaryMock = vi.mocked(generateHatenaSummary);
 
 let testDb: Awaited<ReturnType<typeof createTestDatabase>>['db'];
+
+const syncEnv = {
+  AI_API: 'openai-responses',
+  AI_API_KEY: 'test-api-key',
+  AI_BASE_URL: 'https://api.openai.com/v1',
+  AI_MODEL: 'gpt-5.6-luna',
+  AI_REASONING_EFFORT: 'medium',
+};
 
 describe('worker integration: sync -> articles flow', () => {
   let app: typeof import('./worker.js').app;
@@ -105,7 +114,7 @@ describe('worker integration: sync -> articles flow', () => {
 
     const syncResponse = await app.fetch(
       new Request('http://localhost/api/sync', { method: 'POST' }),
-      {} as never,
+      syncEnv as never,
       { waitUntil: vi.fn() } as never,
     );
     expect(syncResponse.status).toBe(202);

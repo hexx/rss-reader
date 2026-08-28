@@ -42,24 +42,35 @@ cp .env.example .env
 
 要約生成には **OpenAI 互換（OpenAI-compatible）な任意のエンドポイント**を使います。
 裏側では [`@earendil-works/pi-ai`](https://github.com/earendil-works/pi/tree/main/packages/ai) の
-`openai-completions` API を利用しており、特定のベンダーに依存しません。次の 3 つの環境変数で指定します。
+`openai-completions` / `openai-responses` APIを設定で切り替えます。特定のベンダーには依存しません。
 
 | 変数 | 説明 | 例 |
 | --- | --- | --- |
 | `AI_BASE_URL` | OpenAI 互換エンドポイントのベース URL | `https://api.openai.com/v1` |
 | `AI_API_KEY` | API キー（秘匿値）。キー不要なローカルサーバでもダミー値が必要 | `sk-...` |
-| `AI_MODEL` | 利用するモデル名（未設定時は `gpt-4o-mini`） | `gpt-4o-mini` |
+| `AI_MODEL` | 利用するモデル名（未設定時は `gpt-5.6-luna`） | `gpt-5.6-luna` |
+| `AI_API` | API方式（未設定時は `openai-completions`） | `openai-responses` |
+| `AI_REASONING_EFFORT` | 推論レベル（未設定時は `medium`） | `medium` |
 
 ### ローカル開発
 
 `.env`（または `.dev.vars`）に値を書きます。デフォルトの `.env.example` は
-ローカルの [Ollama](https://ollama.com/)（`http://localhost:11434/v1`）向けです。
+OpenAI 本家の GPT-5.6 Luna（`https://api.openai.com/v1`）向けです。
 
 ```ini
-AI_BASE_URL=http://localhost:11434/v1
+AI_BASE_URL=https://api.openai.com/v1
 AI_API_KEY=replace-me
-AI_MODEL=llama3.2
+AI_MODEL=gpt-5.6-luna
+AI_API=openai-responses
+AI_REASONING_EFFORT=medium
 ```
+
+`AI_API` は `openai-completions` または `openai-responses` を指定できます。
+`AI_REASONING_EFFORT` は `off` / `low` / `medium` / `high` / `xhigh` / `max` を指定できます。
+GPT-5.6 Lunaでは `minimal` はサポートされません。
+
+ローカルの [Ollama](https://ollama.com/) を使う場合は、`.env.example` 内のコメント行
+（`http://localhost:11434/v1` + `llama3.2`）に従って書き換えてください。
 
 ### 本番（Cloudflare Workers）
 
@@ -71,12 +82,14 @@ AI_MODEL=llama3.2
   npx wrangler secret put AI_API_KEY
   ```
 
-- **公開値（ベース URL・モデル名）**: `wrangler.toml` の `[vars]` に記載します。
+- **公開値（ベース URL・モデル名・API方式・推論レベル）**: `wrangler.toml` の `[vars]` に記載します。
 
   ```toml
   [vars]
   AI_BASE_URL = "https://api.openai.com/v1"
-  AI_MODEL = "gpt-4o-mini"
+  AI_MODEL = "gpt-5.6-luna"
+  AI_API = "openai-responses"
+  AI_REASONING_EFFORT = "medium"
   ```
 
 設定後 `npx wrangler deploy` で反映されます。
@@ -89,9 +102,10 @@ AI_MODEL=llama3.2
 - **各社の OpenAI 互換ゲートウェイ**: OpenRouter / Azure OpenAI / LiteLLM など。
   Anthropic 等を OpenAI 互換でプロキシするゲートウェイを経由すれば、
   Anthropic モデルも `AI_BASE_URL` にそのまま指定できます。
-- **OpenCode Go 経由の DeepSeek など**: `https://opencode.ai/zen/go/v1` に
-  `AI_MODEL=deepseek-v4-flash` のような指定。`opencode.ai` 経路は pi-ai が自動で
-  互換設定（`store` フィールドを送らない等）を判別します。
+- **DeepSeek 公式 API**: `https://api.deepseek.com` に
+  `AI_MODEL=deepseek-v4-flash-vision-exp` のような指定。API キーは
+  [platform.deepseek.com](https://platform.deepseek.com) で発行します。`api.deepseek.com`
+  経路は pi-ai が自動で互換設定（`store` フィールドを送らない等）を判別します。
 - **ローカルの Ollama**: `http://localhost:11434/v1`（`AI_API_KEY` は必須ですが、
   キー不要なサーバでは `replace-me` などのダミー値で構いません）
 - **ローカルの LM Studio / vLLM 等**: 同様に OpenAI 互換ポートを指定
