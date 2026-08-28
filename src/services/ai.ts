@@ -1,12 +1,39 @@
 import { contentText, createModels, createProvider } from '@earendil-works/pi-ai';
 import type { Context, Model } from '@earendil-works/pi-ai';
 import { openAICompletionsApi } from '@earendil-works/pi-ai/api/openai-completions.lazy';
+import { openAIResponsesApi } from '@earendil-works/pi-ai/api/openai-responses.lazy';
 
 import type { RuntimeEnv } from '../env.js';
 import { sanitizeSummaryHtml } from '../utils/sanitizeHtml.js';
 import type { HatenaBookmarkComment } from './hatena.js';
 
-const defaultModelId = 'gpt-4o-mini';
+export type AiApi = 'openai-completions' | 'openai-responses';
+export type AiReasoningEffort = 'off' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+
+type AiEnv = Pick<RuntimeEnv, 'AI_API' | 'AI_API_KEY' | 'AI_BASE_URL' | 'AI_MODEL' | 'AI_REASONING_EFFORT'>;
+type AiModel = Model<'openai-completions'> | Model<'openai-responses'>;
+
+const defaultApi: AiApi = 'openai-completions';
+const defaultModelId = 'gpt-5.6-luna';
+const defaultReasoningEffort: AiReasoningEffort = 'medium';
+const supportedApis: readonly AiApi[] = ['openai-completions', 'openai-responses'];
+const supportedReasoningEfforts: readonly AiReasoningEffort[] = [
+  'off',
+  'low',
+  'medium',
+  'high',
+  'xhigh',
+  'max',
+];
+const reasoningLevelMap = {
+  off: 'none',
+  low: 'low',
+  medium: 'medium',
+  high: 'high',
+  xhigh: 'xhigh',
+  max: 'max',
+} as const;
+
 const articleContentLimit = 20_000;
 const articleContentTruncationSuffix = '\n...（以下省略）';
 /** はてブ要約プロンプトに含めるコメント数の上限（プロンプト肥大によるコスト・失敗を防ぐ）。 */
@@ -17,38 +44,107 @@ const maxHatenaCommentLength = 300;
 const maxHatenaUserNameLength = 100;
 /** 要約プロンプトに含める記事タイトルの文字数上限（コードポイント）。 */
 const maxArticleTitleLength = 500;
-/** AI リクエストのタイムアウト（ミリ秒）。エンドポイントが詰まっても同期全体を止めない。 */
+/** AI リクエストのタイムアウト（ミリ秒）。タイムアウトはAIエラーとして同期全体へ伝播する。 */
 const aiRequestTimeoutMs = 60_000;
 
 // 任意の OpenAI 互換エンドポイントを pi-ai の Models 抽象に乗せるためのプロバイダ ID。
 const aiProviderId = 'rss-reader';
 
-type AiEnv = Pick<RuntimeEnv, 'AI_API_KEY' | 'AI_BASE_URL' | 'AI_MODEL'>;
+export interface AiConfig {
+  api: AiApi;
+  apiKey: string;
+  baseUrl: string;
+  modelId: string;
+  reasoningEffort: AiReasoningEffort;
+}
 
-// 任意の OpenAI 互換エンドポイントに使う固定の既定メタデータ。
-// cost は未知なので 0、reasoning は使わないので false（thinking を有効化せず、
-// system プロンプトは system ロールで送られる）。compat は pi-ai が baseUrl から
-// 自動検出する（例: opencode.ai 経由なら supportsStore:false 等が正しく付く）。
-const fallbackModel: Model<'openai-completions'> = {
-  id: defaultModelId,
-  name: defaultModelId,
-  api: 'openai-completions',
-  provider: aiProviderId,
-  baseUrl: '',
-  reasoning: false,
-  input: ['text'],
-  cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-  contextWindow: 128_000,
-  maxTokens: 4096,
-};
+/** AI設定の不備・AIリクエストの失敗を同期側で識別するための基底エラー。 */
+export class AiError extends Error {
+  override readonly cause?: unknown;
 
-function requireEnv(env: AiEnv, name: keyof AiEnv): string {
-  const value = env[name];
-  if (value === undefined || value.trim() === '') {
-    throw new Error(`Missing required environment variable: ${name}`);
+  constructor(message: string, cause?: unknown) {
+    super(message);
+    this.name = new.target.name;
+    this.cause = cause;
+  }
+}
+
+export class AiConfigurationError extends AiError {}
+export class AiGenerationError extends AiError {}
+
+export function isAiError(error: unknown): error is AiError {
+  return error instanceof AiError;
+}
+
+export function toAiError(error: unknown): AiError {
+  if (error instanceof AiError) {
+    return error;
   }
 
-  return value;
+  const message = error instanceof Error ? error.message : String(error);
+  return new AiGenerationError(message, error);
+}
+
+function requireEnv(env: AiEnv, name: 'AI_API_KEY' | 'AI_BASE_URL'): string {
+  const value = env[name];
+  if (value === undefined || value.trim() === '') {
+    throw new AiConfigurationError(`Missing required environment variable: ${name}`);
+  }
+
+  return value.trim();
+}
+
+function parseAiConfig(env: AiEnv): AiConfig {
+  const baseUrl = requireEnv(env, 'AI_BASE_URL');
+  const apiKey = requireEnv(env, 'AI_API_KEY');
+  const modelId = env.AI_MODEL?.trim() || defaultModelId;
+  const apiValue = env.AI_API?.trim() || defaultApi;
+  const reasoningEffortValue = env.AI_REASONING_EFFORT?.trim() || defaultReasoningEffort;
+
+  if (!supportedApis.includes(apiValue as AiApi)) {
+    throw new AiConfigurationError(
+      `Invalid environment variable AI_API: ${apiValue}. Expected one of: ${supportedApis.join(', ')}`,
+    );
+  }
+
+  if (!supportedReasoningEfforts.includes(reasoningEffortValue as AiReasoningEffort)) {
+    throw new AiConfigurationError(
+      `Invalid environment variable AI_REASONING_EFFORT: ${reasoningEffortValue}. Expected one of: ${supportedReasoningEfforts.join(', ')}`,
+    );
+  }
+
+  return {
+    api: apiValue as AiApi,
+    apiKey,
+    baseUrl,
+    modelId,
+    reasoningEffort: reasoningEffortValue as AiReasoningEffort,
+  };
+}
+
+/** 同期開始前にAI設定だけを検証する。外部ネットワークアクセスは行わない。 */
+export function validateAiConfiguration(env: RuntimeEnv): void {
+  parseAiConfig(env);
+}
+
+function buildModel(baseUrl: string, modelId: string, api: AiApi): AiModel {
+  const shared = {
+    id: modelId,
+    name: modelId,
+    provider: aiProviderId,
+    baseUrl,
+    // 推論レベルを両API方式へ渡すため、モデルは reasoning 対応として扱う。
+    reasoning: true,
+    input: ['text'] as ('text')[],
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+    contextWindow: 128_000,
+    maxTokens: 4096,
+    thinkingLevelMap: reasoningLevelMap,
+  };
+
+  return api === 'openai-responses'
+    ? { ...shared, api: 'openai-responses' }
+    : { ...shared, api: 'openai-completions' };
 }
 
 /**
@@ -145,69 +241,71 @@ function buildHatenaSummaryPrompt(comments: HatenaBookmarkComment[]): string {
 }
 
 /**
- * 固定の既定メタデータから、指定のモデル ID と接続先を持つモデルを組み立てます。
- * compat は設定せず、pi-ai の baseUrl 自動検出に任せます。
- */
-function buildModel(baseUrl: string, modelId: string): Model<'openai-completions'> {
-  return { ...fallbackModel, id: modelId, name: modelId, baseUrl };
-}
-
-/**
  * 環境バインディングから pi-ai の Models コレクションとモデルを組み立てます。
  * 認証は AI_API_KEY をそのまま使い（process.env に依存しない）、Cloudflare Workers の
- * バインディング経由でも動作します。
+ * バインディング経由でも動作します。API実装は AI_API に応じて切り替えます。
  */
 export function createAi(env: AiEnv) {
-  const baseUrl = requireEnv(env, 'AI_BASE_URL');
-  const apiKey = requireEnv(env, 'AI_API_KEY');
-  const modelId = env.AI_MODEL?.trim() || defaultModelId;
+  const config = parseAiConfig(env);
+  const model = buildModel(config.baseUrl, config.modelId, config.api);
 
-  const model = buildModel(baseUrl, modelId);
-
-  const provider = createProvider<'openai-completions'>({
+  const provider = createProvider<AiApi>({
     id: aiProviderId,
     name: 'RSS Reader AI',
-    baseUrl,
+    baseUrl: config.baseUrl,
     auth: {
       apiKey: {
         name: 'AI API key',
-        resolve: () => Promise.resolve({ auth: { apiKey }, source: 'AI_API_KEY' }),
+        resolve: () => Promise.resolve({ auth: { apiKey: config.apiKey }, source: 'AI_API_KEY' }),
       },
     },
     models: [model],
-    api: openAICompletionsApi(),
+    api: {
+      'openai-completions': openAICompletionsApi(),
+      'openai-responses': openAIResponsesApi(),
+    },
   });
 
   const models = createModels();
   models.setProvider(provider);
 
-  return { models, model };
+  return { config, model, models };
 }
 
 /**
  * system プロンプトと user プロンプトを OpenAI 互換エンドポイントへ非ストリーミングで送信し、
- * 生成テキストを返します。API エラー時は ai-sdk 時代と同じく例外を投げます。
+ * 生成テキストを返します。APIエラーはAIエラーとして呼び出し側へ伝播します。
  */
 async function completeText(env: AiEnv, systemPrompt: string, prompt: string): Promise<string> {
-  const { models, model } = createAi(env);
+  const { config, model, models } = createAi(env);
 
   const context: Context = {
     systemPrompt,
     messages: [{ role: 'user', content: prompt, timestamp: Date.now() }],
   };
+  // off のときはオプションを省略する。モデルの thinkingLevelMap.off が
+  // pi-ai の両APIアダプターに `none` を明示させるため、既定の推論には戻らない。
+  const reasoningOptions = config.reasoningEffort === 'off'
+    ? {}
+    : { reasoningEffort: config.reasoningEffort };
 
-  // エンドポイントが応答しなくなっても同期が止まらないよう、タイムアウトを設定する。
-  const result = await models.complete(model, context, {
-    timeoutMs: aiRequestTimeoutMs,
-  });
+  try {
+    // エンドポイントが応答しなくなっても同期が止まらないよう、タイムアウトを設定する。
+    const result = await models.complete(model, context, {
+      ...reasoningOptions,
+      timeoutMs: aiRequestTimeoutMs,
+    });
 
-  // pi-ai は API エラー時も throw せず stopReason: 'error' のメッセージを返すため、
-  // 呼び出し側（sync ワークフローの try/catch）が期待する reject 挙動をここで再現する。
-  if (result.stopReason === 'error' || result.stopReason === 'aborted') {
-    throw new Error(result.errorMessage ?? `AI request failed: ${result.stopReason}`);
+    // pi-ai は API エラー時も throw せず stopReason: 'error' のメッセージを返すため、
+    // 呼び出し側（sync ワークフロー）が扱えるAIエラーへ変換する。
+    if (result.stopReason === 'error' || result.stopReason === 'aborted') {
+      throw new Error(result.errorMessage ?? `AI request failed: ${result.stopReason}`);
+    }
+
+    return contentText(result.content).trim();
+  } catch (error) {
+    throw toAiError(error);
   }
-
-  return contentText(result.content).trim();
 }
 
 /**

@@ -35,7 +35,9 @@ crons = ["15,45 * * * *", "0 */3 * * *"]
 # AI プロバイダ（OpenAI 互換エンドポイント）の設定
 # 秘匿値である API キーは wrangler.toml には書き込まず、以下で設定する：
 #   npx wrangler secret put AI_API_KEY
-# 公開値（ベース URL・モデル名）は [vars] に記載する。
+# 公開値（ベース URL・モデル名・API方式・推論レベル）は [vars] に記載する。
 [vars]
 AI_BASE_URL = "https://api.openai.com/v1"
-AI_MODEL = "gpt-4o-mini"
+AI_MODEL = "gpt-5.6-luna"
+AI_API = "openai-responses"
+AI_REASONING_EFFORT = "medium"

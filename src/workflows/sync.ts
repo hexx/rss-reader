@@ -3,13 +3,28 @@ import { and, eq, isNull, sql } from 'drizzle-orm';
 import type { RuntimeEnv } from '../env.js';
 import { getDb } from '../db/index.js';
 import { articles, hatenaBookmarks, subscriptions } from '../db/schema.js';
-import { generateArticleSummary, generateHatenaSummary } from '../services/ai.js';
+import {
+  generateArticleSummary,
+  generateHatenaSummary,
+  isAiError,
+  toAiError,
+  validateAiConfiguration,
+} from '../services/ai.js';
 import { fetchHatenaBookmarks } from '../services/hatena.js';
 import type { HatenaBookmarkComment } from '../services/hatena.js';
 import { fetchArticleContent, fetchRssOrFallback } from '../services/scraper.js';
 import { logger } from '../utils/logger.js';
 
 const bookmarkChunkSize = 20;
+
+/** AI生成処理の失敗を同期全体へ伝播させる。 */
+async function runAi<T>(operation: () => Promise<T>): Promise<T> {
+  try {
+    return await operation();
+  } catch (error) {
+    throw toAiError(error);
+  }
+}
 
 /** 任意のエラーをログ用メッセージに正規化する。 */
 function toErrorMessage(error: unknown): string {
@@ -115,22 +130,14 @@ async function syncBookmarksForExistingArticle(
       return;
     }
     backfillState.count += 1;
-    try {
-      const hatenaSummary = await generateHatenaSummary(bookmarks, env);
-      await database
-        .update(articles)
-        .set({ hatenaSummary })
-        .where(eq(articles.id, articleId))
-        .run();
-      nullSummaryArticleIds.delete(articleId);
-      logger.info('取りこぼしていたはてブ要約をバックフィルで生成しました。', { articleId });
-    } catch (error) {
-      const message = toErrorMessage(error);
-      logger.warn('はてブ要約の再生成に失敗したため、次のフル同期で再試行します。', {
-        articleId,
-        error: message,
-      });
-    }
+    const hatenaSummary = await runAi(() => generateHatenaSummary(bookmarks, env));
+    await database
+      .update(articles)
+      .set({ hatenaSummary })
+      .where(eq(articles.id, articleId))
+      .run();
+    nullSummaryArticleIds.delete(articleId);
+    logger.info('取りこぼしていたはてブ要約をバックフィルで生成しました。', { articleId });
   }
 }
 
@@ -153,6 +160,8 @@ export async function syncSite(
   env: RuntimeEnv,
   includeBookmarkBackfill = true,
 ): Promise<number> {
+  // RSS・はてな取得を始める前にAI設定を検証する。
+  validateAiConfiguration(env);
   let processedCount = 0;
 
   // この実行内で共有するバックフィル状態（並行実行と干渉しないよう引数で受け渡す）。
@@ -237,22 +246,10 @@ export async function syncSite(
         }
         const content = contentResult.status === 'fulfilled' ? contentResult.value : '';
         const bookmarks = bookmarksResult.status === 'fulfilled' ? bookmarksResult.value : [];
-        const summary = await generateArticleSummary(article.title, content, env);
-        // はてブ要約の生成失敗は記事の保存を阻害しない（コメントなしで保存し、
-        // 次のフル同期のバックフィルで要約を再生成する）。
+        const summary = await runAi(() => generateArticleSummary(article.title, content, env));
         let hatenaSummary: string | null = null;
         if (bookmarks.length > 0) {
-          try {
-            hatenaSummary = await generateHatenaSummary(bookmarks, env);
-          } catch (error) {
-            const message = toErrorMessage(error);
-            logger.warn('はてブ要約の生成に失敗したため、要約なしで記事を保存します（コメント自体は保存されます）。', {
-              articleUrl: article.url,
-              error: message,
-              siteUrl,
-              title: article.title,
-            });
-          }
+          hatenaSummary = await runAi(() => generateHatenaSummary(bookmarks, env));
         }
         const articleId = crypto.randomUUID();
 
@@ -279,6 +276,9 @@ export async function syncSite(
 
         processedCount += 1;
       } catch (error) {
+        if (isAiError(error)) {
+          throw error;
+        }
         if (debug) {
           console.error(error instanceof Error ? error.stack || error : error);
           throw error;
@@ -297,6 +297,9 @@ export async function syncSite(
     logger.info('サイト同期が完了しました。', { articles: processedCount, siteUrl });
     return processedCount;
   } catch (error) {
+    if (isAiError(error)) {
+      throw error;
+    }
     if (debug) {
       console.error(error instanceof Error ? error.stack || error : error);
       throw error;
@@ -325,6 +328,8 @@ export async function syncAllSubscriptions(
   env: RuntimeEnv,
   includeBookmarkBackfill = true,
 ): Promise<void> {
+  // 外部のRSS・はてな取得より前に設定不備を検出する。
+  validateAiConfiguration(env);
   const database = getDb(env);
   const subscribedSites = await database
     .select({

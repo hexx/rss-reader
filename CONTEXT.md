@@ -12,6 +12,14 @@ _Avoid_: feed, provider, channel
 要約を生成する OpenAI 互換エンドポイント。`AI_BASE_URL` で指し示す接続先のこと。RSS の Source とは全く別の概念。
 _Avoid_: model, endpoint（模型本体と混同しやすい）
 
+**AI Model（AIモデル）**:
+AI Provider 上で要約生成に使う具体的なモデル。`AI_MODEL` で指定し、現在の標準設定は `gpt-5.6-luna` とする。
+_Avoid_: AI Provider（接続先とモデル本体を混同しやすい）
+
+**AI API Key（AI APIキー）**:
+AI Provider への認証に使う秘匿値。アプリでは `AI_API_KEY` で渡し、プロバイダ固有の環境変数名には寄せない。
+_Avoid_: OPENAI_API_KEY（接続先が OpenAI でも、アプリ内の設定名は共通の AI API Key とする）
+
 **Article Summary（記事要約）**:
 記事のタイトルと本文から生成する、全体要点の日本語要約（表示用 HTML スニペット）。
 
