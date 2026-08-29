@@ -68,9 +68,31 @@ export const subscriptions = sqliteTable('subscriptions', {
   addedAt: integer('added_at', { mode: 'timestamp_ms' })
     .notNull()
     .default(createdAtDefault),
+  /**
+   * Backfill Cursor（補完カーソル）: この Source のフィード掲載順に対して、
+   * 次の はてブ補完をどの位置から始めるかを示す進行位置（ADR-0010）。
+   * 末尾に達したら 0 に折り返す。Source 側に置く進行状態はこの 1 つだけで、
+   * 律速状態（間隔・クールダウン）は取得枠 `fetch_buckets` が持つ。
+   */
+  backfillCursor: integer('backfill_cursor').notNull().default(0),
   id: text('id').primaryKey(),
   siteUrl: text('site_url').notNull().unique(),
   title: text('title'),
+});
+
+/**
+ * Fetch Bucket（取得枠）: 律速の間隔とクールダウンを共有する単位 1 つ = 1 行。
+ *
+ * キーは eTLD+1 または運用者群名（例 `hatena`）。`next_allowed_at` / `cooldown_until`
+ * は epoch ms の素の数値で、drizzle の timestamp モードは使わない
+ * （予約の CAS や `max()` 更新を素直に書きたいため）。
+ * 行は初回予約時に lazily 作成する（ADR-0009）。
+ */
+export const fetchBucket = sqliteTable('fetch_buckets', {
+  bucket: text('bucket').primaryKey(),
+  consecutiveThrottles: integer('consecutive_throttles').notNull().default(0),
+  cooldownUntil: integer('cooldown_until').notNull().default(0),
+  nextAllowedAt: integer('next_allowed_at').notNull().default(0),
 });
 
 export type Article = InferSelectModel<typeof articles>;

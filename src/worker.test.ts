@@ -514,7 +514,7 @@ describe('worker app', () => {
       executionContext as never,
     );
     expect(syncResponse.status).toBe(202);
-    expect(syncAllSubscriptionsMock).toHaveBeenCalledWith(false, env);
+    expect(syncAllSubscriptionsMock).toHaveBeenCalledWith(false, env, true, { force: false });
     expect(executionContext.waitUntil).toHaveBeenCalledTimes(1);
   });
 

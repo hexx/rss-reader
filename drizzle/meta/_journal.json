@@ -36,6 +36,13 @@
       "when": 1785680284463,
       "tag": "0004_youthful_white_tiger",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1787970842357,
+      "tag": "0005_egress_fetch_buckets",
+      "breakpoints": true
     }
   ]
 }

@@ -4,6 +4,9 @@ import { isTag } from 'domhandler';
 import type { Element } from 'domhandler';
 import Parser from 'rss-parser';
 
+import type { EgressContext } from './egress.js';
+import { EGRESS_POLICY, continueEgressRequest, startEgressRequest } from './egress.js';
+
 export interface ScrapedLink {
   pubDate: Date | null;
   title: string;
@@ -27,12 +30,36 @@ const linkSelectors = [
   'h3 a[href]',
 ];
 
-export const browserRequestHeaders = {
+const browserRequestHeaders = {
   'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
   'accept-language': 'ja,en-US;q=0.9,en;q=0.8',
   'cache-control': 'no-cache',
   'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
 } as const;
+
+/**
+ * 既定のエグレス User-Agent。ブラウザ偽装をやめ、リーダとして名乗る（ADR-0011）。
+ * `browserRequestHeaders` は 403/451 を返す相手のための退避専用。
+ */
+export const readerRequestHeaders = {
+  ...browserRequestHeaders,
+  'user-agent': EGRESS_POLICY.userAgent,
+} as const;
+
+/** 拒否（退避発火の対象）と扱う HTTP ステータス。 */
+const FORBIDDEN_STATUSES = new Set([403, 451]);
+
+/** HTTP エラーをステータス付きで表現する内部エラー（403/451 の退避判定に使う）。 */
+class HttpStatusError extends Error {
+  readonly status: number;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = 'HttpStatusError';
+    this.status = status;
+  }
+}
+
 
 const nonHtmlFileExtensionPattern =
   /\.(?:pdf|zip|exe|mp4|png|jpe?g|gif|webp|avif|svg|bmp|ico|webm|mov|avi|mkv|mp3|wav|ogg|docx?|xlsx?|pptx?|tar|tgz|gz|bz2|7z|rar)$/i;
@@ -92,19 +119,65 @@ function redactUrl(url: string): string {
   }
 }
 
-async function fetchHtml(url: string): Promise<string> {
+interface HtmlFetchOptions {
+  /** 'defer'（フィード取得: 枠が空くのを待たずに失敗する）または 'wait'（記事本文）。 */
+  egressMode?: 'defer' | 'wait';
+  /** 403/451 のときブラウザ UA で 1 回取り直すか（ADR-0011 の退避）。 */
+  allowBrowserUserAgentFallback?: boolean;
+}
+
+async function fetchHtml(
+  egress: EgressContext,
+  url: string,
+  options: HtmlFetchOptions = {},
+): Promise<string> {
   // SSRF 対策: 初期 URL のスキーム・ホストを検証する。
   // 記事 URL はフィード由来（信頼できない入力）のため、内部アドレス宛の
   // リクエストやリダイレクトによる迂回を許さない。
   ensureSafePageUrl(url);
 
+  try {
+    return await fetchHtmlWithHeaders(egress, url, readerRequestHeaders, options);
+  } catch (error) {
+    // 正直なリーダ UA を嫌う相手だけ、ブラウザ UA で 1 回取り直す。
+    // 退避の事実は Source にも取得枠にも保存しない（ADR-0011）。
+    if (!options.allowBrowserUserAgentFallback || !isForbiddenResponseError(error)) {
+      throw error;
+    }
+    return fetchHtmlWithHeaders(egress, url, browserRequestHeaders, {
+      ...options,
+      allowBrowserUserAgentFallback: false,
+    });
+  }
+}
+
+function isForbiddenResponseError(error: unknown): boolean {
+  return error instanceof HttpStatusError && FORBIDDEN_STATUSES.has(error.status);
+}
+
+async function fetchHtmlWithHeaders(
+  egress: EgressContext,
+  url: string,
+  headers: Record<string, string>,
+  options: HtmlFetchOptions,
+): Promise<string> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
   try {
-    // リダイレクトは safeFetch が手動で追随し、各ホップで安全性を再検証する。
-    const response = await safeFetch(url, controller.signal);
+    // 枠は 1 論理操作で 1 つだけ確保する。リダイレクトは同じ枠の続きとして追随し、
+    // 各ホップで安全性を再検証する。
+    const started = await startEgressRequest(
+      egress,
+      url,
+      { headers, redirect: 'manual', signal: controller.signal },
+      { mode: options.egressMode ?? 'wait' },
+    );
+    const response = await followRedirects(egress, started.bucket, started.response, url, headers, controller.signal);
     if (!response.ok) {
-      throw new Error(`Failed to fetch ${redactUrl(url)}: ${response.status} ${response.statusText}`);
+      throw new HttpStatusError(
+        `Failed to fetch ${redactUrl(url)}: ${response.status} ${response.statusText}`,
+        response.status,
+      );
     }
     return await readBoundedText(response, DEFAULT_MAX_HTML_BYTES);
   } catch (error) {
@@ -195,8 +268,9 @@ function extractFallbackLinks(html: string, baseUrl: string): ScrapedLink[] {
   return links;
 }
 
-export async function fetchArticleContent(url: string): Promise<string> {
-  const html = await fetchHtml(url);
+export async function fetchArticleContent(egress: EgressContext, url: string): Promise<string> {
+  // 記事本文は同じ相手を続けて叩くことがあるため、枠の空きを待つ（パス2 の取得）。
+  const html = await fetchHtml(egress, url, { allowBrowserUserAgentFallback: true, egressMode: 'wait' });
   return extractArticleContent(html);
 }
 
@@ -532,29 +606,42 @@ export function extractMediaType(contentType: string): string {
   return contentType.split(';')[0]?.trim().toLowerCase() ?? '';
 }
 
-async function safeFetch(url: string, signal: AbortSignal, hops = 0): Promise<Response> {
-  if (hops > MAX_REDIRECT_HOPS) {
-    throw new Error('Too many redirects during feed discovery.');
-  }
+/**
+ * 確保済みの取得枠を続けて使い、リダイレクトを手動追随する。
+ * 各ホップの Location は安全性（内部アドレスでないこと）を検証してから追う。
+ */
+async function followRedirects(
+  egress: EgressContext,
+  bucket: string,
+  response: Response,
+  url: string,
+  headers: Record<string, string>,
+  signal: AbortSignal,
+): Promise<Response> {
+  let current = response;
+  let currentUrl = url;
 
-  const response = await fetch(url, {
-    headers: browserRequestHeaders,
-    redirect: 'manual',
-    signal,
-  });
+  for (let hop = 0; hop < MAX_REDIRECT_HOPS; hop += 1) {
+    if (current.status < 300 || current.status >= 400) {
+      return current;
+    }
 
-  // リダイレクト時は Location ヘッダーの安全性を検証し、手動で追随する。
-  if (response.status >= 300 && response.status < 400) {
-    const location = response.headers.get('location');
+    const location = current.headers.get('location');
     if (!location) {
       throw new Error('Redirect response missing Location header.');
     }
-    const nextUrl = new URL(location, url).toString();
+    const nextUrl = new URL(location, currentUrl).toString();
     ensureSafePageUrl(nextUrl);
-    return safeFetch(nextUrl, signal, hops + 1);
+    current = await continueEgressRequest(
+      egress,
+      bucket,
+      nextUrl,
+      { headers, redirect: 'manual', signal },
+    );
+    currentUrl = nextUrl;
   }
 
-  return response;
+  throw new Error('Too many redirects during feed discovery.');
 }
 
 export async function readBoundedText(response: Response, maxBytes: number): Promise<string> {
@@ -601,6 +688,7 @@ export async function readBoundedText(response: Response, maxBytes: number): Pro
  * - 全体のタイムアウトとレスポンスサイズに上限を設ける。
  */
 export async function discoverRssFeedUrl(
+  egress: EgressContext,
   rawUrl: string,
   options: DiscoverOptions = {},
 ): Promise<DiscoveredFeed | null> {
@@ -612,7 +700,20 @@ export async function discoverRssFeedUrl(
   // ヘッダー取得だけでなくボディ読み込みまで含めて全体をタイムアウト対象にする。
   // clearTimeout は finally で一括実行し、早期リターン経路で漏れないようにする。
   try {
-    const response = await safeFetch(safeUrl.toString(), controller.signal);
+    const started = await startEgressRequest(
+      egress,
+      safeUrl.toString(),
+      { headers: readerRequestHeaders, redirect: 'manual', signal: controller.signal },
+      { mode: 'wait' },
+    );
+    const response = await followRedirects(
+      egress,
+      started.bucket,
+      started.response,
+      safeUrl.toString(),
+      readerRequestHeaders,
+      controller.signal,
+    );
 
     if (!response.ok) {
       throw new Error(`Failed to fetch the page. status=${response.status}`);
@@ -702,8 +803,13 @@ export async function discoverRssFeedUrl(
   }
 }
 
-export async function fetchRssOrFallback(siteUrl: string): Promise<ScrapedLink[]> {
-  const htmlOrXml = await fetchHtml(siteUrl);
+export async function fetchRssOrFallback(
+  egress: EgressContext,
+  siteUrl: string,
+): Promise<ScrapedLink[]> {
+  // パス1（全 Source のフィード取得）から呼ばれる。枠が空いていなければ
+  // 待機せず EgressUnavailableError を返し、呼び出し側の後回し列に譲る（ADR-0009）。
+  const htmlOrXml = await fetchHtml(egress, siteUrl, { egressMode: 'defer' });
 
   try {
     const feed = await rssParser.parseString(htmlOrXml);
