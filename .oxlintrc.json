@@ -32,8 +32,7 @@
       "allow": [
         "_setSleepForTest",
         "_setRandomForTest",
-        "_resetRateLimiterForTest",
-        "_getRateLimiterStateForTest"
+        "_setNowForTest"
       ]
     }]
   },
