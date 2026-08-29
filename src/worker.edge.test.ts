@@ -95,25 +95,25 @@ describe('worker internal functions', () => {
     });
   });
 
-  describe('isHatenaSource', () => {
+  describe('isHatenaBookmarkHost', () => {
     it('returns true for b.hatena.ne.jp hostname', async () => {
-      const { isHatenaSource } = await import('./worker.js');
-      expect(isHatenaSource('https://b.hatena.ne.jp/entry/s/example.com')).toBe(true);
+      const { isHatenaBookmarkHost } = await import('./worker.js');
+      expect(isHatenaBookmarkHost('https://b.hatena.ne.jp/entry/s/example.com')).toBe(true);
     });
 
     it('returns true for b.hatena.ne.jp without path', async () => {
-      const { isHatenaSource } = await import('./worker.js');
-      expect(isHatenaSource('https://b.hatena.ne.jp')).toBe(true);
+      const { isHatenaBookmarkHost } = await import('./worker.js');
+      expect(isHatenaBookmarkHost('https://b.hatena.ne.jp')).toBe(true);
     });
 
     it('returns false for other domains', async () => {
-      const { isHatenaSource } = await import('./worker.js');
-      expect(isHatenaSource('https://example.com/')).toBe(false);
+      const { isHatenaBookmarkHost } = await import('./worker.js');
+      expect(isHatenaBookmarkHost('https://example.com/')).toBe(false);
     });
 
     it('returns false for invalid URL', async () => {
-      const { isHatenaSource } = await import('./worker.js');
-      expect(isHatenaSource('')).toBe(false);
+      const { isHatenaBookmarkHost } = await import('./worker.js');
+      expect(isHatenaBookmarkHost('')).toBe(false);
     });
   });
 

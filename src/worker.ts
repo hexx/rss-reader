@@ -16,6 +16,7 @@ import type {
   SyncAcceptedResponse,
 } from './shared/types.js';
 import { syncAllSubscriptions } from './workflows/sync.js';
+import { createEgressContext } from './services/egress.js';
 import { discoverRssFeedUrl } from './services/scraper.js';
 import type { DiscoveredFeed } from './services/scraper.js';
 
@@ -126,7 +127,12 @@ function sourceSuffix(siteUrl: string): string {
   }
 }
 
-function isHatenaSource(siteUrl: string): boolean {
+/**
+ * ブックマーク掲載元（Bookmark Host）の判定。
+ * はてなブックマーク由来の Source の表示名を紛れ解消するためだけで、
+ * 律速が束ねる運用者群（はてな群）より範囲の狭い別概念である（CONTEXT.md 参照）。
+ */
+function isHatenaBookmarkHost(siteUrl: string): boolean {
   try {
     return new URL(siteUrl).hostname === 'b.hatena.ne.jp';
   } catch {
@@ -137,7 +143,7 @@ function isHatenaSource(siteUrl: string): boolean {
 function sourceDisplayTitle(source: Pick<SourceRow, 'siteUrl' | 'title'>, titleCounts: Map<string, number>): string {
   const base = sourceTitleBase(source);
   const suffix = sourceSuffix(source.siteUrl);
-  const shouldDisambiguate = (titleCounts.get(base) ?? 0) > 1 || isHatenaSource(source.siteUrl);
+  const shouldDisambiguate = (titleCounts.get(base) ?? 0) > 1 || isHatenaBookmarkHost(source.siteUrl);
 
   if (!shouldDisambiguate || suffix.length === 0) {
     return base;
@@ -445,7 +451,7 @@ app.post('/api/subscriptions', async (c) => {
   // <link rel="alternate"> タグを探索してフィード URL を特定する。
   let discoveredFeed: DiscoveredFeed | null;
   try {
-    discoveredFeed = await discoverRssFeedUrl(normalizedSiteUrl);
+    discoveredFeed = await discoverRssFeedUrl(createEgressContext(c.env), normalizedSiteUrl);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     console.warn('RSS フィードの自動検出に失敗しました。', { error: message, siteUrl: normalizedSiteUrl });
@@ -532,7 +538,10 @@ app.patch('/api/articles/:id', updateArticleReadState);
 app.patch('/api/articles/:id/read', updateArticleReadState);
 
 app.post('/api/sync', (c) => {
-  const syncTask = syncAllSubscriptions(false, c.env).catch((error: unknown) => {
+  // `?force=true` はクールダウンだけを無視して取得する（枠内の最小間隔は守る）。
+  // UI からは使わず、運用上の手動リカバリ専用の引数（docs/specs/sync-egress-politeness.md）。
+  const force = c.req.query('force') === 'true';
+  const syncTask = syncAllSubscriptions(false, c.env, true, { force }).catch((error: unknown) => {
     console.error('同期APIの実行に失敗しました。', { error });
   });
   if (c.executionCtx) {
@@ -594,7 +603,7 @@ export { app };
 // テスト用エクスポート（テストコードからのみ参照）
 export {
   formatDate,
-  isHatenaSource,
+  isHatenaBookmarkHost,
   parsePaginationParam,
   sourceDisplayTitle,
   sourceHostname,

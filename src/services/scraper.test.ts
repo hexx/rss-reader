@@ -1,7 +1,13 @@
 import { HttpResponse, http } from 'msw';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { server } from '../test/setup.js';
+import {
+  createTestEgressContext,
+  createVirtualClock,
+  installVirtualEgressTime,
+  resetEgressTestHooks,
+} from '../test-utils/egress.js';
 
 const { parseStringMock, parseURLMock } = vi.hoisted(() => ({
   parseStringMock: vi.fn(),
@@ -15,6 +21,7 @@ vi.mock('rss-parser', () => ({
   },
 }));
 
+import { bucketKeyOf, EGRESS_POLICY } from './egress.js';
 import { fetchArticleContent, fetchRssOrFallback, discoverRssFeedUrl, readBoundedText } from './scraper.js';
 
 const feedUrl = 'https://example.com/feed.xml';
@@ -23,6 +30,9 @@ const articleOneUrl = 'https://example.com/posts/one';
 const articleTwoUrl = 'https://example.com/posts/two';
 const pdfUrl = 'https://example.com/files/report.pdf';
 const imageUrl = 'https://example.com/images/photo.png';
+const readerHeaders = {
+  'user-agent': EGRESS_POLICY.userAgent,
+};
 const browserHeaders = {
   accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
   'accept-language': 'ja,en-US;q=0.9,en;q=0.8',
@@ -89,7 +99,16 @@ const assetFallbackHtml = `<!doctype html>
 </html>`;
 
 describe('scraper service', () => {
+  let egress = createTestEgressContext();
+  let clock = createVirtualClock();
+
+  beforeEach(() => {
+    clock = installVirtualEgressTime();
+    egress = createTestEgressContext();
+  });
+
   afterEach(() => {
+    resetEgressTestHooks();
     vi.useRealTimers();
     vi.restoreAllMocks();
     parseStringMock.mockReset();
@@ -102,19 +121,19 @@ describe('scraper service', () => {
         expect(request.headers.get('accept')).toBe(browserHeaders.accept);
         expect(request.headers.get('accept-language')).toBe(browserHeaders['accept-language']);
         expect(request.headers.get('cache-control')).toBe(browserHeaders['cache-control']);
-        expect(request.headers.get('user-agent')).toBe(browserHeaders['user-agent']);
+        expect(request.headers.get('user-agent')).toBe(readerHeaders['user-agent']);
 
         return HttpResponse.text(articleHtml, { headers: { 'Content-Type': 'text/html' } });
       }),
     );
 
-    await expect(fetchArticleContent(articleOneUrl)).resolves.toBe('First article Article body text.');
+    await expect(fetchArticleContent(egress, articleOneUrl)).resolves.toBe('First article Article body text.');
   });
 
   it('rejects internal article URLs to prevent SSRF', async () => {
-    await expect(fetchArticleContent('http://127.0.0.1/')).rejects.toThrow(/internal/iu);
-    await expect(fetchArticleContent('http://169.254.169.254/latest/meta-data/')).rejects.toThrow(/internal/iu);
-    await expect(fetchArticleContent('http://[::ffff:127.0.0.1]/')).rejects.toThrow(/internal/iu);
+    await expect(fetchArticleContent(egress, 'http://127.0.0.1/')).rejects.toThrow(/internal/iu);
+    await expect(fetchArticleContent(egress, 'http://169.254.169.254/latest/meta-data/')).rejects.toThrow(/internal/iu);
+    await expect(fetchArticleContent(egress, 'http://[::ffff:127.0.0.1]/')).rejects.toThrow(/internal/iu);
   });
 
   it('rejects redirects to internal addresses when fetching article content', async () => {
@@ -124,7 +143,7 @@ describe('scraper service', () => {
       ),
     );
 
-    await expect(fetchArticleContent('https://public.example.com/article')).rejects.toThrow(/internal/iu);
+    await expect(fetchArticleContent(egress, 'https://public.example.com/article')).rejects.toThrow(/internal/iu);
   });
 
   it('returns empty content when no article body can be extracted', async () => {
@@ -135,7 +154,7 @@ describe('scraper service', () => {
       ),
     );
 
-    await expect(fetchArticleContent(articleTwoUrl)).resolves.toBe('');
+    await expect(fetchArticleContent(egress, articleTwoUrl)).resolves.toBe('');
   });
 
   it('drops feed items with non-http(s) URLs (javascript: etc.)', async () => {
@@ -153,7 +172,7 @@ describe('scraper service', () => {
       ],
     });
 
-    await expect(fetchRssOrFallback(feedUrl)).resolves.toEqual([
+    await expect(fetchRssOrFallback(egress, feedUrl)).resolves.toEqual([
       {
         pubDate: null,
         title: 'First article',
@@ -168,7 +187,7 @@ describe('scraper service', () => {
         expect(request.headers.get('accept')).toBe(browserHeaders.accept);
         expect(request.headers.get('accept-language')).toBe(browserHeaders['accept-language']);
         expect(request.headers.get('cache-control')).toBe(browserHeaders['cache-control']);
-        expect(request.headers.get('user-agent')).toBe(browserHeaders['user-agent']);
+        expect(request.headers.get('user-agent')).toBe(readerHeaders['user-agent']);
 
         return HttpResponse.text(feedXml, { headers: { 'Content-Type': 'application/rss+xml' } });
       }),
@@ -176,7 +195,7 @@ describe('scraper service', () => {
         expect(request.headers.get('accept')).toBe(browserHeaders.accept);
         expect(request.headers.get('accept-language')).toBe(browserHeaders['accept-language']);
         expect(request.headers.get('cache-control')).toBe(browserHeaders['cache-control']);
-        expect(request.headers.get('user-agent')).toBe(browserHeaders['user-agent']);
+        expect(request.headers.get('user-agent')).toBe(readerHeaders['user-agent']);
 
         return HttpResponse.text(fallbackHtml, { headers: { 'Content-Type': 'text/html' } });
       }),
@@ -195,7 +214,7 @@ describe('scraper service', () => {
       items: [],
     });
 
-    await expect(fetchRssOrFallback(feedUrl)).resolves.toEqual([
+    await expect(fetchRssOrFallback(egress, feedUrl)).resolves.toEqual([
       {
         pubDate: new Date('2024-01-02T03:04:05.000Z'),
         title: 'First article',
@@ -203,7 +222,10 @@ describe('scraper service', () => {
       },
     ]);
 
-    await expect(fetchRssOrFallback(fallbackUrl)).resolves.toEqual([
+    // 同一 Source を続けて取得すると枠の間隔で弾かれるため、この節では枠を新しく作る
+    // （間隔そのものは egress.test.ts で検証する）。
+    egress = createTestEgressContext();
+    await expect(fetchRssOrFallback(egress, fallbackUrl)).resolves.toEqual([
       {
         pubDate: null,
         title: 'First article',
@@ -247,7 +269,7 @@ describe('scraper service', () => {
       items: [],
     });
 
-    await expect(fetchRssOrFallback(feedUrl)).resolves.toEqual([
+    await expect(fetchRssOrFallback(egress, feedUrl)).resolves.toEqual([
       {
         pubDate: null,
         title: 'First article',
@@ -255,13 +277,76 @@ describe('scraper service', () => {
       },
     ]);
 
-    await expect(fetchRssOrFallback(fallbackUrl)).resolves.toEqual([
+    // 同一 Source を続けて取得すると枠の間隔で弾かれるため、この節では枠を新しく作る
+    // （間隔そのものは egress.test.ts で検証する）。
+    egress = createTestEgressContext();
+    await expect(fetchRssOrFallback(egress, fallbackUrl)).resolves.toEqual([
       {
         pubDate: null,
         title: 'First article',
         url: articleOneUrl,
       },
     ]);
+  });
+
+  describe('律速と User-Agent（ADR-0009 / ADR-0011）', () => {
+    it('429 を ThrottleError として返し、枠にクールダウンを設定する', async () => {
+      server.use(
+        http.get(feedUrl, () =>
+          new HttpResponse(null, { status: 429, headers: { 'Retry-After': '45' } })),
+      );
+
+      await expect(fetchRssOrFallback(egress, feedUrl)).rejects.toThrow(/Rate limited by example\.com/u);
+      // クールダウン中（=仮想時間 45 秒以内）は同じ枠の取得は断られる。
+      await expect(fetchRssOrFallback(egress, feedUrl)).rejects.toThrow(/cooling down/u);
+    });
+
+    it('本文取得が 403 のときだけブラウザ UA で 1 回取り直す', async () => {
+      const seenUserAgents: string[] = [];
+      server.use(
+        http.get(articleOneUrl, ({ request }) => {
+          seenUserAgents.push(request.headers.get('user-agent') ?? '');
+          if (seenUserAgents.length === 1) {
+            return new HttpResponse(null, { status: 403 });
+          }
+          return HttpResponse.text(articleHtml, { headers: { 'Content-Type': 'text/html' } });
+        }),
+      );
+
+      await expect(fetchArticleContent(egress, articleOneUrl)).resolves.toBe(
+        'First article Article body text.',
+      );
+      expect(seenUserAgents).toEqual([
+        EGRESS_POLICY.userAgent,
+        browserHeaders['user-agent'],
+      ]);
+    });
+
+    it('403 が続くと退避は 1 回までで、本文なしの失敗を返す', async () => {
+      server.use(http.get(articleOneUrl, () => new HttpResponse(null, { status: 403 })));
+
+      await expect(fetchArticleContent(egress, articleOneUrl)).rejects.toThrow(/403/u);
+    });
+
+    it('退避でブラウザ UA を使ったあとも枠の間隔は守られる', async () => {
+      let calls = 0;
+      server.use(
+        http.get(articleOneUrl, ({ request }) => {
+          calls += 1;
+          if (request.headers.get('user-agent') === EGRESS_POLICY.userAgent) {
+            return new HttpResponse(null, { status: 403 });
+          }
+          return HttpResponse.text(articleHtml, { headers: { 'Content-Type': 'text/html' } });
+        }),
+      );
+
+      const before = clock.now();
+      await fetchArticleContent(egress, articleOneUrl);
+      expect(calls).toBe(2);
+      // 退避のリクエストぶん枠が前に進んでいるので、次の取得は待機させられる。
+      await fetchArticleContent(egress, articleOneUrl);
+      expect(clock.now() - before).toBeGreaterThanOrEqual(EGRESS_POLICY.defaultMinimumDelayMs);
+    });
   });
 
   describe('discoverRssFeedUrl', () => {
@@ -274,7 +359,7 @@ describe('scraper service', () => {
         ),
       );
 
-      await expect(discoverRssFeedUrl('https://example.com/feed.xml')).resolves.toEqual({
+      await expect(discoverRssFeedUrl(egress, 'https://example.com/feed.xml')).resolves.toEqual({
         alreadyAFeed: true,
         feedUrl: 'https://example.com/feed.xml',
         type: 'rss',
@@ -290,7 +375,7 @@ describe('scraper service', () => {
         ),
       );
 
-      await expect(discoverRssFeedUrl('https://example.com/atom.xml')).resolves.toEqual({
+      await expect(discoverRssFeedUrl(egress, 'https://example.com/atom.xml')).resolves.toEqual({
         alreadyAFeed: true,
         feedUrl: 'https://example.com/atom.xml',
         type: 'atom',
@@ -306,7 +391,7 @@ describe('scraper service', () => {
         ),
       );
 
-      await expect(discoverRssFeedUrl('https://example.com/generic-feed')).resolves.toEqual({
+      await expect(discoverRssFeedUrl(egress, 'https://example.com/generic-feed')).resolves.toEqual({
         alreadyAFeed: true,
         feedUrl: 'https://example.com/generic-feed',
         type: 'rss',
@@ -322,7 +407,7 @@ describe('scraper service', () => {
         ),
       );
 
-      await expect(discoverRssFeedUrl('https://example.com/generic-atom')).resolves.toEqual({
+      await expect(discoverRssFeedUrl(egress, 'https://example.com/generic-atom')).resolves.toEqual({
         alreadyAFeed: true,
         feedUrl: 'https://example.com/generic-atom',
         type: 'atom',
@@ -339,7 +424,7 @@ describe('scraper service', () => {
         ),
       );
 
-      await expect(discoverRssFeedUrl('https://example.com/rss10')).resolves.toEqual({
+      await expect(discoverRssFeedUrl(egress, 'https://example.com/rss10')).resolves.toEqual({
         alreadyAFeed: true,
         feedUrl: 'https://example.com/rss10',
         type: 'rss',
@@ -357,7 +442,7 @@ describe('scraper service', () => {
         ),
       );
 
-      await expect(discoverRssFeedUrl('https://example.com/sitemap.xml')).resolves.toBeNull();
+      await expect(discoverRssFeedUrl(egress, 'https://example.com/sitemap.xml')).resolves.toBeNull();
     });
 
     it('discovers an RSS feed URL from a normal HTML page', async () => {
@@ -375,7 +460,7 @@ describe('scraper service', () => {
         ),
       );
 
-      await expect(discoverRssFeedUrl('https://blog.example.com/')).resolves.toEqual({
+      await expect(discoverRssFeedUrl(egress, 'https://blog.example.com/')).resolves.toEqual({
         alreadyAFeed: false,
         feedUrl: 'https://blog.example.com/feed.xml',
         type: 'rss',
@@ -397,7 +482,7 @@ describe('scraper service', () => {
         ),
       );
 
-      await expect(discoverRssFeedUrl('https://example.com/blog/')).resolves.toEqual({
+      await expect(discoverRssFeedUrl(egress, 'https://example.com/blog/')).resolves.toEqual({
         alreadyAFeed: false,
         feedUrl: 'https://example.com/atom.xml',
         type: 'atom',
@@ -420,7 +505,7 @@ describe('scraper service', () => {
         ),
       );
 
-      await expect(discoverRssFeedUrl('https://example.com/')).resolves.toEqual({
+      await expect(discoverRssFeedUrl(egress, 'https://example.com/')).resolves.toEqual({
         alreadyAFeed: false,
         feedUrl: 'https://example.com/rss.xml',
         type: 'rss',
@@ -440,7 +525,7 @@ describe('scraper service', () => {
         ),
       );
 
-      await expect(discoverRssFeedUrl('https://nofeed.example.com/')).resolves.toBeNull();
+      await expect(discoverRssFeedUrl(egress, 'https://nofeed.example.com/')).resolves.toBeNull();
     });
 
     it('returns null for non-HTML responses that are not feeds', async () => {
@@ -450,75 +535,75 @@ describe('scraper service', () => {
         ),
       );
 
-      await expect(discoverRssFeedUrl('https://json.example.com/data')).resolves.toBeNull();
+      await expect(discoverRssFeedUrl(egress, 'https://json.example.com/data')).resolves.toBeNull();
     });
 
     it('rejects unsupported protocols', async () => {
-      await expect(discoverRssFeedUrl('ftp://example.com/feed')).rejects.toThrow(/protocol/i);
+      await expect(discoverRssFeedUrl(egress, 'ftp://example.com/feed')).rejects.toThrow(/protocol/i);
     });
 
     it('rejects localhost to prevent SSRF', async () => {
-      await expect(discoverRssFeedUrl('http://localhost/')).rejects.toThrow(/internal/iu);
+      await expect(discoverRssFeedUrl(egress, 'http://localhost/')).rejects.toThrow(/internal/iu);
     });
 
     it('rejects 127.0.0.1 to prevent SSRF', async () => {
-      await expect(discoverRssFeedUrl('http://127.0.0.1/')).rejects.toThrow(/internal/iu);
+      await expect(discoverRssFeedUrl(egress, 'http://127.0.0.1/')).rejects.toThrow(/internal/iu);
     });
 
     it('rejects private IPv4 ranges to prevent SSRF', async () => {
-      await expect(discoverRssFeedUrl('http://10.0.0.1/')).rejects.toThrow(/internal/iu);
-      await expect(discoverRssFeedUrl('http://192.168.1.1/')).rejects.toThrow(/internal/iu);
-      await expect(discoverRssFeedUrl('http://172.16.0.1/')).rejects.toThrow(/internal/iu);
+      await expect(discoverRssFeedUrl(egress, 'http://10.0.0.1/')).rejects.toThrow(/internal/iu);
+      await expect(discoverRssFeedUrl(egress, 'http://192.168.1.1/')).rejects.toThrow(/internal/iu);
+      await expect(discoverRssFeedUrl(egress, 'http://172.16.0.1/')).rejects.toThrow(/internal/iu);
     });
 
     it('rejects the cloud metadata endpoint to prevent SSRF', async () => {
-      await expect(discoverRssFeedUrl('http://169.254.169.254/')).rejects.toThrow(/internal/iu);
+      await expect(discoverRssFeedUrl(egress, 'http://169.254.169.254/')).rejects.toThrow(/internal/iu);
     });
 
     it('rejects IPv4-mapped IPv6 addresses to prevent SSRF', async () => {
-      await expect(discoverRssFeedUrl('http://[::ffff:169.254.169.254]/')).rejects.toThrow(/internal/iu);
-      await expect(discoverRssFeedUrl('http://[::ffff:127.0.0.1]/')).rejects.toThrow(/internal/iu);
+      await expect(discoverRssFeedUrl(egress, 'http://[::ffff:169.254.169.254]/')).rejects.toThrow(/internal/iu);
+      await expect(discoverRssFeedUrl(egress, 'http://[::ffff:127.0.0.1]/')).rejects.toThrow(/internal/iu);
     });
 
     it('rejects numeric IPv4 representations to prevent SSRF', async () => {
       // 2130706433 = 127.0.0.1, 0x7f000001 = 127.0.0.1
-      await expect(discoverRssFeedUrl('http://2130706433/')).rejects.toThrow(/internal/iu);
-      await expect(discoverRssFeedUrl('http://0x7f000001/')).rejects.toThrow(/internal/iu);
+      await expect(discoverRssFeedUrl(egress, 'http://2130706433/')).rejects.toThrow(/internal/iu);
+      await expect(discoverRssFeedUrl(egress, 'http://0x7f000001/')).rejects.toThrow(/internal/iu);
     });
 
     it('rejects expanded IPv6 loopback and ULA to prevent SSRF', async () => {
-      await expect(discoverRssFeedUrl('http://[0:0:0:0:0:0:0:1]/')).rejects.toThrow(/internal/iu);
-      await expect(discoverRssFeedUrl('http://[fd00::1]/')).rejects.toThrow(/internal/iu);
-      await expect(discoverRssFeedUrl('http://[fe80::1]/')).rejects.toThrow(/internal/iu);
+      await expect(discoverRssFeedUrl(egress, 'http://[0:0:0:0:0:0:0:1]/')).rejects.toThrow(/internal/iu);
+      await expect(discoverRssFeedUrl(egress, 'http://[fd00::1]/')).rejects.toThrow(/internal/iu);
+      await expect(discoverRssFeedUrl(egress, 'http://[fe80::1]/')).rejects.toThrow(/internal/iu);
     });
 
     it('rejects IPv4-compatible and translated IPv6 forms to prevent SSRF', async () => {
       // WHATWG URL は [::127.0.0.1] を [::7f00:1] に正規化する（IPv4 互換）。
       // ::ffff:0:a.b.c.d（IPv4 トランスレーテッド）も同様にブロックする。
-      await expect(discoverRssFeedUrl('http://[::127.0.0.1]/')).rejects.toThrow(/internal/iu);
-      await expect(discoverRssFeedUrl('http://[::ffff:0:127.0.0.1]/')).rejects.toThrow(/internal/iu);
-      await expect(discoverRssFeedUrl('http://[::ffff:0:169.254.169.254]/')).rejects.toThrow(/internal/iu);
+      await expect(discoverRssFeedUrl(egress, 'http://[::127.0.0.1]/')).rejects.toThrow(/internal/iu);
+      await expect(discoverRssFeedUrl(egress, 'http://[::ffff:0:127.0.0.1]/')).rejects.toThrow(/internal/iu);
+      await expect(discoverRssFeedUrl(egress, 'http://[::ffff:0:169.254.169.254]/')).rejects.toThrow(/internal/iu);
     });
 
     it('rejects octal and hex IPv4 literals to prevent SSRF', async () => {
       // WHATWG URL パーサは 8進/16進オクテットや単一数値を解釈する。
       // 末尾ドット付きは正規化されず残るため、パーサ側でも解釈してブロックする。
-      await expect(discoverRssFeedUrl('http://0177.0.0.1./')).rejects.toThrow(/internal/iu);
-      await expect(discoverRssFeedUrl('http://0x7f.0.0.1./')).rejects.toThrow(/internal/iu);
-      await expect(discoverRssFeedUrl('http://017700000001./')).rejects.toThrow(/internal/iu);
+      await expect(discoverRssFeedUrl(egress, 'http://0177.0.0.1./')).rejects.toThrow(/internal/iu);
+      await expect(discoverRssFeedUrl(egress, 'http://0x7f.0.0.1./')).rejects.toThrow(/internal/iu);
+      await expect(discoverRssFeedUrl(egress, 'http://017700000001./')).rejects.toThrow(/internal/iu);
     });
 
     it('rejects abbreviated IPv4 forms to prevent SSRF', async () => {
       // WHATWG URL パーサは 127.1 を 127.0.0.1 に展開する
-      await expect(discoverRssFeedUrl('http://127.1./')).rejects.toThrow(/internal/iu);
-      await expect(discoverRssFeedUrl('http://127.0.1./')).rejects.toThrow(/internal/iu);
+      await expect(discoverRssFeedUrl(egress, 'http://127.1./')).rejects.toThrow(/internal/iu);
+      await expect(discoverRssFeedUrl(egress, 'http://127.0.1./')).rejects.toThrow(/internal/iu);
     });
 
     it('rejects NAT64 and 6to4 addresses embedding private IPv4', async () => {
       // NAT64 well-known プレフィックス (64:ff9b::/96) に 127.0.0.1 を埋め込んだ形
-      await expect(discoverRssFeedUrl('http://[64:ff9b::7f00:1]/')).rejects.toThrow(/internal/iu);
+      await expect(discoverRssFeedUrl(egress, 'http://[64:ff9b::7f00:1]/')).rejects.toThrow(/internal/iu);
       // 6to4 (2002::/16) に 127.0.0.1 を埋め込んだ形
-      await expect(discoverRssFeedUrl('http://[2002:7f00:1::]/')).rejects.toThrow(/internal/iu);
+      await expect(discoverRssFeedUrl(egress, 'http://[2002:7f00:1::]/')).rejects.toThrow(/internal/iu);
     });
 
     it('allows NAT64 addresses embedding a public IPv4', async () => {
@@ -534,7 +619,7 @@ describe('scraper service', () => {
 
       try {
         // フィードが見つからないだけで、内部アドレスとしては拒否されない
-        await expect(discoverRssFeedUrl('http://[64:ff9b::808:808]/')).resolves.toBeNull();
+        await expect(discoverRssFeedUrl(egress, 'http://[64:ff9b::808:808]/')).resolves.toBeNull();
       } finally {
         vi.unstubAllGlobals();
       }
@@ -545,13 +630,13 @@ describe('scraper service', () => {
     it('rejects trailing-dot FQDN hostnames to prevent SSRF', async () => {
       // WHATWG URL は末尾ドットを保持するため、127.0.0.1. / localhost. は
       // そのままではブロックリストに一致しないが、DNS は同一ホストに解決される。
-      await expect(discoverRssFeedUrl('http://127.0.0.1./')).rejects.toThrow(/internal/iu);
-      await expect(discoverRssFeedUrl('http://169.254.169.254./')).rejects.toThrow(/internal/iu);
-      await expect(discoverRssFeedUrl('http://localhost./')).rejects.toThrow(/internal/iu);
+      await expect(discoverRssFeedUrl(egress, 'http://127.0.0.1./')).rejects.toThrow(/internal/iu);
+      await expect(discoverRssFeedUrl(egress, 'http://169.254.169.254./')).rejects.toThrow(/internal/iu);
+      await expect(discoverRssFeedUrl(egress, 'http://localhost./')).rejects.toThrow(/internal/iu);
     });
 
     it('rejects invalid URLs', async () => {
-      await expect(discoverRssFeedUrl('not-a-url')).rejects.toThrow(/invalid/i);
+      await expect(discoverRssFeedUrl(egress, 'not-a-url')).rejects.toThrow(/invalid/i);
     });
 
     it('rejects redirects to internal addresses to prevent SSRF', async () => {
@@ -561,7 +646,7 @@ describe('scraper service', () => {
         ),
       );
 
-      await expect(discoverRssFeedUrl('https://public.example.com/')).rejects.toThrow(/internal/iu);
+      await expect(discoverRssFeedUrl(egress, 'https://public.example.com/')).rejects.toThrow(/internal/iu);
     });
 
     it('rejects redirect loops', async () => {
@@ -574,7 +659,7 @@ describe('scraper service', () => {
         ),
       );
 
-      await expect(discoverRssFeedUrl('https://loop.example.com/a')).rejects.toThrow(/redirects/i);
+      await expect(discoverRssFeedUrl(egress, 'https://loop.example.com/a')).rejects.toThrow(/redirects/i);
     });
 
     it('ignores linked feed URLs pointing to internal addresses', async () => {
@@ -593,7 +678,7 @@ describe('scraper service', () => {
         ),
       );
 
-      await expect(discoverRssFeedUrl('https://example.com/')).resolves.toEqual({
+      await expect(discoverRssFeedUrl(egress, 'https://example.com/')).resolves.toEqual({
         alreadyAFeed: false,
         feedUrl: 'https://example.com/atom.xml',
         type: 'atom',
@@ -623,5 +708,35 @@ describe('scraper service', () => {
 
       await expect(readBoundedText(fakeResponse, 1024)).resolves.toBe('hello');
     });
+  });
+});
+
+describe('律速層への障害記録（ADR-0009）', () => {
+  it('タイムアウトしたフィード取得は枠にクールダウンを設定する', async () => {
+    const egress = createTestEgressContext();
+    vi.useFakeTimers();
+    const hangingFetch = ((_input: RequestInfo | URL, init?: RequestInit) =>
+      new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener('abort', () => {
+          reject(new DOMException('The operation was aborted.', 'AbortError'));
+        });
+      })) as typeof fetch;
+    vi.stubGlobal('fetch', hangingFetch);
+
+    try {
+      const promise = fetchRssOrFallback(egress, feedUrl);
+      const assertion = expect(promise).rejects.toThrow(/timed out/i);
+      await vi.advanceTimersByTimeAsync(15_000 + 10);
+      await assertion;
+    } finally {
+      vi.unstubAllGlobals();
+      vi.useRealTimers();
+    }
+
+    // 枠（example.com）にクールダウンが記録されていること。
+    // 時刻系 DI に依存しないよう、ストアの生値で検証する。
+    const state = await egress.store.read(bucketKeyOf(feedUrl));
+    expect(state?.cooldownUntilMs).toBeGreaterThan(Date.now());
+    expect(state?.consecutiveThrottles).toBe(1);
   });
 });

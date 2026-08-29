@@ -38,6 +38,28 @@ cp .env.example .env
 - テスト: `npm run test`
 - ビルド: `npm run build`
 
+## 同期の律速（外部取得のマナー）
+
+定期同期は購読先とはてなブックマーク API を多数叩くため、外部取得はすべて
+**律速層**（`src/services/egress.ts`）を通します。取得枠（同一登録ドメイン、または
+はてな群のような同一運用者の集まり）ごとに最小間隔を守り、429/503 を受けると
+D1 の `fetch_buckets` にクールダウン（30分 → 60分 → 90分、`Retry-After` は尊重）を
+記録して自己回復します。設計詳細は [docs/specs/sync-egress-politeness.md](./docs/specs/sync-egress-politeness.md)、
+判断根拠は ADR-0009 / 0010 / 0011 を参照してください。
+
+`POST /api/sync?force=true` はクールダウン中の特例再試行で、運用上手動のリカバリ専用です
+（UI からは呼びません。枠内の最小間隔は引き続き守ります）。
+
+## スキーマ変更の反映
+
+D1 のテーブルは drizzle のマイグレーションで管理します（`drizzle/` 配下）。
+スキーマを変えたら `npm run db:generate` で生成し、デプロイ前に反映してください。
+
+```bash
+npx wrangler d1 migrations apply rss-reader --local   # 開発確認
+npx wrangler d1 migrations apply rss-reader --remote  # 本番
+```
+
 ## AI プロバイダの設定
 
 要約生成には **OpenAI 互換（OpenAI-compatible）な任意のエンドポイント**を使います。

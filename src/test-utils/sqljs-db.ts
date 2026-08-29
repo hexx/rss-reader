@@ -56,7 +56,14 @@ export async function createTestDatabase(options: { initializeSchema?: boolean }
         id TEXT PRIMARY KEY,
         site_url TEXT NOT NULL UNIQUE,
         title TEXT,
+        backfill_cursor INTEGER NOT NULL DEFAULT 0,
         added_at INTEGER NOT NULL DEFAULT ${createdAtDefaultExpression}
+      );
+      CREATE TABLE fetch_buckets (
+        bucket TEXT PRIMARY KEY,
+        consecutive_throttles INTEGER NOT NULL DEFAULT 0,
+        cooldown_until INTEGER NOT NULL DEFAULT 0,
+        next_allowed_at INTEGER NOT NULL DEFAULT 0
       );
       CREATE INDEX articles_site_url_is_read_idx ON articles (site_url, is_read);
       CREATE INDEX articles_sort_idx ON articles (coalesce("published_at", "created_at"));

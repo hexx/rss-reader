@@ -4,6 +4,17 @@ import { isTag } from 'domhandler';
 import type { Element } from 'domhandler';
 import Parser from 'rss-parser';
 
+import type { EgressContext } from './egress.js';
+import {
+  acquireEgressSlot,
+  bucketKeyOf,
+  continueEgressRequest,
+  EGRESS_POLICY,
+  EgressUnavailableError,
+  markThrottled,
+  requestWithinEgressSlot,
+} from './egress.js';
+
 export interface ScrapedLink {
   pubDate: Date | null;
   title: string;
@@ -27,12 +38,36 @@ const linkSelectors = [
   'h3 a[href]',
 ];
 
-export const browserRequestHeaders = {
+const browserRequestHeaders = {
   'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
   'accept-language': 'ja,en-US;q=0.9,en;q=0.8',
   'cache-control': 'no-cache',
   'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
 } as const;
+
+/**
+ * 既定のエグレス User-Agent。ブラウザ偽装をやめ、リーダとして名乗る（ADR-0011）。
+ * `browserRequestHeaders` は 403/451 を返す相手のための退避専用。
+ */
+export const readerRequestHeaders = {
+  ...browserRequestHeaders,
+  'user-agent': EGRESS_POLICY.userAgent,
+} as const;
+
+/** 拒否（退避発火の対象）と扱う HTTP ステータス。 */
+const FORBIDDEN_STATUSES = new Set([403, 451]);
+
+/** HTTP エラーをステータス付きで表現する内部エラー（403/451 の退避判定に使う）。 */
+class HttpStatusError extends Error {
+  readonly status: number;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = 'HttpStatusError';
+    this.status = status;
+  }
+}
+
 
 const nonHtmlFileExtensionPattern =
   /\.(?:pdf|zip|exe|mp4|png|jpe?g|gif|webp|avif|svg|bmp|ico|webm|mov|avi|mkv|mp3|wav|ogg|docx?|xlsx?|pptx?|tar|tgz|gz|bz2|7z|rar)$/i;
@@ -92,31 +127,102 @@ function redactUrl(url: string): string {
   }
 }
 
-async function fetchHtml(url: string): Promise<string> {
+interface HtmlFetchOptions {
+  /** 'defer'（フィード取得: 枠が空くのを待たずに失敗する）または 'wait'（記事本文）。 */
+  egressMode?: 'defer' | 'wait';
+  /** 403/451 のときブラウザ UA で 1 回取り直すか（ADR-0011 の退避）。 */
+  allowBrowserUserAgentFallback?: boolean;
+}
+
+async function fetchHtml(
+  egress: EgressContext,
+  url: string,
+  options: HtmlFetchOptions = {},
+): Promise<string> {
   // SSRF 対策: 初期 URL のスキーム・ホストを検証する。
   // 記事 URL はフィード由来（信頼できない入力）のため、内部アドレス宛の
   // リクエストやリダイレクトによる迂回を許さない。
   ensureSafePageUrl(url);
 
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
   try {
-    // リダイレクトは safeFetch が手動で追随し、各ホップで安全性を再検証する。
-    const response = await safeFetch(url, controller.signal);
-    if (!response.ok) {
-      throw new Error(`Failed to fetch ${redactUrl(url)}: ${response.status} ${response.statusText}`);
-    }
-    return await readBoundedText(response, DEFAULT_MAX_HTML_BYTES);
+    return await fetchHtmlWithHeaders(egress, url, readerRequestHeaders, options);
   } catch (error) {
+    // 正直なリーダ UA を嫌う相手だけ、ブラウザ UA で 1 回取り直す。
+    // 退避の事実は Source にも取得枠にも保存しない（ADR-0011）。
+    if (!options.allowBrowserUserAgentFallback || !isForbiddenResponseError(error)) {
+      throw error;
+    }
+    return fetchHtmlWithHeaders(egress, url, browserRequestHeaders, {
+      ...options,
+      allowBrowserUserAgentFallback: false,
+    });
+  }
+}
+
+function isForbiddenResponseError(error: unknown): boolean {
+  return error instanceof HttpStatusError && FORBIDDEN_STATUSES.has(error.status);
+}
+
+async function fetchHtmlWithHeaders(
+  egress: EgressContext,
+  url: string,
+  headers: Record<string, string>,
+  options: HtmlFetchOptions,
+): Promise<string> {
+  const bucket = bucketKeyOf(url);
+  try {
+    // 枠は 1 論理操作で 1 つだけ確保する。リダイレクトは同じ枠の続きとして追随し、
+    // 各ホップで安全性を再検証する。
+    const slot = await acquireEgressSlot(egress, url, { mode: options.egressMode ?? 'wait' });
+    if (!slot.acquired) {
+      throw new EgressUnavailableError(bucket, slot.reason ?? 'occupied', slot.cooldownUntilMs ?? 0);
+    }
+    // HTTP タイムアウトは枠を確保した**あとに**張る。枠待ちの時間を
+    // 相手の不調と誤診してクールダウンを作るのを防ぐ（ADR-0009）。
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+    try {
+      const first = await requestWithinEgressSlot(
+        egress,
+        bucket,
+        url,
+        { headers, redirect: 'manual', signal: controller.signal },
+      );
+      const response = await followRedirects(egress, bucket, first, url, headers, controller.signal);
+      if (!response.ok) {
+        throw new HttpStatusError(
+          `Failed to fetch ${redactUrl(url)}: ${response.status} ${response.statusText}`,
+          response.status,
+        );
+      }
+      // タイムアウトはヘッダー到着だけでなくボディ読み取りまで含めて適用する。
+      return await readBoundedText(response, DEFAULT_MAX_HTML_BYTES);
+    } finally {
+      clearTimeout(timeout);
+    }
+  } catch (error) {
+    // タイムアウト・ボディサイズ超過は 429 と同じ「相手の不調の兆候」として枠に記録し、
+    // 間隔だけ空けて同じ相手を叩き返し続けるのを防ぐ（ADR-0009）。
+    if (isAbortError(error) || isUnhealthyResponseError(error)) {
+      await markThrottled(egress, bucket);
+    }
     // タイムアウトによる中断は AbortError のまま呼び出し側に渡さず、
     // 分かりやすいメッセージに置き換える。
-    if (error instanceof DOMException && error.name === 'AbortError') {
+    if (isAbortError(error)) {
       throw new Error(`Fetch timed out: ${redactUrl(url)}`, { cause: error });
     }
     throw error;
-  } finally {
-    clearTimeout(timeout);
   }
+}
+
+/** AbortError（タイムアウト）かどうか。判定は signal ではなくエラー型で行う。 */
+function isAbortError(error: unknown): boolean {
+  return error instanceof DOMException && error.name === 'AbortError';
+}
+
+/** ボディサイズ超過など、bot ブロック・不調の兆候と扱う応答異常か。 */
+function isUnhealthyResponseError(error: unknown): boolean {
+  return error instanceof Error && error.message.includes('exceeded the size limit');
 }
 
 function extractArticleContent(html: string): string {
@@ -195,8 +301,9 @@ function extractFallbackLinks(html: string, baseUrl: string): ScrapedLink[] {
   return links;
 }
 
-export async function fetchArticleContent(url: string): Promise<string> {
-  const html = await fetchHtml(url);
+export async function fetchArticleContent(egress: EgressContext, url: string): Promise<string> {
+  // 記事本文は同じ相手を続けて叩くことがあるため、枠の空きを待つ（パス2 の取得）。
+  const html = await fetchHtml(egress, url, { allowBrowserUserAgentFallback: true, egressMode: 'wait' });
   return extractArticleContent(html);
 }
 
@@ -532,29 +639,42 @@ export function extractMediaType(contentType: string): string {
   return contentType.split(';')[0]?.trim().toLowerCase() ?? '';
 }
 
-async function safeFetch(url: string, signal: AbortSignal, hops = 0): Promise<Response> {
-  if (hops > MAX_REDIRECT_HOPS) {
-    throw new Error('Too many redirects during feed discovery.');
-  }
+/**
+ * 確保済みの取得枠を続けて使い、リダイレクトを手動追随する。
+ * 各ホップの Location は安全性（内部アドレスでないこと）を検証してから追う。
+ */
+async function followRedirects(
+  egress: EgressContext,
+  bucket: string,
+  response: Response,
+  url: string,
+  headers: Record<string, string>,
+  signal: AbortSignal,
+): Promise<Response> {
+  let current = response;
+  let currentUrl = url;
 
-  const response = await fetch(url, {
-    headers: browserRequestHeaders,
-    redirect: 'manual',
-    signal,
-  });
+  for (let hop = 0; hop < MAX_REDIRECT_HOPS; hop += 1) {
+    if (current.status < 300 || current.status >= 400) {
+      return current;
+    }
 
-  // リダイレクト時は Location ヘッダーの安全性を検証し、手動で追随する。
-  if (response.status >= 300 && response.status < 400) {
-    const location = response.headers.get('location');
+    const location = current.headers.get('location');
     if (!location) {
       throw new Error('Redirect response missing Location header.');
     }
-    const nextUrl = new URL(location, url).toString();
+    const nextUrl = new URL(location, currentUrl).toString();
     ensureSafePageUrl(nextUrl);
-    return safeFetch(nextUrl, signal, hops + 1);
+    current = await continueEgressRequest(
+      egress,
+      bucket,
+      nextUrl,
+      { headers, redirect: 'manual', signal },
+    );
+    currentUrl = nextUrl;
   }
 
-  return response;
+  throw new Error('Too many redirects during feed discovery.');
 }
 
 export async function readBoundedText(response: Response, maxBytes: number): Promise<string> {
@@ -601,18 +721,31 @@ export async function readBoundedText(response: Response, maxBytes: number): Pro
  * - 全体のタイムアウトとレスポンスサイズに上限を設ける。
  */
 export async function discoverRssFeedUrl(
+  egress: EgressContext,
   rawUrl: string,
   options: DiscoverOptions = {},
 ): Promise<DiscoveredFeed | null> {
   const safeUrl = ensureSafePageUrl(rawUrl);
-  const maxBytes = options.maxBytes ?? DEFAULT_MAX_HTML_BYTES;
+  const url = safeUrl.toString();
+  const bucket = bucketKeyOf(url);
 
+  const slot = await acquireEgressSlot(egress, url, { mode: 'wait' });
+  if (!slot.acquired) {
+    throw new EgressUnavailableError(bucket, slot.reason ?? 'occupied', slot.cooldownUntilMs ?? 0);
+  }
+
+  // HTTP タイムアウトは枠を確保した**あとに**張る。枠待ちの時間を相手の不調と
+  // 誤診してクールダウンを作るのを防ぐ（ADR-0009）。
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), DISCOVERY_TIMEOUT_MS);
-  // ヘッダー取得だけでなくボディ読み込みまで含めて全体をタイムアウト対象にする。
-  // clearTimeout は finally で一括実行し、早期リターン経路で漏れないようにする。
   try {
-    const response = await safeFetch(safeUrl.toString(), controller.signal);
+    const first = await requestWithinEgressSlot(
+      egress,
+      bucket,
+      url,
+      { headers: readerRequestHeaders, redirect: 'manual', signal: controller.signal },
+    );
+    const response = await followRedirects(egress, bucket, first, url, readerRequestHeaders, controller.signal);
 
     if (!response.ok) {
       throw new Error(`Failed to fetch the page. status=${response.status}`);
@@ -625,7 +758,7 @@ export async function discoverRssFeedUrl(
     // 入力 URL が既に RSS/Atom フィードそのものを指している場合はそのまま返す。
     if (FEED_CONTENT_TYPE_PATTERN.test(mediaType)) {
       const type = pickFeedType(mediaType) ?? 'rss';
-      return { alreadyAFeed: true, feedUrl: safeUrl.toString(), type };
+      return { alreadyAFeed: true, feedUrl: url, type };
     }
 
     // HTML / テキスト（およびルート要素を確認する必要がある汎用 XML）のみ自動検出を試みる。
@@ -633,77 +766,102 @@ export async function discoverRssFeedUrl(
       return null;
     }
 
-    const html = await readBoundedText(response, maxBytes);
-    const $ = load(html);
-
-    // 汎用 XML (application/xml, text/xml) はルート要素でフィードか判定する。
-    // フィード以外の XML（sitemap.xml や XHTML 等）は <link rel=alternate> の
-    // 探索へフォールバックし、誤ってフィードとして登録しないようにする。
-    // ルート要素は生テキストの先頭タグで判定する（cheerio の load は XML を
-    // HTML としてパースし <html> に包むため、ルート要素が取れない）。
-    // 文書途中の同名要素による誤検知も防げる。RSS 1.0 は <rdf:RDF> ルートを持つ。
-    if (isGenericXml) {
-      const rootTagMatch =
-        /^\uFEFF?\s*(?:<\?xml[^>]*\?>\s*)?(?:<!DOCTYPE[^>]*>\s*)?<([a-zA-Z][a-zA-Z0-9:_-]*)/u.exec(html);
-      const rootTagName = rootTagMatch?.[1]?.toLowerCase() ?? '';
-      if (rootTagName === 'rss' || rootTagName === 'rdf:rdf') {
-        return { alreadyAFeed: true, feedUrl: safeUrl.toString(), type: 'rss' };
-      }
-      if (rootTagName === 'feed') {
-        return { alreadyAFeed: true, feedUrl: safeUrl.toString(), type: 'atom' };
-      }
+    // ヘッダー取得だけでなくボディ読み込みまで含めて全体をタイムアウト対象にする。
+    const html = await readBoundedText(response, options.maxBytes ?? DEFAULT_MAX_HTML_BYTES);
+    return classifyDiscoveredFeed(url, mediaType, isGenericXml, html);
+  } catch (error) {
+    // タイムアウト・ボディサイズ超過は 429 と同じ「相手の不調の兆候」として枠に記録する。
+    if (isAbortError(error) || isUnhealthyResponseError(error)) {
+      await markThrottled(egress, bucket);
     }
-
-    const candidates: { feedUrl: string; type: DiscoveredFeedType }[] = [];
-
-    $('link[rel~="alternate"]').each((_, node) => {
-      if (!isTag(node)) {
-        return;
-      }
-      const typeAttr = $(node).attr('type') ?? '';
-      const feedType = pickFeedType(typeAttr);
-      if (!feedType) {
-        return;
-      }
-      const href = $(node).attr('href');
-      if (!href || href.length === 0) {
-        return;
-      }
-      try {
-        const resolved = new URL(href, safeUrl);
-        if (!['http:', 'https:'].includes(resolved.protocol)) {
-          return;
-        }
-        // 検出されたフィード URL も安全性を検証し、ストアド SSRF を防ぐ。
-        if (isUnsafeHostname(resolved.hostname)) {
-          return;
-        }
-        candidates.push({ feedUrl: resolved.toString(), type: feedType });
-      } catch {
-        // 不正な href はスキップ
-      }
-    });
-
-    if (candidates.length === 0) {
-      return null;
-    }
-
-    // RSS を優先、同一 type 内ではソース上の出現順を保つ。
-    candidates.sort((a, b) => {
-      if (a.type === b.type) {
-        return 0;
-      }
-      return a.type === 'rss' ? -1 : 1;
-    });
-
-    return { ...candidates[0]!, alreadyAFeed: false };
+    throw error;
   } finally {
     clearTimeout(timeout);
   }
 }
 
-export async function fetchRssOrFallback(siteUrl: string): Promise<ScrapedLink[]> {
-  const htmlOrXml = await fetchHtml(siteUrl);
+/**
+ * 取得したドキュメントからフィード URL を判定する純粋処理。
+ *
+ * 汎用 XML (application/xml, text/xml) はルート要素でフィードか判定する。
+ * フィード以外の XML（sitemap.xml や XHTML 等）は `<link rel=alternate>` の
+ * 探索へフォールバックし、誤ってフィードとして登録しないようにする。
+ * ルート要素は生テキストの先頭タグで判定する（cheerio の load は XML を
+ * HTML としてパースし `<html>` に包むため、ルート要素が取れない）。
+ * 文書途中の同名要素による誤検知も防げる。RSS 1.0 は `<rdf:RDF>` ルートを持つ。
+ */
+function classifyDiscoveredFeed(
+  url: string,
+  mediaType: string,
+  isGenericXml: boolean,
+  html: string,
+): DiscoveredFeed | null {
+  const safeUrl = new URL(url);
+
+  if (isGenericXml) {
+    const rootTagMatch =
+      /^\uFEFF?\s*(?:<\?xml[^>]*\?>\s*)?(?:<!DOCTYPE[^>]*>)?\s*<([a-zA-Z][a-zA-Z0-9:_-]*)/u.exec(html);
+    const rootTagName = rootTagMatch?.[1]?.toLowerCase() ?? '';
+    if (rootTagName === 'rss' || rootTagName === 'rdf:rdf') {
+      return { alreadyAFeed: true, feedUrl: url, type: 'rss' };
+    }
+    if (rootTagName === 'feed') {
+      return { alreadyAFeed: true, feedUrl: url, type: 'atom' };
+    }
+  }
+
+  const $ = load(html);
+  const candidates: { feedUrl: string; type: DiscoveredFeedType }[] = [];
+
+  $('link[rel~="alternate"]').each((_, node) => {
+    if (!isTag(node)) {
+      return;
+    }
+    const feedType = pickFeedType($(node).attr('type') ?? '');
+    if (!feedType) {
+      return;
+    }
+    const href = $(node).attr('href');
+    if (!href || href.length === 0) {
+      return;
+    }
+    try {
+      const resolved = new URL(href, safeUrl);
+      if (!['http:', 'https:'].includes(resolved.protocol)) {
+        return;
+      }
+      // 検出されたフィード URL も安全性を検証し、ストアド SSRF を防ぐ。
+      if (isUnsafeHostname(resolved.hostname)) {
+        return;
+      }
+      candidates.push({ feedUrl: resolved.toString(), type: feedType });
+    } catch {
+      // 不正な href はスキップ
+    }
+  });
+
+  if (candidates.length === 0) {
+    return null;
+  }
+
+  // RSS を優先、同一 type 内ではソース上の出現順を保つ。
+  candidates.sort((a, b) => {
+    if (a.type === b.type) {
+      return 0;
+    }
+    return a.type === 'rss' ? -1 : 1;
+  });
+
+  return { ...candidates[0]!, alreadyAFeed: false };
+}
+
+export async function fetchRssOrFallback(
+  egress: EgressContext,
+  siteUrl: string,
+): Promise<ScrapedLink[]> {
+  // パス1（全 Source のフィード取得）から呼ばれる。枠が空いていなければ
+  // 待機せず EgressUnavailableError を返し、呼び出し側の後回し列に譲る（ADR-0009）。
+  const htmlOrXml = await fetchHtml(egress, siteUrl, { egressMode: 'defer' });
 
   try {
     const feed = await rssParser.parseString(htmlOrXml);

@@ -137,8 +137,8 @@ describe('syncSite', () => {
       createdAt: new Date('2024-01-01T00:00:00.000Z'),
       user: 'alice',
     });
-    expect(fetchArticleContentMock).toHaveBeenCalledWith(article.url);
-    expect(fetchHatenaBookmarksMock).toHaveBeenCalledWith(article.url);
+    expect(fetchArticleContentMock).toHaveBeenCalledWith(expect.anything(), article.url);
+    expect(fetchHatenaBookmarksMock).toHaveBeenCalledWith(expect.anything(), article.url);
     expect(generateArticleSummaryMock).toHaveBeenCalledWith(article.title, '', expect.any(Object));
     expect(generateHatenaSummaryMock).toHaveBeenCalledWith(bookmarks, expect.any(Object));
     expect(loggerMock.info).toHaveBeenCalledWith('記事の同期処理を実行します。', {
@@ -159,7 +159,7 @@ describe('syncSite', () => {
 
     await syncSite(nonHatenaSiteUrl, false, testEnv);
 
-    expect(fetchHatenaBookmarksMock).toHaveBeenCalledWith(article.url);
+    expect(fetchHatenaBookmarksMock).toHaveBeenCalledWith(expect.anything(), article.url);
     // ブックマークが 0 件なので、generateHatenaSummary は呼ばれない
     expect(generateHatenaSummaryMock).not.toHaveBeenCalled();
 
@@ -250,8 +250,8 @@ describe('syncSite', () => {
       title: article.title,
       url: article.url,
     });
-    expect(fetchArticleContentMock).toHaveBeenCalledWith(article.url);
-    expect(fetchHatenaBookmarksMock).toHaveBeenCalledWith(article.url);
+    expect(fetchArticleContentMock).toHaveBeenCalledWith(expect.anything(), article.url);
+    expect(fetchHatenaBookmarksMock).toHaveBeenCalledWith(expect.anything(), article.url);
     expect(generateArticleSummaryMock).toHaveBeenCalledWith(article.title, '', expect.any(Object));
     expect(generateHatenaSummaryMock).toHaveBeenCalledWith(
       [{ comment: '面白い', timestamp: new Date('2024-01-05T00:00:00.000Z'), user: 'bob' }],
@@ -277,7 +277,7 @@ describe('syncSite', () => {
 
     await expect(syncSite(siteUrl, true, testEnv)).rejects.toThrow('summary failed');
 
-    expect(fetchHatenaBookmarksMock).toHaveBeenCalledWith(article.url);
+    expect(fetchHatenaBookmarksMock).toHaveBeenCalledWith(expect.anything(), article.url);
     expect(generateHatenaSummaryMock).not.toHaveBeenCalled();
     expect(loggerMock.warn).not.toHaveBeenCalled();
   });
@@ -438,7 +438,7 @@ describe('syncAllSubscriptions', () => {
     await syncAllSubscriptions(false, testEnv);
 
     expect(fetchRssOrFallbackMock).not.toHaveBeenCalled();
-    expect(loggerMock.info).toHaveBeenCalledWith('購読サイトがありません。');
+    expect(loggerMock.info).toHaveBeenCalledWith('購読されている Source がありません。');
   });
 
   it('splits hatena bookmark inserts into chunks of 20', async () => {
@@ -471,7 +471,7 @@ describe('syncAllSubscriptions', () => {
       { id: 'subscription-2', siteUrl: nonHatenaSiteUrl },
     ]);
 
-    fetchRssOrFallbackMock.mockImplementation(async (targetUrl) =>
+    fetchRssOrFallbackMock.mockImplementation(async (_egress: unknown, targetUrl: string) =>
       targetUrl === siteUrl ? [article] : [secondArticle],
     );
     fetchArticleContentMock.mockResolvedValue('本文');
@@ -493,7 +493,7 @@ describe('syncAllSubscriptions', () => {
       { id: 'subscription-2', siteUrl: nonHatenaSiteUrl },
     ]);
 
-    fetchRssOrFallbackMock.mockImplementation(async (targetUrl) =>
+    fetchRssOrFallbackMock.mockImplementation(async (_egress: unknown, targetUrl: string) =>
       targetUrl === siteUrl ? [article] : [secondArticle],
     );
     fetchArticleContentMock.mockResolvedValue('本文');
@@ -503,8 +503,313 @@ describe('syncAllSubscriptions', () => {
     const { syncAllSubscriptions } = await import('./sync.js');
     await expect(syncAllSubscriptions(false, testEnv)).rejects.toThrow('AI unavailable');
 
-    expect(fetchRssOrFallbackMock).toHaveBeenCalledTimes(1);
+    expect(fetchRssOrFallbackMock).toHaveBeenCalledTimes(2); // パス1で全フィードを取得してから記事処理に入る
     expect(generateArticleSummaryMock).toHaveBeenCalledTimes(1);
     await expect(testDb.select().from(articles)).resolves.toHaveLength(0);
+  });
+});
+
+describe('二段同期（パス1 のフィード取得優先・律速・補完カーソル）', () => {
+  // 律速層は ThrottleError を instanceof で判定し、仮想時計の DI もモジュール状態に
+  // 入れるため、同期側と必ず同じモジュール生成から解決する。
+  type EgressModule = typeof import('../services/egress.js');
+  type TestEgressModule = typeof import('../test-utils/egress.js');
+
+  let egressModule: EgressModule;
+  let egress: ReturnType<TestEgressModule['createTestEgressContext']>;
+  let resetEgressHooks: TestEgressModule['resetEgressTestHooks'];
+
+  beforeEach(async () => {
+    vi.resetModules();
+    testDb = (await createTestDatabase()).db;
+
+    egressModule = await import('../services/egress.js');
+    const testEgressModule = await import('../test-utils/egress.js');
+    testEgressModule.installVirtualEgressTime();
+    resetEgressHooks = testEgressModule.resetEgressTestHooks;
+    egress = testEgressModule.createTestEgressContext();
+
+    // sync.js は egress.js を静的に import するため、上の生成をそのまま共有する。
+    await import('./sync.js');
+
+    fetchHatenaBookmarksMock.mockReset();
+    generateArticleSummaryMock.mockReset();
+    generateHatenaSummaryMock.mockReset();
+    fetchArticleContentMock.mockReset();
+    fetchRssOrFallbackMock.mockReset();
+    loggerMock.info.mockReset();
+    loggerMock.warn.mockReset();
+  });
+
+  afterEach(() => {
+    resetEgressHooks?.();
+  });
+
+  it('パス1で全 Source のフィードを取得してから、パス2で記事処理をする', async () => {
+    const order: string[] = [];
+    await testDb.insert(subscriptions).values([
+      { id: 'subscription-1', siteUrl },
+      { id: 'subscription-2', siteUrl: nonHatenaSiteUrl },
+    ]);
+    fetchRssOrFallbackMock.mockImplementation(async (_egress: unknown, targetUrl: string) => {
+      order.push(`feed:${targetUrl}`);
+      return targetUrl === siteUrl ? [article] : [secondArticle];
+    });
+    fetchArticleContentMock.mockImplementation(async () => {
+      order.push('content');
+      return '本文';
+    });
+    fetchHatenaBookmarksMock.mockResolvedValue(bookmarks);
+    generateArticleSummaryMock.mockResolvedValue('要約文');
+    generateHatenaSummaryMock.mockResolvedValue('はてブ要約');
+
+    const { syncAllSubscriptions } = await import('./sync.js');
+    await syncAllSubscriptions(false, testEnv, false, { egress });
+
+    expect(order).toEqual([
+      `feed:${siteUrl}`,
+      `feed:${nonHatenaSiteUrl}`,
+      'content',
+      'content',
+    ]);
+  });
+
+  it('429 を受けた Source はパス1末尾で 1 回だけ再試行し、同じ run で取り込む', async () => {
+    await testDb.insert(subscriptions).values([{ id: 'subscription-1', siteUrl }]);
+    const throttled = () =>
+      new egressModule.ThrottleError('Rate limited by hatena: 429 Too Many Requests', {
+        bucket: 'hatena',
+        nextRetryAtMs: Date.now() + 30 * 60 * 1000,
+      });
+    fetchRssOrFallbackMock.mockRejectedValueOnce(throttled()).mockResolvedValueOnce([article]);
+    fetchArticleContentMock.mockResolvedValue('本文');
+    fetchHatenaBookmarksMock.mockResolvedValue(bookmarks);
+    generateArticleSummaryMock.mockResolvedValue('要約文');
+    generateHatenaSummaryMock.mockResolvedValue('はてブ要約');
+
+    const { syncAllSubscriptions } = await import('./sync.js');
+    await syncAllSubscriptions(false, testEnv, false, { egress });
+
+    expect(fetchRssOrFallbackMock).toHaveBeenCalledTimes(2);
+    await expect(testDb.select().from(articles)).resolves.toHaveLength(1);
+    expect(loggerMock.warn).toHaveBeenCalledWith(
+      'Source 同期が律速されました。クールダウンを設定したため次周で再試行します。',
+      expect.objectContaining({ bucket: 'hatena', nextRetryAt: expect.any(String), siteUrl }),
+    );
+    // 再試行で成功したので、律速 warn は 1 本だけ。
+    expect(loggerMock.warn.mock.calls.filter((call) => String(call[0]).includes('律速'))).toHaveLength(1);
+  });
+
+  it('再試行でも取れなければ warn を増やさず、次回以降に譲る', async () => {
+    await testDb.insert(subscriptions).values([{ id: 'subscription-1', siteUrl }]);
+    fetchRssOrFallbackMock.mockImplementation(async () => {
+      throw new egressModule.ThrottleError('Rate limited by hatena: 429 Too Many Requests', {
+        bucket: 'hatena',
+        nextRetryAtMs: Date.now() + 30 * 60 * 1000,
+      });
+    });
+    fetchArticleContentMock.mockResolvedValue('本文');
+    fetchHatenaBookmarksMock.mockResolvedValue([]);
+    generateArticleSummaryMock.mockResolvedValue('要約文');
+
+    const { syncAllSubscriptions } = await import('./sync.js');
+    await syncAllSubscriptions(false, testEnv, false, { egress });
+
+    expect(fetchRssOrFallbackMock).toHaveBeenCalledTimes(2);
+    expect(loggerMock.warn.mock.calls.filter((call) => String(call[0]).includes('律速'))).toHaveLength(1);
+    await expect(testDb.select().from(articles)).resolves.toHaveLength(0);
+  });
+
+  it('クールダウン中の Source は info でスキップし、他の Source は継続する', async () => {
+    const coolingSiteUrl = nonHatenaSiteUrl;
+    await testDb.insert(subscriptions).values([
+      { id: 'subscription-1', siteUrl },
+      { id: 'subscription-2', siteUrl: coolingSiteUrl },
+    ]);
+    await egressModule.markThrottled(egress, 'example.com', null);
+
+    fetchRssOrFallbackMock.mockImplementation(async (_egress: unknown, targetUrl: string) =>
+      targetUrl === siteUrl ? [article] : [secondArticle],
+    );
+    fetchArticleContentMock.mockResolvedValue('本文');
+    fetchHatenaBookmarksMock.mockResolvedValue(bookmarks);
+    generateArticleSummaryMock.mockResolvedValue('要約文');
+    generateHatenaSummaryMock.mockResolvedValue('はてブ要約');
+
+    const { syncAllSubscriptions } = await import('./sync.js');
+    await syncAllSubscriptions(false, testEnv, false, { egress });
+
+    expect(fetchRssOrFallbackMock).toHaveBeenCalledTimes(1);
+    expect(fetchRssOrFallbackMock).toHaveBeenCalledWith(expect.anything(), siteUrl);
+    expect(loggerMock.info).toHaveBeenCalledWith(
+      'Source はクールダウン中のため取得をスキップします。',
+      expect.objectContaining({
+        bucket: 'example.com',
+        nextAllowedAt: expect.any(String),
+        siteUrl: coolingSiteUrl,
+      }),
+    );
+    await expect(testDb.select().from(articles)).resolves.toHaveLength(1);
+  });
+
+  it('force はクールダウンを無視して取得する（docs/specs/sync-egress-politeness.md）', async () => {
+    await testDb.insert(subscriptions).values([{ id: 'subscription-1', siteUrl: nonHatenaSiteUrl }]);
+    await egressModule.markThrottled(egress, 'example.com', null);
+    fetchRssOrFallbackMock.mockResolvedValue([article]);
+    fetchArticleContentMock.mockResolvedValue('本文');
+    fetchHatenaBookmarksMock.mockResolvedValue([]);
+    generateArticleSummaryMock.mockResolvedValue('要約文');
+
+    const testEgressModule = await import('../test-utils/egress.js');
+    const egressForced = testEgressModule.createTestEgressContext({ ignoreCooldown: true });
+    const { syncAllSubscriptions } = await import('./sync.js');
+    await syncAllSubscriptions(false, testEnv, false, { egress: egressForced, force: true });
+
+    expect(fetchRssOrFallbackMock).toHaveBeenCalledWith(expect.anything(), nonHatenaSiteUrl);
+  });
+
+  it('はてブ補完は 1 run 60 件で、カーソルが前回位置から巡回する（ADR-0010）', async () => {
+    const many = Array.from({ length: 70 }, (_, index) => ({
+      pubDate: new Date('2024-01-02T00:00:00.000Z'),
+      title: `記事 ${index}`,
+      url: `https://example.com/many/${index}`,
+    }));
+    await testDb.insert(subscriptions).values([{ id: 'subscription-1', siteUrl }]);
+    await testDb.insert(articles).values(
+      many.map((item, index) => ({
+        content: '本文',
+        hatenaSummary: '既存要約',
+        id: `article-${index}`,
+        isRead: false,
+        siteUrl,
+        summary: '要約',
+        title: item.title,
+        url: item.url,
+      })),
+    );
+
+    fetchRssOrFallbackMock.mockResolvedValue(many);
+    fetchHatenaBookmarksMock.mockResolvedValue(bookmarks);
+    generateArticleSummaryMock.mockResolvedValue('要約文');
+    generateHatenaSummaryMock.mockResolvedValue('はてブ要約');
+
+    const { backfillBudgetPerRun, syncAllSubscriptions } = await import('./sync.js');
+    await syncAllSubscriptions(false, testEnv, true, { egress });
+
+    expect(fetchHatenaBookmarksMock).toHaveBeenCalledTimes(backfillBudgetPerRun);
+    const firstRunCursor = await testDb
+      .select({ backfillCursor: subscriptions.backfillCursor })
+      .from(subscriptions);
+    expect(firstRunCursor[0]?.backfillCursor).toBe(backfillBudgetPerRun % many.length);
+
+    // 2 周目は前回位置の次から巡回する（先頭からやり直さない）。
+    fetchHatenaBookmarksMock.mockClear();
+    const visited: string[] = [];
+    fetchHatenaBookmarksMock.mockImplementation(async (_egress: unknown, articleUrl: string) => {
+      visited.push(articleUrl);
+      return bookmarks;
+    });
+    await syncAllSubscriptions(false, testEnv, true, { egress });
+
+    expect(visited[0]).toBe(many[60]!.url);
+    expect(visited).toHaveLength(backfillBudgetPerRun);
+    const secondRunCursor = await testDb
+      .select({ backfillCursor: subscriptions.backfillCursor })
+      .from(subscriptions);
+    expect(secondRunCursor[0]?.backfillCursor).toBe((60 + backfillBudgetPerRun) % many.length);
+  });
+
+  it('再試行でも枠が空かなければ info で持ち越しを 1 行出す（warn を増やさない）', async () => {
+    await testDb.insert(subscriptions).values([{ id: 'subscription-1', siteUrl }]);
+    fetchRssOrFallbackMock.mockImplementation(async () => {
+      throw new egressModule.EgressUnavailableError('hatena', 'occupied', 0);
+    });
+
+    const { syncAllSubscriptions } = await import('./sync.js');
+    await syncAllSubscriptions(false, testEnv, false, { egress });
+
+    expect(loggerMock.info).toHaveBeenCalledWith(
+      '未取得の Source を次回の同期に持ち越します。',
+      expect.objectContaining({ carried: 1, siteUrls: [siteUrl] }),
+    );
+    expect(loggerMock.warn).not.toHaveBeenCalled();
+  });
+
+  it('補完巡回はクールダウンで打ち切り、info 1 本だけ出して warn を増やさない', async () => {
+    const items = Array.from({ length: 5 }, (_, index) => ({
+      pubDate: new Date('2024-01-02T00:00:00.000Z'),
+      title: `記事 ${index}`,
+      url: `https://example.com/cool/${index}`,
+    }));
+    await testDb.insert(subscriptions).values([{ id: 'subscription-1', siteUrl }]);
+    await testDb.insert(articles).values(
+      items.map((item, index) => ({
+        content: '本文',
+        hatenaSummary: null,
+        id: `cool-${index}`,
+        isRead: false,
+        siteUrl,
+        summary: '要約',
+        title: item.title,
+        url: item.url,
+      })),
+    );
+
+    fetchRssOrFallbackMock.mockResolvedValue(items);
+    fetchHatenaBookmarksMock.mockImplementation(async () => {
+      throw new egressModule.EgressUnavailableError('hatena', 'cooldown', Date.now() + 30 * 60 * 1000);
+    });
+    generateArticleSummaryMock.mockResolvedValue('要約文');
+    generateHatenaSummaryMock.mockResolvedValue('はてブ要約');
+
+    const { syncAllSubscriptions } = await import('./sync.js');
+    await syncAllSubscriptions(false, testEnv, true, { egress });
+
+    // 1 件目で枠が空かないと分かれば、残りは試みない（=warn/info の乱発がない）。
+    expect(fetchHatenaBookmarksMock).toHaveBeenCalledTimes(1);
+    expect(loggerMock.warn).not.toHaveBeenCalled();
+    expect(loggerMock.info).toHaveBeenCalledWith(
+      'はてブ補完は取得枠のクールダウン中のため、この Source を打ち切ります。',
+      expect.objectContaining({ bucket: 'hatena', nextRetryAt: expect.any(String), siteUrl }),
+    );
+    const cursor = await testDb.select({ backfillCursor: subscriptions.backfillCursor }).from(subscriptions);
+    expect(cursor[0]?.backfillCursor).toBe(1);
+  });
+
+  it('新着記事のはてブがクールダウン中なら info でコメントなし保存する', async () => {
+    await testDb.insert(subscriptions).values([{ id: 'subscription-1', siteUrl }]);
+    fetchRssOrFallbackMock.mockResolvedValue([article]);
+    fetchArticleContentMock.mockResolvedValue('本文');
+    fetchHatenaBookmarksMock.mockRejectedValue(
+      new egressModule.EgressUnavailableError('hatena', 'cooldown', Date.now() + 30 * 60 * 1000),
+    );
+    generateArticleSummaryMock.mockResolvedValue('要約文');
+
+    const { syncAllSubscriptions } = await import('./sync.js');
+    await syncAllSubscriptions(false, testEnv, false, { egress });
+
+    await expect(testDb.select().from(articles)).resolves.toHaveLength(1);
+    expect(loggerMock.info).toHaveBeenCalledWith(
+      'はてなブックマークはクールダウン中のため、コメントなしで保存します。',
+      expect.objectContaining({ articleUrl: article.url, bucket: 'hatena', nextRetryAt: expect.any(String) }),
+    );
+    expect(loggerMock.warn).not.toHaveBeenCalled();
+  });
+
+  it('run 完了サマリを 1 本出す', async () => {
+    await testDb.insert(subscriptions).values([{ id: 'subscription-1', siteUrl }]);
+    fetchRssOrFallbackMock.mockResolvedValue([article]);
+    fetchArticleContentMock.mockResolvedValue('本文');
+    fetchHatenaBookmarksMock.mockResolvedValue(bookmarks);
+    generateArticleSummaryMock.mockResolvedValue('要約文');
+    generateHatenaSummaryMock.mockResolvedValue('はてブ要約');
+
+    const { syncAllSubscriptions } = await import('./sync.js');
+    await syncAllSubscriptions(false, testEnv, false, { egress });
+
+    expect(loggerMock.info).toHaveBeenCalledWith(
+      '同期が完了しました。',
+      expect.objectContaining({ skipped: 0, sources: 1, synced: 1, throttled: 0 }),
+    );
   });
 });
