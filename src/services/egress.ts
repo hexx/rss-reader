@@ -317,27 +317,42 @@ export async function acquireEgressSlot(
     if (state === null) {
       return first;
     }
-    if (state.cooldownUntilMs > deadline) {
+    // 待機上限を過ぎたら待つのも再試行も打ち切る（=最大待機時間の約束を守る）。
+    if (now >= deadline) {
+      return { acquired: false, bucket, reason: 'occupied' };
+    }
+    // force（ignoreCooldown）はクールダウンを待たない。礼儀の間隔だけを待つ。
+    if (!ignoreCooldown && state.cooldownUntilMs > deadline) {
       return { acquired: false, bucket, cooldownUntilMs: state.cooldownUntilMs, reason: 'cooldown' };
     }
 
-    const waitUntilMs = Math.max(state.cooldownUntilMs, state.nextAllowedAtMs);
-    if (waitUntilMs > now) {
-      await sleepFn(Math.min(waitUntilMs - now, deadline - now));
-    } else {
-      await sleepFn(Math.min(100, Math.max(1, deadline - nowFn())));
-    }
+    const waitUntilMs = ignoreCooldown ? state.nextAllowedAtMs : Math.max(state.cooldownUntilMs, state.nextAllowedAtMs);
+    const waitMs = Math.min(Math.max(waitUntilMs - now, 0), deadline - now);
+    await sleepFn(waitMs > 0 ? waitMs : 1);
 
     const retry = await attemptReserve(egress.store, bucket, ignoreCooldown);
-    if (retry.acquired || retry.reason === 'cooldown') {
+    if (retry.acquired) {
+      return retry;
+    }
+    if (!ignoreCooldown && retry.reason === 'cooldown') {
       return retry;
     }
     if (nowFn() >= deadline) {
-      return retry;
+      return { acquired: false, bucket, reason: 'occupied' };
     }
   }
 
   return { acquired: false, bucket, reason: 'occupied' };
+}
+
+/** 確保済みの枠の中で HTTP リクエストを行う（429/503 は ThrottleError）。 */
+export async function requestWithinEgressSlot(
+  egress: EgressContext,
+  bucket: string,
+  rawUrl: string,
+  init: RequestInit,
+): Promise<Response> {
+  return performRequest(egress, bucket, rawUrl, init);
 }
 
 /**
@@ -346,6 +361,10 @@ export async function acquireEgressSlot(
  *
  * リダイレクト追随など同一操作内の後続リクエストは `continueEgressRequest` を使うこと
  * （1 リクエストごとに枠を消費すると、多重リダイレクトで自分自身の枠に詰まる）。
+ *
+ * NOTE: HTTP のタイムアウトは呼び出し側で `init.signal` に載せるが、そのタイマーは
+ * **枠を確保したあとに**張るようにすること（`acquireEgressSlot` + `requestWithinEgressSlot`
+ * を使う）。枠待ちの時間を相手の不調と誤診してクールダウンを作る誤りがある。
  */
 export async function startEgressRequest(
   egress: EgressContext,

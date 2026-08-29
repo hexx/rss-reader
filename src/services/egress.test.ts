@@ -113,6 +113,19 @@ describe('acquireEgressSlot (枠の予約)', () => {
     expect(reservation).toMatchObject({ acquired: false, reason: 'cooldown' });
   });
 
+  it('wait モードは最大待機時間を超えて待たない（超えたら occupied）', async () => {
+    const egress = createTestEgressContext();
+    // 他の実行が遠くまで枠を進めておく（クールダウンなし＝ occupied のみ）。
+    const far = clock.now() + EGRESS_POLICY.maximumSlotWaitMs + 60_000;
+    await egress.store.spaceOut('example.com', far);
+    const before = clock.now();
+
+    const reservation = await acquireEgressSlot(egress, defaultUrl, { mode: 'wait' });
+
+    expect(reservation).toMatchObject({ acquired: false, reason: 'occupied' });
+    expect(clock.now() - before).toBeLessThanOrEqual(EGRESS_POLICY.maximumSlotWaitMs + 1);
+  });
+
   it('force（ignoreCooldown）はクールダウンを無視して予約する', async () => {
     const egress = createTestEgressContext({ ignoreCooldown: true });
     await markThrottled(egress, 'hatena', null);
@@ -123,6 +136,18 @@ describe('acquireEgressSlot (枠の予約)', () => {
       acquired: false,
       reason: 'occupied',
     });
+  });
+
+  it('force の wait はクールダウンを待たず、礼儀の間隔だけ待つ', async () => {
+    const egress = createTestEgressContext({ ignoreCooldown: true });
+    await markThrottled(egress, 'hatena', '86400'); // 1 日のクールダウン
+    const before = clock.now();
+
+    const reservation = await acquireEgressSlot(egress, hatenaFeedUrl, { mode: 'wait' });
+
+    expect(reservation.acquired).toBe(true);
+    // 1 日ではなく、はてな群の最小間隔ぶんだけ待って通る。
+    expect(clock.now() - before).toBeLessThan(EGRESS_POLICY.maximumSlotWaitMs);
   });
 });
 

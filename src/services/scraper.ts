@@ -5,7 +5,15 @@ import type { Element } from 'domhandler';
 import Parser from 'rss-parser';
 
 import type { EgressContext } from './egress.js';
-import { EGRESS_POLICY, bucketKeyOf, continueEgressRequest, markThrottled, startEgressRequest } from './egress.js';
+import {
+  acquireEgressSlot,
+  bucketKeyOf,
+  continueEgressRequest,
+  EGRESS_POLICY,
+  EgressUnavailableError,
+  markThrottled,
+  requestWithinEgressSlot,
+} from './egress.js';
 
 export interface ScrapedLink {
   pubDate: Date | null;
@@ -161,32 +169,42 @@ async function fetchHtmlWithHeaders(
   headers: Record<string, string>,
   options: HtmlFetchOptions,
 ): Promise<string> {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+  const bucket = bucketKeyOf(url);
   try {
     // 枠は 1 論理操作で 1 つだけ確保する。リダイレクトは同じ枠の続きとして追随し、
     // 各ホップで安全性を再検証する。
-    const started = await startEgressRequest(
-      egress,
-      url,
-      { headers, redirect: 'manual', signal: controller.signal },
-      { mode: options.egressMode ?? 'wait' },
-    );
-    const response = await followRedirects(egress, started.bucket, started.response, url, headers, controller.signal);
-    if (!response.ok) {
-      throw new HttpStatusError(
-        `Failed to fetch ${redactUrl(url)}: ${response.status} ${response.statusText}`,
-        response.status,
-      );
+    const slot = await acquireEgressSlot(egress, url, { mode: options.egressMode ?? 'wait' });
+    if (!slot.acquired) {
+      throw new EgressUnavailableError(bucket, slot.reason ?? 'occupied', slot.cooldownUntilMs ?? 0);
     }
-    return await readBoundedText(response, DEFAULT_MAX_HTML_BYTES);
+    // HTTP タイムアウトは枠を確保した**あとに**張る。枠待ちの時間を
+    // 相手の不調と誤診してクールダウンを作るのを防ぐ（ADR-0009）。
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+    try {
+      const first = await requestWithinEgressSlot(
+        egress,
+        bucket,
+        url,
+        { headers, redirect: 'manual', signal: controller.signal },
+      );
+      const response = await followRedirects(egress, bucket, first, url, headers, controller.signal);
+      if (!response.ok) {
+        throw new HttpStatusError(
+          `Failed to fetch ${redactUrl(url)}: ${response.status} ${response.statusText}`,
+          response.status,
+        );
+      }
+      // タイムアウトはヘッダー到着だけでなくボディ読み取りまで含めて適用する。
+      return await readBoundedText(response, DEFAULT_MAX_HTML_BYTES);
+    } finally {
+      clearTimeout(timeout);
+    }
   } catch (error) {
-    // タイムアウト・ボディ異常は 429 と同じ「相手の不調の兆候」として枠に記録し、
+    // タイムアウト・ボディサイズ超過は 429 と同じ「相手の不調の兆候」として枠に記録し、
     // 間隔だけ空けて同じ相手を叩き返し続けるのを防ぐ（ADR-0009）。
-    // 枠キーは URL から解決する（startEgressRequest の途中で reject されると
-    // bucket を受け取れないため、この計算は確保済み枠と同じになる）。
     if (isAbortError(error) || isUnhealthyResponseError(error)) {
-      await markThrottled(egress, bucketKeyOf(url));
+      await markThrottled(egress, bucket);
     }
     // タイムアウトによる中断は AbortError のまま呼び出し側に渡さず、
     // 分かりやすいメッセージに置き換える。
@@ -194,11 +212,10 @@ async function fetchHtmlWithHeaders(
       throw new Error(`Fetch timed out: ${redactUrl(url)}`, { cause: error });
     }
     throw error;
-  } finally {
-    clearTimeout(timeout);
   }
 }
 
+/** AbortError（タイムアウト）かどうか。判定は signal ではなくエラー型で行う。 */
 function isAbortError(error: unknown): boolean {
   return error instanceof DOMException && error.name === 'AbortError';
 }
@@ -709,27 +726,26 @@ export async function discoverRssFeedUrl(
   options: DiscoverOptions = {},
 ): Promise<DiscoveredFeed | null> {
   const safeUrl = ensureSafePageUrl(rawUrl);
-  const maxBytes = options.maxBytes ?? DEFAULT_MAX_HTML_BYTES;
+  const url = safeUrl.toString();
+  const bucket = bucketKeyOf(url);
 
+  const slot = await acquireEgressSlot(egress, url, { mode: 'wait' });
+  if (!slot.acquired) {
+    throw new EgressUnavailableError(bucket, slot.reason ?? 'occupied', slot.cooldownUntilMs ?? 0);
+  }
+
+  // HTTP タイムアウトは枠を確保した**あとに**張る。枠待ちの時間を相手の不調と
+  // 誤診してクールダウンを作るのを防ぐ（ADR-0009）。
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), DISCOVERY_TIMEOUT_MS);
-  // ヘッダー取得だけでなくボディ読み込みまで含めて全体をタイムアウト対象にする。
-  // clearTimeout は finally で一括実行し、早期リターン経路で漏れないようにする。
   try {
-    const started = await startEgressRequest(
+    const first = await requestWithinEgressSlot(
       egress,
-      safeUrl.toString(),
+      bucket,
+      url,
       { headers: readerRequestHeaders, redirect: 'manual', signal: controller.signal },
-      { mode: 'wait' },
     );
-    const response = await followRedirects(
-      egress,
-      started.bucket,
-      started.response,
-      safeUrl.toString(),
-      readerRequestHeaders,
-      controller.signal,
-    );
+    const response = await followRedirects(egress, bucket, first, url, readerRequestHeaders, controller.signal);
 
     if (!response.ok) {
       throw new Error(`Failed to fetch the page. status=${response.status}`);
@@ -742,7 +758,7 @@ export async function discoverRssFeedUrl(
     // 入力 URL が既に RSS/Atom フィードそのものを指している場合はそのまま返す。
     if (FEED_CONTENT_TYPE_PATTERN.test(mediaType)) {
       const type = pickFeedType(mediaType) ?? 'rss';
-      return { alreadyAFeed: true, feedUrl: safeUrl.toString(), type };
+      return { alreadyAFeed: true, feedUrl: url, type };
     }
 
     // HTML / テキスト（およびルート要素を確認する必要がある汎用 XML）のみ自動検出を試みる。
@@ -750,80 +766,93 @@ export async function discoverRssFeedUrl(
       return null;
     }
 
-    const html = await readBoundedText(response, maxBytes);
-    const $ = load(html);
-
-    // 汎用 XML (application/xml, text/xml) はルート要素でフィードか判定する。
-    // フィード以外の XML（sitemap.xml や XHTML 等）は <link rel=alternate> の
-    // 探索へフォールバックし、誤ってフィードとして登録しないようにする。
-    // ルート要素は生テキストの先頭タグで判定する（cheerio の load は XML を
-    // HTML としてパースし <html> に包むため、ルート要素が取れない）。
-    // 文書途中の同名要素による誤検知も防げる。RSS 1.0 は <rdf:RDF> ルートを持つ。
-    if (isGenericXml) {
-      const rootTagMatch =
-        /^\uFEFF?\s*(?:<\?xml[^>]*\?>\s*)?(?:<!DOCTYPE[^>]*>\s*)?<([a-zA-Z][a-zA-Z0-9:_-]*)/u.exec(html);
-      const rootTagName = rootTagMatch?.[1]?.toLowerCase() ?? '';
-      if (rootTagName === 'rss' || rootTagName === 'rdf:rdf') {
-        return { alreadyAFeed: true, feedUrl: safeUrl.toString(), type: 'rss' };
-      }
-      if (rootTagName === 'feed') {
-        return { alreadyAFeed: true, feedUrl: safeUrl.toString(), type: 'atom' };
-      }
-    }
-
-    const candidates: { feedUrl: string; type: DiscoveredFeedType }[] = [];
-
-    $('link[rel~="alternate"]').each((_, node) => {
-      if (!isTag(node)) {
-        return;
-      }
-      const typeAttr = $(node).attr('type') ?? '';
-      const feedType = pickFeedType(typeAttr);
-      if (!feedType) {
-        return;
-      }
-      const href = $(node).attr('href');
-      if (!href || href.length === 0) {
-        return;
-      }
-      try {
-        const resolved = new URL(href, safeUrl);
-        if (!['http:', 'https:'].includes(resolved.protocol)) {
-          return;
-        }
-        // 検出されたフィード URL も安全性を検証し、ストアド SSRF を防ぐ。
-        if (isUnsafeHostname(resolved.hostname)) {
-          return;
-        }
-        candidates.push({ feedUrl: resolved.toString(), type: feedType });
-      } catch {
-        // 不正な href はスキップ
-      }
-    });
-
-    if (candidates.length === 0) {
-      return null;
-    }
-
-    // RSS を優先、同一 type 内ではソース上の出現順を保つ。
-    candidates.sort((a, b) => {
-      if (a.type === b.type) {
-        return 0;
-      }
-      return a.type === 'rss' ? -1 : 1;
-    });
-
-    return { ...candidates[0]!, alreadyAFeed: false };
+    // ヘッダー取得だけでなくボディ読み込みまで含めて全体をタイムアウト対象にする。
+    const html = await readBoundedText(response, options.maxBytes ?? DEFAULT_MAX_HTML_BYTES);
+    return classifyDiscoveredFeed(url, mediaType, isGenericXml, html);
   } catch (error) {
-    // タイムアウトは自動検出相手の不調の兆候として枠に記録する（ADR-0009）。
-    // メッセージは従来どおり AbortError をそのまま渡す。
-    if (isAbortError(error)) {
-      await markThrottled(egress, bucketKeyOf(safeUrl.toString()));
+    // タイムアウト・ボディサイズ超過は 429 と同じ「相手の不調の兆候」として枠に記録する。
+    if (isAbortError(error) || isUnhealthyResponseError(error)) {
+      await markThrottled(egress, bucket);
     }
     throw error;
   } finally {
     clearTimeout(timeout);
   }
+}
+
+/**
+ * 取得したドキュメントからフィード URL を判定する純粋処理。
+ *
+ * 汎用 XML (application/xml, text/xml) はルート要素でフィードか判定する。
+ * フィード以外の XML（sitemap.xml や XHTML 等）は `<link rel=alternate>` の
+ * 探索へフォールバックし、誤ってフィードとして登録しないようにする。
+ * ルート要素は生テキストの先頭タグで判定する（cheerio の load は XML を
+ * HTML としてパースし `<html>` に包むため、ルート要素が取れない）。
+ * 文書途中の同名要素による誤検知も防げる。RSS 1.0 は `<rdf:RDF>` ルートを持つ。
+ */
+function classifyDiscoveredFeed(
+  url: string,
+  mediaType: string,
+  isGenericXml: boolean,
+  html: string,
+): DiscoveredFeed | null {
+  const safeUrl = new URL(url);
+
+  if (isGenericXml) {
+    const rootTagMatch =
+      /^\uFEFF?\s*(?:<\?xml[^>]*\?>\s*)?(?:<!DOCTYPE[^>]*>)?\s*<([a-zA-Z][a-zA-Z0-9:_-]*)/u.exec(html);
+    const rootTagName = rootTagMatch?.[1]?.toLowerCase() ?? '';
+    if (rootTagName === 'rss' || rootTagName === 'rdf:rdf') {
+      return { alreadyAFeed: true, feedUrl: url, type: 'rss' };
+    }
+    if (rootTagName === 'feed') {
+      return { alreadyAFeed: true, feedUrl: url, type: 'atom' };
+    }
+  }
+
+  const $ = load(html);
+  const candidates: { feedUrl: string; type: DiscoveredFeedType }[] = [];
+
+  $('link[rel~="alternate"]').each((_, node) => {
+    if (!isTag(node)) {
+      return;
+    }
+    const feedType = pickFeedType($(node).attr('type') ?? '');
+    if (!feedType) {
+      return;
+    }
+    const href = $(node).attr('href');
+    if (!href || href.length === 0) {
+      return;
+    }
+    try {
+      const resolved = new URL(href, safeUrl);
+      if (!['http:', 'https:'].includes(resolved.protocol)) {
+        return;
+      }
+      // 検出されたフィード URL も安全性を検証し、ストアド SSRF を防ぐ。
+      if (isUnsafeHostname(resolved.hostname)) {
+        return;
+      }
+      candidates.push({ feedUrl: resolved.toString(), type: feedType });
+    } catch {
+      // 不正な href はスキップ
+    }
+  });
+
+  if (candidates.length === 0) {
+    return null;
+  }
+
+  // RSS を優先、同一 type 内ではソース上の出現順を保つ。
+  candidates.sort((a, b) => {
+    if (a.type === b.type) {
+      return 0;
+    }
+    return a.type === 'rss' ? -1 : 1;
+  });
+
+  return { ...candidates[0]!, alreadyAFeed: false };
 }
 
 export async function fetchRssOrFallback(

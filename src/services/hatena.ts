@@ -1,8 +1,10 @@
 import type { EgressContext } from './egress.js';
 import {
+  acquireEgressSlot,
   bucketKeyOf,
+  EgressUnavailableError,
   markThrottled,
-  startEgressRequest,
+  requestWithinEgressSlot,
   ThrottleError,
 } from './egress.js';
 import { readerRequestHeaders, readBoundedText } from './scraper.js';
@@ -94,22 +96,28 @@ export async function fetchHatenaBookmarks(
   const requestUrl = `${hatenaEntryJsonLiteBaseUrl}${encodeURIComponent(articleUrl)}`;
   // jsonlite のホスト（b.hatena.ne.jp）ははてな群の 1 取得枠に属する。
   const bucket = bucketKeyOf(requestUrl);
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), hatenaFetchTimeoutMs);
 
   let payload: HatenaBookmarkApiResponse | null | undefined;
+  const slot = await acquireEgressSlot(egress, requestUrl, { mode: 'wait' });
+  if (!slot.acquired) {
+    throw new EgressUnavailableError(bucket, slot.reason ?? 'occupied', slot.cooldownUntilMs ?? 0);
+  }
+
+  // HTTP タイムアウトは枠を確保した**あとに**張る（枠待ちを相手の不調と誤診しないため）。
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), hatenaFetchTimeoutMs);
   try {
     // タイムアウトはレスポンスヘッダー到着だけでなく、ボディ読み取りまで
     // 含めて適用する（ヘッダーだけ返して本文を送らない bot ブロック等で
     // 同期が止まらないようにするため）。
-    const { response } = await startEgressRequest(
+    const response = await requestWithinEgressSlot(
       egress,
+      bucket,
       requestUrl,
       {
         headers: { ...readerRequestHeaders, accept: 'application/json' },
         signal: controller.signal,
       },
-      { mode: 'wait' },
     );
 
     if (!response.ok) {

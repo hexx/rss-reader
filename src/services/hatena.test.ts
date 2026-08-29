@@ -8,7 +8,7 @@ import {
   resetEgressTestHooks,
   type VirtualClock,
 } from '../test-utils/egress.js';
-import { EGRESS_POLICY, isThrottleError } from './egress.js';
+import { EGRESS_POLICY, isThrottleError, markThrottled } from './egress.js';
 import { fetchRssOrFallback } from './scraper.js';
 import { fetchHatenaBookmarks } from './hatena.js';
 
@@ -59,6 +59,10 @@ const hatenaResponse = {
     },
   ],
 };
+
+async function markThrottledForTest(egress: ReturnType<typeof createTestEgressContext>): Promise<void> {
+  await markThrottled(egress, 'hatena', null);
+}
 
 describe('fetchHatenaBookmarks', () => {
   let egress = createTestEgressContext();
@@ -220,6 +224,19 @@ describe('fetchHatenaBookmarks', () => {
       clock.advance(120_000);
       server.use(http.get(hatenaApiBaseUrl, () => HttpResponse.json({ bookmarks: [] }, { headers: jsonHeaders })));
       await expect(fetchHatenaBookmarks(egress, articleUrl)).resolves.toEqual([]);
+    });
+
+    it('枠待ちで弾かれたときはクールダウンを一段進めない（自前の待機を相手の不調にしない）', async () => {
+      server.use(
+        http.get(hatenaApiBaseUrl, () => HttpResponse.json({ bookmarks: [] }, { headers: jsonHeaders })),
+      );
+      await markThrottledForTest(egress);
+
+      const stateBefore = await egress.store.read('hatena');
+      await expect(fetchHatenaBookmarks(egress, articleUrl)).rejects.toThrow(/cooling down/i);
+      const stateAfter = await egress.store.read('hatena');
+
+      expect(stateAfter?.consecutiveThrottles).toBe(stateBefore?.consecutiveThrottles);
     });
 
     it('はてな群ではフィード取得とはてブ取得が同じ枠を共有する', async () => {
