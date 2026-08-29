@@ -5,7 +5,7 @@ import type { Element } from 'domhandler';
 import Parser from 'rss-parser';
 
 import type { EgressContext } from './egress.js';
-import { EGRESS_POLICY, continueEgressRequest, startEgressRequest } from './egress.js';
+import { EGRESS_POLICY, bucketKeyOf, continueEgressRequest, markThrottled, startEgressRequest } from './egress.js';
 
 export interface ScrapedLink {
   pubDate: Date | null;
@@ -181,15 +181,31 @@ async function fetchHtmlWithHeaders(
     }
     return await readBoundedText(response, DEFAULT_MAX_HTML_BYTES);
   } catch (error) {
+    // タイムアウト・ボディ異常は 429 と同じ「相手の不調の兆候」として枠に記録し、
+    // 間隔だけ空けて同じ相手を叩き返し続けるのを防ぐ（ADR-0009）。
+    // 枠キーは URL から解決する（startEgressRequest の途中で reject されると
+    // bucket を受け取れないため、この計算は確保済み枠と同じになる）。
+    if (isAbortError(error) || isUnhealthyResponseError(error)) {
+      await markThrottled(egress, bucketKeyOf(url));
+    }
     // タイムアウトによる中断は AbortError のまま呼び出し側に渡さず、
     // 分かりやすいメッセージに置き換える。
-    if (error instanceof DOMException && error.name === 'AbortError') {
+    if (isAbortError(error)) {
       throw new Error(`Fetch timed out: ${redactUrl(url)}`, { cause: error });
     }
     throw error;
   } finally {
     clearTimeout(timeout);
   }
+}
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof DOMException && error.name === 'AbortError';
+}
+
+/** ボディサイズ超過など、bot ブロック・不調の兆候と扱う応答異常か。 */
+function isUnhealthyResponseError(error: unknown): boolean {
+  return error instanceof Error && error.message.includes('exceeded the size limit');
 }
 
 function extractArticleContent(html: string): string {
@@ -798,6 +814,13 @@ export async function discoverRssFeedUrl(
     });
 
     return { ...candidates[0]!, alreadyAFeed: false };
+  } catch (error) {
+    // タイムアウトは自動検出相手の不調の兆候として枠に記録する（ADR-0009）。
+    // メッセージは従来どおり AbortError をそのまま渡す。
+    if (isAbortError(error)) {
+      await markThrottled(egress, bucketKeyOf(safeUrl.toString()));
+    }
+    throw error;
   } finally {
     clearTimeout(timeout);
   }

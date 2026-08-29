@@ -48,7 +48,15 @@ function matchesDomain(hostname: string, domain: string): boolean {
   return hostname === domain || hostname.endsWith(`.${domain}`);
 }
 
-/** 一般ドメインに対して登録可能ドメインとして扱う国別 2 段 TLD（日本中心）。 */
+/**
+ * 一般ドメインに対して登録可能ドメインとして扱う国別 2 段 TLD（日本中心）。
+ *
+ * 公開サフィックスリスト（PSL）の完全な写しではなく、購読先で現れうる範囲に絞った
+ * 運用上の短縮リスト。失敗方向は安全側のみ：未収録の multi-label suffix（例 `co.za`）は
+ * 末尾 2 ラベルを登録可能ドメインとして扱うため、本来より細かく割られるだけで、
+ * 相手を叩く量は増えない（異なる運用者を同一枠に束ねる方向にしか狂わない）。
+ * 逆方向（別々の相手を同一枠にして礼儀を緩める）ことは起こりえない。
+ */
 const TWO_LEVEL_PUBLIC_SUFFIXES = new Set([
   'co.jp',
   'ne.jp',
@@ -487,8 +495,11 @@ export function createD1BucketStore(database: AppDatabase): BucketStore {
       await database
         .update(fetchBucket)
         .set({
-          consecutiveThrottles: sql`${fetchBucket.consecutiveThrottles} + 1`,
-          cooldownUntil: until,
+          // 連続障害回数とクールダウンは、読み直した値ではなく DB 側の現在値を
+          // 基準に更新する。並行実行が同時に 429 を記録しても、バックオフが
+          // 一段戻ったり短い値で上書きされたりしない（ADR-0009）。
+          consecutiveThrottles: sql`min(${fetchBucket.consecutiveThrottles} + 1, ${EGRESS_POLICY.cooldownStepsMs.length})`,
+          cooldownUntil: sql`max(${fetchBucket.cooldownUntil}, ${until})`,
         })
         .where(sql`${fetchBucket.bucket} = ${bucket}`)
         .run();
@@ -551,8 +562,8 @@ export function createMemoryBucketStore(): BucketStore & { buckets: Map<string, 
       const state = buckets.get(bucket) ?? empty();
       buckets.set(bucket, {
         ...state,
-        consecutiveThrottles: state.consecutiveThrottles + 1,
-        cooldownUntil: Math.max(cooldownUntilMs, nowFn()),
+        consecutiveThrottles: Math.min(state.consecutiveThrottles + 1, EGRESS_POLICY.cooldownStepsMs.length),
+        cooldownUntil: Math.max(state.cooldownUntil, cooldownUntilMs, nowFn()),
       });
     },
     async markOk(bucket) {

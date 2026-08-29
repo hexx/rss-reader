@@ -21,7 +21,7 @@ vi.mock('rss-parser', () => ({
   },
 }));
 
-import { EGRESS_POLICY } from './egress.js';
+import { bucketKeyOf, EGRESS_POLICY } from './egress.js';
 import { fetchArticleContent, fetchRssOrFallback, discoverRssFeedUrl, readBoundedText } from './scraper.js';
 
 const feedUrl = 'https://example.com/feed.xml';
@@ -708,5 +708,35 @@ describe('scraper service', () => {
 
       await expect(readBoundedText(fakeResponse, 1024)).resolves.toBe('hello');
     });
+  });
+});
+
+describe('律速層への障害記録（ADR-0009）', () => {
+  it('タイムアウトしたフィード取得は枠にクールダウンを設定する', async () => {
+    const egress = createTestEgressContext();
+    vi.useFakeTimers();
+    const hangingFetch = ((_input: RequestInfo | URL, init?: RequestInit) =>
+      new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener('abort', () => {
+          reject(new DOMException('The operation was aborted.', 'AbortError'));
+        });
+      })) as typeof fetch;
+    vi.stubGlobal('fetch', hangingFetch);
+
+    try {
+      const promise = fetchRssOrFallback(egress, feedUrl);
+      const assertion = expect(promise).rejects.toThrow(/timed out/i);
+      await vi.advanceTimersByTimeAsync(15_000 + 10);
+      await assertion;
+    } finally {
+      vi.unstubAllGlobals();
+      vi.useRealTimers();
+    }
+
+    // 枠（example.com）にクールダウンが記録されていること。
+    // 時刻系 DI に依存しないよう、ストアの生値で検証する。
+    const state = await egress.store.read(bucketKeyOf(feedUrl));
+    expect(state?.cooldownUntilMs).toBeGreaterThan(Date.now());
+    expect(state?.consecutiveThrottles).toBe(1);
   });
 });

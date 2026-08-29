@@ -284,3 +284,37 @@ describe('createD1BucketStore (枠状態は D1 が権威)', () => {
     await expect(store.read('hatena')).resolves.toMatchObject({ nextAllowedAtMs: far });
   });
 });
+
+describe('並行実行下のバックオフ（取りこぼし防止）', () => {
+  let clock: VirtualClock;
+
+  beforeEach(() => {
+    clock = installVirtualEgressTime();
+  });
+
+  afterEach(() => {
+    resetEgressTestHooks();
+  });
+
+  it('短い Retry-After が後から来てもクールダウンは戻るだけ（max で保つ）', async () => {
+    const egress = createTestEgressContext();
+
+    const long = await markThrottled(egress, 'example.com', '3600');
+    await markThrottled(egress, 'example.com', '5');
+
+    const state = await egress.store.read('example.com');
+    expect(state?.cooldownUntilMs).toBe(long);
+    expect(state?.cooldownUntilMs).toBeGreaterThan(clock.now() + 3_000_000);
+  });
+
+  it('連続障害回数は段階テーブルの長さを超えて増えない', async () => {
+    const egress = createTestEgressContext();
+
+    for (let attempt = 0; attempt < 6; attempt += 1) {
+      await markThrottled(egress, 'example.com', null);
+    }
+    const state = await egress.store.read('example.com');
+    expect(state?.consecutiveThrottles).toBe(EGRESS_POLICY.cooldownStepsMs.length);
+    expect((state?.cooldownUntilMs ?? 0) - clock.now()).toBeLessThanOrEqual(EGRESS_POLICY.cooldownCapMs);
+  });
+});
