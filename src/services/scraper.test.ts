@@ -461,6 +461,50 @@ describe('scraper service', () => {
       expect(authHeaders).toEqual(['Bearer test-key', null]);
     });
 
+    it('認証情報（userinfo）付きの URL は退避しない（Jina への漏出を防ぐ）', async () => {
+      let jinaCalled = false;
+      server.use(
+        http.get('https://example.com/secret', () => new HttpResponse(null, { status: 403 })),
+        http.get('https://r.jina.ai/*', () => {
+          jinaCalled = true;
+          return HttpResponse.text(jinaMarkdown);
+        }),
+      );
+
+      await expect(
+        fetchArticleContent(egress, 'https://user:pass@example.com/secret'),
+      ).rejects.toThrow(/credentials/iu);
+      expect(jinaCalled).toBe(false);
+    });
+
+    it('リダイレクト先が他オリジンになると Bearer ヘッダーを落とし、同一オリジンなら維持する', async () => {
+      let jinaRedirects = 0;
+      const authOnSameOrigin: (string | null)[] = [];
+      const authOnCrossOrigin: (string | null)[] = [];
+      server.use(
+        http.get(articleOneUrl, () => new HttpResponse(null, { status: 403 })),
+        http.get('https://r.jina.ai/*', ({ request }) => {
+          jinaRedirects += 1;
+          authOnSameOrigin.push(request.headers.get('authorization'));
+          if (jinaRedirects === 1) {
+            return HttpResponse.text('', { headers: { Location: 'https://r.jina.ai/next' }, status: 302 });
+          }
+          return HttpResponse.text('', { headers: { Location: 'https://elsewhere.example.net/landing' }, status: 302 });
+        }),
+        http.get('https://elsewhere.example.net/landing', ({ request }) => {
+          authOnCrossOrigin.push(request.headers.get('authorization'));
+          return HttpResponse.text(jinaMarkdown);
+        }),
+      );
+
+      await expect(
+        fetchArticleContent(egress, articleOneUrl, { jinaApiKey: 'test-key' }),
+      ).resolves.toBe(jinaMarkdownNormalized);
+      expect(jinaRedirects).toBe(2);
+      expect(authOnSameOrigin).toEqual(['Bearer test-key', 'Bearer test-key']);
+      expect(authOnCrossOrigin).toEqual([null]);
+    });
+
     it('非HTML拡張子の URL は退避しない', async () => {
       let jinaCalled = false;
       server.use(

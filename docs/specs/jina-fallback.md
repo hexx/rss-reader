@@ -36,6 +36,9 @@
   - 記事 URL の `ensureSafePageUrl`（内部アドレス・非 http(s) の拒否）
   - 非HTML拡張子の除外（退避の対象にそもそもならない）
   - タイムアウト 15 秒 / ボディ上限 2 MB（`FETCH_TIMEOUT_MS` / `DEFAULT_MAX_HTML_BYTES` の流用）
+- 退避に固有の追加防御:
+  - 認証情報（userinfo）付きの URL は第三者（Jina）に渡すと漏出になるため**退避しない**。
+  - Jina の `Authorization` ヘッダーは**クロスオリジンのリダイレクト先へは送らない**（同一オリジンの追随では維持）。
 
 ## 4. 律速との統合
 
