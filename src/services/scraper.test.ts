@@ -322,10 +322,23 @@ describe('scraper service', () => {
       ]);
     });
 
-    it('403 が続くと退避は 1 回までで、本文なしの失敗を返す', async () => {
+    it('403 が続くと退避は 1 回までで、本文なしの失敗を返す（退避先は Jina Fallback）', async () => {
       server.use(http.get(articleOneUrl, () => new HttpResponse(null, { status: 403 })));
 
-      await expect(fetchArticleContent(egress, articleOneUrl)).rejects.toThrow(/403/u);
+      // ブラウザ UA での退避は 1 回限り。それでも 403 なら Jina Fallback（ADR-0012）に委ねる。
+      const seenUserAgents: string[] = [];
+      server.use(
+        http.get(articleOneUrl, ({ request }) => {
+          seenUserAgents.push(request.headers.get('user-agent') ?? '');
+          return new HttpResponse(null, { status: 403 });
+        }),
+        http.get('https://r.jina.ai/*', () => HttpResponse.text('Title: x\n\nMarkdown Content:\n\nbody')),
+      );
+
+      await expect(fetchArticleContent(egress, articleOneUrl)).resolves.toBe(
+        'Title: x Markdown Content: body',
+      );
+      expect(seenUserAgents).toEqual([EGRESS_POLICY.userAgent, browserHeaders['user-agent']]);
     });
 
     it('退避でブラウザ UA を使ったあとも枠の間隔は守られる', async () => {
@@ -346,6 +359,177 @@ describe('scraper service', () => {
       // 退避のリクエストぶん枠が前に進んでいるので、次の取得は待機させられる。
       await fetchArticleContent(egress, articleOneUrl);
       expect(clock.now() - before).toBeGreaterThanOrEqual(EGRESS_POLICY.defaultMinimumDelayMs);
+    });
+  });
+
+  describe('Jina Fallback（ADR-0012）', () => {
+    const jinaMarkdown = [
+      'Title: First article',
+      '',
+      `URL Source: ${articleOneUrl}`,
+      '',
+      'Markdown Content:',
+      '',
+      '# First article',
+      '',
+      'Article body text.',
+    ].join('\n');
+    const jinaMarkdownNormalized =
+      `Title: First article URL Source: ${articleOneUrl} Markdown Content: # First article Article body text.`;
+
+    it('ブラウザ UA でも 403 のときだけ Jina Reader へ退避し、markdown をそのまま本文にする', async () => {
+      let jinaCalled = false;
+      server.use(
+        http.get(articleOneUrl, () => new HttpResponse(null, { status: 403 })),
+        http.get('https://r.jina.ai/*', ({ request }) => {
+          jinaCalled = true;
+          expect(request.url).toBe(`https://r.jina.ai/${articleOneUrl}`);
+          // UA は素直なリーダ UA のまま（ADR-0011）。
+          expect(request.headers.get('user-agent')).toBe(EGRESS_POLICY.userAgent);
+          return HttpResponse.text(jinaMarkdown, {
+            headers: { 'Content-Type': 'text/plain; charset=utf-8' },
+          });
+        }),
+      );
+
+      // cheerio 抽出を経ないため、Jina 応答が正規化されてそのまま本文になる。
+      await expect(fetchArticleContent(egress, articleOneUrl)).resolves.toBe(jinaMarkdownNormalized);
+      expect(jinaCalled).toBe(true);
+    });
+
+    it('429 では退避しない（相手の不調は律速・クールダウンの領域）', async () => {
+      let jinaCalled = false;
+      server.use(
+        http.get(articleOneUrl, () => new HttpResponse(null, { status: 429 })),
+        http.get('https://r.jina.ai/*', () => {
+          jinaCalled = true;
+          return HttpResponse.text(jinaMarkdown);
+        }),
+      );
+
+      await expect(fetchArticleContent(egress, articleOneUrl)).rejects.toThrow(
+        /Rate limited by example\.com/u,
+      );
+      expect(jinaCalled).toBe(false);
+    });
+
+    it('Jina も 403 を返したら失敗として返す（呼び出し側は本文なしで保存する）', async () => {
+      server.use(
+        http.get(articleOneUrl, () => new HttpResponse(null, { status: 403 })),
+        http.get('https://r.jina.ai/*', () => new HttpResponse(null, { status: 403 })),
+      );
+
+      await expect(fetchArticleContent(egress, articleOneUrl)).rejects.toThrow(/403/u);
+    });
+
+    it('Jina が 429 を返すと jina.ai 枠にクールダウンが入り、次の退避は待たずに断られる', async () => {
+      server.use(
+        http.get(articleOneUrl, () => new HttpResponse(null, { status: 403 })),
+        http.get(articleTwoUrl, () => new HttpResponse(null, { status: 403 })),
+        http.get('https://r.jina.ai/*', () =>
+          new HttpResponse(null, { status: 429, headers: { 'Retry-After': '45' } })),
+      );
+
+      const before = clock.now();
+      await expect(fetchArticleContent(egress, articleOneUrl)).rejects.toThrow(
+        /Rate limited by jina\.ai/u,
+      );
+
+      // クールダウン中（45 秒後まで）の退避は 60 秒の枠待ちをせず即座に断られる。
+      await expect(fetchArticleContent(egress, articleTwoUrl)).rejects.toThrow(/cooling down/u);
+      expect(clock.now() - before).toBeLessThan(EGRESS_POLICY.maximumSlotWaitMs);
+
+      const state = await egress.store.read('jina.ai');
+      expect(state?.consecutiveThrottles).toBe(1);
+      expect(state?.cooldownUntilMs).toBeGreaterThan(clock.now());
+    });
+
+    it('JINA_API_KEY があれば Bearer ヘッダーを添付し、なければ添付しない', async () => {
+      const authHeaders: (string | null)[] = [];
+      server.use(
+        http.get(articleOneUrl, () => new HttpResponse(null, { status: 403 })),
+        http.get('https://r.jina.ai/*', ({ request }) => {
+          authHeaders.push(request.headers.get('authorization'));
+          return HttpResponse.text(jinaMarkdown);
+        }),
+      );
+
+      await fetchArticleContent(egress, articleOneUrl, { jinaApiKey: 'test-key' });
+      // 同一 jina.ai 枠の間隔の検証は egress.test.ts に譲るため、ここでは枠を作り直す。
+      egress = createTestEgressContext();
+      await fetchArticleContent(egress, articleOneUrl);
+      expect(authHeaders).toEqual(['Bearer test-key', null]);
+    });
+
+    it('認証情報（userinfo）付きの URL は退避しない（Jina への漏出を防ぐ）', async () => {
+      let jinaCalled = false;
+      server.use(
+        http.get('https://example.com/secret', () => new HttpResponse(null, { status: 403 })),
+        http.get('https://r.jina.ai/*', () => {
+          jinaCalled = true;
+          return HttpResponse.text(jinaMarkdown);
+        }),
+      );
+
+      await expect(
+        fetchArticleContent(egress, 'https://user:pass@example.com/secret'),
+      ).rejects.toThrow(/credentials/iu);
+      expect(jinaCalled).toBe(false);
+    });
+
+    it('リダイレクト先が他オリジンになると Bearer ヘッダーを落とし、同一オリジンなら維持する', async () => {
+      let jinaRedirects = 0;
+      const authOnSameOrigin: (string | null)[] = [];
+      const authOnCrossOrigin: (string | null)[] = [];
+      server.use(
+        http.get(articleOneUrl, () => new HttpResponse(null, { status: 403 })),
+        http.get('https://r.jina.ai/*', ({ request }) => {
+          jinaRedirects += 1;
+          authOnSameOrigin.push(request.headers.get('authorization'));
+          if (jinaRedirects === 1) {
+            return HttpResponse.text('', { headers: { Location: 'https://r.jina.ai/next' }, status: 302 });
+          }
+          return HttpResponse.text('', { headers: { Location: 'https://elsewhere.example.net/landing' }, status: 302 });
+        }),
+        http.get('https://elsewhere.example.net/landing', ({ request }) => {
+          authOnCrossOrigin.push(request.headers.get('authorization'));
+          return HttpResponse.text(jinaMarkdown);
+        }),
+      );
+
+      await expect(
+        fetchArticleContent(egress, articleOneUrl, { jinaApiKey: 'test-key' }),
+      ).resolves.toBe(jinaMarkdownNormalized);
+      expect(jinaRedirects).toBe(2);
+      expect(authOnSameOrigin).toEqual(['Bearer test-key', 'Bearer test-key']);
+      expect(authOnCrossOrigin).toEqual([null]);
+    });
+
+    it('非HTML拡張子の URL は退避しない', async () => {
+      let jinaCalled = false;
+      server.use(
+        http.get(pdfUrl, () => new HttpResponse(null, { status: 403 })),
+        http.get('https://r.jina.ai/*', () => {
+          jinaCalled = true;
+          return HttpResponse.text(jinaMarkdown);
+        }),
+      );
+
+      await expect(fetchArticleContent(egress, pdfUrl)).rejects.toThrow(/non-HTML/u);
+      expect(jinaCalled).toBe(false);
+    });
+
+    it('内部アドレス宛の URL は退避しない', async () => {
+      let jinaCalled = false;
+      server.use(
+        http.get('https://r.jina.ai/*', () => {
+          jinaCalled = true;
+          return HttpResponse.text(jinaMarkdown);
+        }),
+      );
+
+      await expect(fetchArticleContent(egress, 'http://127.0.0.1/')).rejects.toThrow(/internal/iu);
+      expect(jinaCalled).toBe(false);
     });
   });
 

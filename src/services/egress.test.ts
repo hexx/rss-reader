@@ -42,6 +42,11 @@ describe('bucketKeyOf (取得枠の解決)', () => {
     expect(bucketKeyOf('https://a.b.example.com/')).toBe('example.com');
   });
 
+  it('Jina Reader の退避先は jina.ai 枠に束ねられる（ADR-0012）', () => {
+    expect(bucketKeyOf('https://r.jina.ai/https://example.com/posts/one')).toBe('jina.ai');
+    expect(bucketKeyOf('https://r.jina.ai/https://www.qiita.com/tags/ai/feed')).toBe('jina.ai');
+  });
+
   it('IP リテラルと不正 URL は枠キーを壊さない', () => {
     expect(bucketKeyOf('http://169.254.169.254/')).toBe('169.254.169.254');
     expect(bucketKeyOf('not a url')).toBe('unknown');
@@ -92,6 +97,27 @@ describe('acquireEgressSlot (枠の予約)', () => {
       acquired: true,
       bucket: 'hatena',
     });
+  });
+
+  it('jina.ai 枠は 3 秒の間隔を守る（既定枠より広い、ADR-0012）', async () => {
+    const egress = createTestEgressContext();
+    const jinaUrl = `https://r.jina.ai/${defaultUrl}`;
+
+    await expect(acquireEgressSlot(egress, jinaUrl)).resolves.toMatchObject({ acquired: true, bucket: 'jina.ai' });
+    await expect(acquireEgressSlot(egress, jinaUrl)).resolves.toMatchObject({
+      acquired: false,
+      reason: 'occupied',
+    });
+
+    // 既定枠の間隔では足りない。
+    clock.advance(EGRESS_POLICY.defaultMinimumDelayMs);
+    await expect(acquireEgressSlot(egress, jinaUrl)).resolves.toMatchObject({
+      acquired: false,
+      reason: 'occupied',
+    });
+
+    clock.advance(EGRESS_POLICY.jinaMinimumDelayMs);
+    await expect(acquireEgressSlot(egress, jinaUrl)).resolves.toMatchObject({ acquired: true });
   });
 
   it('wait モードは枠が空くまで（仮想時間で）待つ', async () => {

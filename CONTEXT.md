@@ -35,6 +35,14 @@ _Avoid_: createdAt（DB上の実装名であり、取得時刻と誤読しやす
 はてなブックマークのコメント群から生成する、世間の反応・意見の日本語要約（表示用 HTML スニペット）。コメント0件では生成しない。
 _Avoid_: Reaction Summary
 
+**Fallback（取得退避）**:
+相手が直接の取得を拒否したときに、同一の対象を取得のしかたを替えて取り直すこと。1 段目は User-Agent の差し替え、2 段目が Jina Fallback。再試行（同じしかたでやり直す）とも Backfill（取りこぼしを巡回して埋める）とも違う。
+_Avoid_: 再取得（Two-Pass Sync・Backfill と混同）, リトライ, プロキシ（仕組みの呼び方であって概念の名前ではない）
+
+**Jina Fallback（Jina 退避）**:
+Fallback の 2 段目。ブラウザ UA での取り直しでも相手に拒否された本文を、Jina Reader 経由で取得すること。相手が Cloudflare 由来かどうかは条件に入れない（拒否の結果だけで判定する）。
+_Avoid_: プロキシ取得, スクレイピング回避, Cloudflare 対策（原因の推定を条件に見せかける呼び方）
+
 **Issue（課題プロンプト）**:
 issue-logger スキルが `issues/issue-yyyyMMddHHmm.md` に生成する、後続の AI エージェントがそのまま実行できるプロンプト形式の課題ファイル。GitHub の Issue とは全く別の概念。フロントマターは `title` / `status` / `created` の 3 字段のみで、状態遷移の根拠は本文末尾の「## 解決記録」に記す（ADR 0005）。
 _Avoid_: ticket, task, GitHub Issue

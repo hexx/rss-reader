@@ -507,7 +507,7 @@ async function ingestNewArticle(
     // どちらかが失敗しても記事の同期自体は継続する（本文失敗 → 本文なしで保存、
     // はてブ失敗 → コメントなしで保存。取りこぼしたはてブは補完巡回で埋める）。
     const [contentResult, bookmarksResult] = await Promise.allSettled([
-      fetchArticleContent(egress, article.url),
+      fetchArticleContent(egress, article.url, { jinaApiKey: env.JINA_API_KEY }),
       fetchHatenaBookmarks(egress, article.url),
     ]);
 
