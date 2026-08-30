@@ -137,7 +137,9 @@ describe('syncSite', () => {
       createdAt: new Date('2024-01-01T00:00:00.000Z'),
       user: 'alice',
     });
-    expect(fetchArticleContentMock).toHaveBeenCalledWith(expect.anything(), article.url);
+    expect(fetchArticleContentMock).toHaveBeenCalledWith(expect.anything(), article.url, {
+      jinaApiKey: undefined,
+    });
     expect(fetchHatenaBookmarksMock).toHaveBeenCalledWith(expect.anything(), article.url);
     expect(generateArticleSummaryMock).toHaveBeenCalledWith(article.title, '', expect.any(Object));
     expect(generateHatenaSummaryMock).toHaveBeenCalledWith(bookmarks, expect.any(Object));
@@ -250,7 +252,9 @@ describe('syncSite', () => {
       title: article.title,
       url: article.url,
     });
-    expect(fetchArticleContentMock).toHaveBeenCalledWith(expect.anything(), article.url);
+    expect(fetchArticleContentMock).toHaveBeenCalledWith(expect.anything(), article.url, {
+      jinaApiKey: undefined,
+    });
     expect(fetchHatenaBookmarksMock).toHaveBeenCalledWith(expect.anything(), article.url);
     expect(generateArticleSummaryMock).toHaveBeenCalledWith(article.title, '', expect.any(Object));
     expect(generateHatenaSummaryMock).toHaveBeenCalledWith(

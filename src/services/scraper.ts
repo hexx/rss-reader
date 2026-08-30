@@ -4,6 +4,7 @@ import { isTag } from 'domhandler';
 import type { Element } from 'domhandler';
 import Parser from 'rss-parser';
 
+import { logger } from '../utils/logger.js';
 import type { EgressContext } from './egress.js';
 import {
   acquireEgressSlot,
@@ -56,6 +57,9 @@ export const readerRequestHeaders = {
 
 /** 拒否（退避発火の対象）と扱う HTTP ステータス。 */
 const FORBIDDEN_STATUSES = new Set([403, 451]);
+
+/** Jina Fallback（ADR-0012）の退避先。記事 URL をこの prefix の後に連結する。 */
+const JINA_READER_PREFIX = 'https://r.jina.ai/';
 
 /** HTTP エラーをステータス付きで表現する内部エラー（403/451 の退避判定に使う）。 */
 class HttpStatusError extends Error {
@@ -301,10 +305,62 @@ function extractFallbackLinks(html: string, baseUrl: string): ScrapedLink[] {
   return links;
 }
 
-export async function fetchArticleContent(egress: EgressContext, url: string): Promise<string> {
+export interface ArticleContentOptions {
+  /** Jina Fallback で使う Jina Reader の API キー。未設定ならキーなし（無料枠）で呼ぶ。 */
+  jinaApiKey?: string | undefined;
+}
+
+export async function fetchArticleContent(
+  egress: EgressContext,
+  url: string,
+  options: ArticleContentOptions = {},
+): Promise<string> {
   // 記事本文は同じ相手を続けて叩くことがあるため、枠の空きを待つ（パス2 の取得）。
-  const html = await fetchHtml(egress, url, { allowBrowserUserAgentFallback: true, egressMode: 'wait' });
-  return extractArticleContent(html);
+  try {
+    const html = await fetchHtml(egress, url, {
+      allowBrowserUserAgentFallback: true,
+      egressMode: 'wait',
+    });
+    return extractArticleContent(html);
+  } catch (error) {
+    // ブラウザ UA でも拒否された（403/451）ときだけ Jina Reader へ退避する（ADR-0012）。
+    // 429・タイムアウトは相手の不調であり、退避ではなく律速・クールダウンの対象。
+    if (!isForbiddenResponseError(error)) {
+      throw error;
+    }
+    return fetchArticleContentViaJina(egress, url, options.jinaApiKey);
+  }
+}
+
+/** 拒否された本文を Jina Reader 経由で取得する最終段の退避（ADR-0012 / jina-fallback.md）。 */
+async function fetchArticleContentViaJina(
+  egress: EgressContext,
+  url: string,
+  jinaApiKey: string | undefined,
+): Promise<string> {
+  // 退避先でも対象 URL は直接取得と同じ安全検証に従う（内部アドレス・非HTML は退避しない）。
+  ensureSafePageUrl(url);
+  if (shouldSkipNonHtmlUrl(url)) {
+    throw new Error(`Refusing to fetch a non-HTML page via Jina Reader: ${redactUrl(url)}`);
+  }
+
+  const jinaUrl = `${JINA_READER_PREFIX}${url}`;
+  ensureSafePageUrl(jinaUrl);
+
+  // UA は ADR-0011 の素直なリーダ UA のまま。キーがあれば Bearer で添付する。
+  const headers: Record<string, string> = { ...readerRequestHeaders };
+  if (jinaApiKey !== undefined && jinaApiKey.length > 0) {
+    headers.authorization = `Bearer ${jinaApiKey}`;
+  }
+
+  logger.info('Jina Fallback で本文を取得します。', {
+    articleUrl: redactUrl(url),
+    bucket: bucketKeyOf(jinaUrl),
+  });
+
+  // 応答は Jina 側で本文抽出済みの markdown。cheerio を経ず、空白を正規化してそのまま本文にする。
+  const markdown = await fetchHtmlWithHeaders(egress, jinaUrl, headers, { egressMode: 'wait' });
+  return normalizeText(markdown);
 }
 
 /** RSS / Atom フィードの Content-Type として扱う値。 */

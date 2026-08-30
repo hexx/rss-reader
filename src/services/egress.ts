@@ -23,6 +23,9 @@ export const EGRESS_POLICY = {
   /** はてな群の枠内最小間隔（下限／ジッター加算幅）= 3〜6 秒。 */
   hatenaMinimumDelayMs: 3_000,
   hatenaJitterSpanMs: 3_000,
+  /** jina.ai 枠の枠内最小間隔（下限／ジッター加算幅）= 3〜4 秒。キーなし Jina の無料枠（約 20 RPM）以下。 */
+  jinaMinimumDelayMs: 3_000,
+  jinaJitterSpanMs: 1_000,
   /** クールダウン段階（連続障害回数で index、末尾が cap）= 30分 → 60分 → 90分。 */
   cooldownStepsMs: [30 * 60 * 1_000, 60 * 60 * 1_000, 90 * 60 * 1_000],
   /** `Retry-After` がこれを超える場合は段階を打ち切って指示に優先服従する。 */
@@ -232,10 +235,20 @@ export function bucketKeyOf(rawUrl: string): string {
 }
 
 function delayForBucket(bucket: string): number {
-  const hatena = bucket === 'hatena';
-  const minimum = hatena ? EGRESS_POLICY.hatenaMinimumDelayMs : EGRESS_POLICY.defaultMinimumDelayMs;
-  const span = hatena ? EGRESS_POLICY.hatenaJitterSpanMs : EGRESS_POLICY.defaultJitterSpanMs;
-  return minimum + Math.floor(randomFn() * (span + 1));
+  // 運用者群・外部退避先など、性質の異なる相手ごとに枠内間隔を変える。
+  if (bucket === 'hatena') {
+    return bucketIntervalMs(EGRESS_POLICY.hatenaMinimumDelayMs, EGRESS_POLICY.hatenaJitterSpanMs);
+  }
+  // jina.ai 枠: Jina Fallback（ADR-0012）の退避先。キーの有無にかかわらず
+  // キーなし無料枠（約 20 RPM）以下の間隔を守る。
+  if (bucket === 'jina.ai') {
+    return bucketIntervalMs(EGRESS_POLICY.jinaMinimumDelayMs, EGRESS_POLICY.jinaJitterSpanMs);
+  }
+  return bucketIntervalMs(EGRESS_POLICY.defaultMinimumDelayMs, EGRESS_POLICY.defaultJitterSpanMs);
+}
+
+function bucketIntervalMs(minimumMs: number, jitterSpanMs: number): number {
+  return minimumMs + Math.floor(randomFn() * (jitterSpanMs + 1));
 }
 
 /** `Retry-After`（秒数 / HTTP date）を次回取得可能時刻に変換する。読めなければ null。 */
