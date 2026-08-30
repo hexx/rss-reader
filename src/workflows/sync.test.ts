@@ -621,6 +621,14 @@ describe('二段同期（パス1 のフィード取得優先・律速・補完�
 
     expect(fetchRssOrFallbackMock).toHaveBeenCalledTimes(2);
     expect(loggerMock.warn.mock.calls.filter((call) => String(call[0]).includes('律速'))).toHaveLength(1);
+    // 持ち越しログには最後の失敗理由（throttle）が含まれる。
+    expect(loggerMock.info).toHaveBeenCalledWith(
+      '未取得の Source を次回の同期に持ち越します。',
+      expect.objectContaining({
+        carried: 1,
+        sources: [{ reason: 'throttled', siteUrl }],
+      }),
+    );
     await expect(testDb.select().from(articles)).resolves.toHaveLength(0);
   });
 
@@ -651,6 +659,14 @@ describe('二段同期（パス1 のフィード取得優先・律速・補完�
         bucket: 'example.com',
         nextAllowedAt: expect.any(String),
         siteUrl: coolingSiteUrl,
+      }),
+    );
+    // 持ち越しログには実際の結果（skipped）が理由として載る（誤って defer と表示しない）。
+    expect(loggerMock.info).toHaveBeenCalledWith(
+      '未取得の Source を次回の同期に持ち越します。',
+      expect.objectContaining({
+        carried: 1,
+        sources: [{ reason: 'skipped', siteUrl: coolingSiteUrl }],
       }),
     );
     await expect(testDb.select().from(articles)).resolves.toHaveLength(1);
@@ -734,7 +750,15 @@ describe('二段同期（パス1 のフィード取得優先・律速・補完�
 
     expect(loggerMock.info).toHaveBeenCalledWith(
       '未取得の Source を次回の同期に持ち越します。',
-      expect.objectContaining({ carried: 1, siteUrls: [siteUrl] }),
+      expect.objectContaining({
+        carried: 1,
+        sources: [{ reason: 'defer', siteUrl }],
+      }),
+    );
+    // 枠が空かず後回しにしたことも info で 1 行出る（「開始します」で途切れる行を作らない）。
+    expect(loggerMock.info).toHaveBeenCalledWith(
+      'Source は取得枠が空かないため、後回しにします。',
+      expect.objectContaining({ bucket: 'hatena', siteUrl }),
     );
     expect(loggerMock.warn).not.toHaveBeenCalled();
   });

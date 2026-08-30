@@ -345,9 +345,17 @@ async function collectFeeds(
 ): Promise<FetchedFeed[]> {
   const feeds: FetchedFeed[] = [];
   const deferred: SubscriptionRow[] = [];
+  // 持ち越しログに理由を含めるため、未取得に終わった Source の最後の結果を記録する。
+  // carried には後回し列（defer/throttled）以外に skipped（クールダウン）・failed も含まれるため、
+  // 誤った理由を付けないよう ok 以外の全 outcome を記録する。
+  const carryReasons = new Map<string, CarryReason>();
 
   for (const subscription of subscriptionRows) {
     const outcome = await tryFetchFeed(egress, subscription, feeds, counters, debug);
+    if (outcome === 'ok') {
+      continue;
+    }
+    carryReasons.set(subscription.siteUrl, outcome);
     if (outcome === 'defer' || outcome === 'throttled') {
       deferred.push(subscription);
     }
@@ -355,18 +363,27 @@ async function collectFeeds(
 
   // パス1末尾: 他の Source を回している間に枠が空いた可能性があるので 1 周だけ再試行する。
   for (const subscription of deferred) {
-    await tryFetchFeed(egress, subscription, feeds, counters, debug, { quiet: true });
+    const outcome = await tryFetchFeed(egress, subscription, feeds, counters, debug, { quiet: true });
+    if (outcome !== 'ok') {
+      carryReasons.set(subscription.siteUrl, outcome);
+    }
   }
 
-  // それでも取得できなかった Source は、理由を 1 行残して次 run に譲る
-  // （warn を増やさない。律速 warn は初回失敗時に出済みであるため）。取れた Source の
-  // 数だけを数えて、残った件数を info に出す。
+  // それでも取得できなかった Source（Carry-over）は、理由を 1 行にまとめて次 run に譲る
+  // （warn を増やさない。律速 warn は初回失敗時に出済みであるため）。枠の空きは予約しないので
+  // 次回可能時刻は持たず、次の cron run で再試行する。
   const fetchedUrls = new Set(feeds.map((feed) => feed.siteUrl));
-  const carried = subscriptionRows.filter((subscription) => !fetchedUrls.has(subscription.siteUrl));
+  const carried: Array<{ reason: CarryReason; siteUrl: string }> = [];
+  for (const subscription of subscriptionRows) {
+    const reason = carryReasons.get(subscription.siteUrl);
+    if (!fetchedUrls.has(subscription.siteUrl) && reason !== undefined) {
+      carried.push({ reason, siteUrl: subscription.siteUrl });
+    }
+  }
   if (carried.length > 0) {
     logger.info('未取得の Source を次回の同期に持ち越します。', {
       carried: carried.length,
-      siteUrls: carried.map((subscription) => subscription.siteUrl),
+      sources: carried,
     });
   }
 
@@ -374,6 +391,9 @@ async function collectFeeds(
 }
 
 type FeedFetchOutcome = 'defer' | 'failed' | 'ok' | 'skipped' | 'throttled';
+
+/** 持ち越しログに出す最後の結果（ok 以外の outcome）。 */
+type CarryReason = Exclude<FeedFetchOutcome, 'ok'>;
 
 /**
  * 1 Source のフィードを取得して `feeds` に加える。
@@ -422,6 +442,11 @@ async function tryFetchFeed(
         return 'skipped';
       }
       // 他実行が枠を予約しているだけ。待機せず後回し列に譲る。
+      // 「開始します」で途切れる行を作らないよう、defer も info で 1 行出す（仕様 §7）。
+      logger.info('Source は取得枠が空かないため、後回しにします。', {
+        bucket: error.bucket,
+        siteUrl,
+      });
       return 'defer';
     }
 
