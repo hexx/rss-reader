@@ -339,9 +339,13 @@ async function fetchArticleContentViaJina(
   jinaApiKey: string | undefined,
 ): Promise<string> {
   // 退避先でも対象 URL は直接取得と同じ安全検証に従う（内部アドレス・非HTML は退避しない）。
-  ensureSafePageUrl(url);
+  const targetUrl = ensureSafePageUrl(url);
   if (shouldSkipNonHtmlUrl(url)) {
     throw new Error(`Refusing to fetch a non-HTML page via Jina Reader: ${redactUrl(url)}`);
+  }
+  // 認証情報（userinfo）付きの URL は第三者（Jina）へ渡すと漏出になるため退避しない。
+  if (targetUrl.username.length > 0 || targetUrl.password.length > 0) {
+    throw new Error(`Refusing to fetch a URL with credentials via Jina Reader: ${redactUrl(url)}`);
   }
 
   const jinaUrl = `${JINA_READER_PREFIX}${url}`;
@@ -721,16 +725,27 @@ async function followRedirects(
     }
     const nextUrl = new URL(location, currentUrl).toString();
     ensureSafePageUrl(nextUrl);
+    // クロスオリジンのリダイレクト先へ認証情報を流さない
+    // （Jina Fallback の Bearer ヘッダーが退避先のリダイレクトで他ホストに漏れるのを防ぐ）。
+    const hopHeaders = new URL(nextUrl).origin === new URL(currentUrl).origin
+      ? headers
+      : omitAuthorization(headers);
     current = await continueEgressRequest(
       egress,
       bucket,
       nextUrl,
-      { headers, redirect: 'manual', signal },
+      { headers: hopHeaders, redirect: 'manual', signal },
     );
     currentUrl = nextUrl;
   }
 
   throw new Error('Too many redirects during feed discovery.');
+}
+
+function omitAuthorization(headers: Record<string, string>): Record<string, string> {
+  const stripped = { ...headers };
+  delete stripped.authorization;
+  return stripped;
 }
 
 export async function readBoundedText(response: Response, maxBytes: number): Promise<string> {
