@@ -6,7 +6,7 @@
 
 **目標**
 - 429 によって Source の新着が取りこぼされないこと。一時同期障害は同じ run 内または次回同期で自己回復する。
-- 新着の許容取り込み遅延（Freshness Budget）は通常 ±10 分、律速時は最大 90 分。
+- 新着の許容取り込み遅延（Freshness Budget）は通常 ±10 分、律速時は最大 90 分。枠が空かず Carry-over された場合も「律速時」に含む（遅延は最大でも次回 cron までの 30 分）。
 - 補完完走ウィンドウ ≤ 24 時間。
 - warn ログは「障害」ではなく「対応済みで、いつ再試行するか」が読める行になる。
 
@@ -32,12 +32,12 @@
 ## 3. 同期進行（二段同期）
 
 ### パス1 — 全 Source のフィード取得（最優先）
-1. `subscriptions` を siteUrl 昇順で読む（従来どおり）。
+1. `subscriptions` を読む（明示的な順序は持たない。D1 の格納順 ≒ 登録順。枠の空きで後回しが起きるため、順序に礼儀・鮮度上の本質的意味はない）。
 2. Source ごとに取得枠を CAS 予約（`cooldown_until <= now AND next_allowed_at <= now` を取れた実行だけが進む）。取れない Source は**待機せず後回し列**へ。
 3. 予約取れた Source のフィードを取得。パースした記事一覧はメモリに保持し、この段階では DB に記事を書かない。
 4. 一時同期障害（429 / 503 / タイムアウト / HTML 応答）→ 枠にクールダウンを設定し、後回し列へ。
 5. **パス1末尾**：後回し列を 1 周する。枠が開していれば再試行（**待機はしない**）、まだ 429 なら次 run 持ち越し（クールダウン済み）。
-6. 最終的に取得できなかった Source は info でスキップ理由と次回取得可能時刻を出して進む（他の Source に影響を波及させない）。
+6. 最終的に取得できなかった Source（Carry-over）は info で理由（defer / throttled）を 1 行にまとめて次の run に譲る（他の Source に影響を波及させない）。枠の空きは予約しないため次回可能時刻は持たず、次の cron run で再試行する。throttle の次回可能時刻は初回失敗時の warn に既出。
 
 ### パス2 — 記事処理（本文・ブックマーク・要約）
 - パス1で取得できたフィードの記事一覧を順に処理する。
@@ -89,8 +89,9 @@ ALTER TABLE subscriptions ADD backfill_cursor INTEGER NOT NULL DEFAULT 0;
 | 事象 | レベル | 必須フィールド |
 | --- | --- | --- |
 | `Source 同期を開始します。` / `Source のフィードを取得しました。`（「購読サイト」は使わない） | info | `siteUrl` |
-| クールダウン中または枠が空かず、取得を見送る | info | `bucket`, `nextAllowedAt`, `siteUrl` |
-| パス1末尾の再試行でも未取得だった Source の持ち越し | info | `carried`, `siteUrls` |
+| クールダウン中、取得を見送る | info | `bucket`, `nextAllowedAt`, `siteUrl` |
+| 枠が空かず、後回し（defer）にする | info | `bucket`, `siteUrl`（**「開始します」で途切れる行を作らない**） |
+| パス1末尾の再試行でも未取得だった Source の持ち越し（Carry-over） | info | `carried`, `sources`（`reason` ＋ `siteUrl` の配列） |
 | 一時同期障害（429 / 503 / タイムアウト / HTML 応答） | warn | `siteUrl` or `articleUrl`, `error`, `bucket`, **`nextRetryAt`** |
 | クールダウンを理由に見送った記事処理（補完打ち切り・コメントなし保存） | info | `bucket`, `nextRetryAt`（**warn を乱発しない**） |
 | run 完了サマリ | info | `elapsedMs`, `skipped`, `sources`, `synced`, `throttled` |
