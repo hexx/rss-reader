@@ -661,6 +661,14 @@ describe('二段同期（パス1 のフィード取得優先・律速・補完�
         siteUrl: coolingSiteUrl,
       }),
     );
+    // 持ち越しログには実際の結果（skipped）が理由として載る（誤って defer と表示しない）。
+    expect(loggerMock.info).toHaveBeenCalledWith(
+      '未取得の Source を次回の同期に持ち越します。',
+      expect.objectContaining({
+        carried: 1,
+        sources: [{ reason: 'skipped', siteUrl: coolingSiteUrl }],
+      }),
+    );
     await expect(testDb.select().from(articles)).resolves.toHaveLength(1);
   });
 
