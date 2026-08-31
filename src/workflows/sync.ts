@@ -567,7 +567,11 @@ async function ingestNewArticle(
 
     const content = contentResult.status === 'fulfilled' ? contentResult.value : '';
     const bookmarks = bookmarksResult.status === 'fulfilled' ? bookmarksResult.value : [];
-    const summary = await runAi(() => generateArticleSummary(article.title, content, env));
+    // 空本文（Content Gap の「欠損」）では要約を生成しない。タイトルだけの要約は情報を増やさず
+    // 表示品質を下げるため。summary は NULL のまま残し、本文が回復した際に生成する
+    // （summary IS NULL が対象抽出条件。本文の再取得は欠損本文の Backfill 課題に譲る）。
+    const summary =
+      content === '' ? null : await runAi(() => generateArticleSummary(article.title, content, env));
     let hatenaSummary: string | null = null;
     if (bookmarks.length > 0) {
       hatenaSummary = await runAi(() => generateHatenaSummary(bookmarks, env));

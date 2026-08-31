@@ -154,6 +154,7 @@ ORDER BY 欠損 DESC, 疑い DESC;
 - Source が違っても Article URL のホストが同じなら 1 行にまとまる。例えば Domain Filter に `asahi.com` を指定すると、朝日新聞デジタルの記事と、朝日の記事を配信している Yahoo!ニュースの記事が同じ `asahi.com` 行に合算される。
 - サブドメイン（`digital.asahi.com` 等）は `www.` と見なさないため別行になる。
 - Domain Filter を使わず全体を俯瞰したいときは、`WITH domain` 行・`CROSS JOIN domain d`・`WHERE` の 8 条件を丸ごと削る。
+- 期間で絞る: 内側の `SELECT` の `WHERE` に `datetime(created_at / 1000, 'unixepoch', '+09:00') >= '2026-08-31 00:00:00'`（JST。日付は書き換える）を足す。取り込み日時ではなく公開日で見たいときは `created_at` を `published_at` に替える。
 - 欠損・疑いだけの件数で十分なときは、内側の `SELECT` に `AND (content IS NULL OR content = '' OR LENGTH(content) < 200)` を足し、`正常`・`合計` の列を `対象計` に置き換える。
 
 ### 4.4 ③ 記事別詳細 — 本文先頭を目視確認
@@ -190,6 +191,31 @@ ORDER BY LENGTH(a.content);
 
 - **取得経路は判定できない。** Jina Fallback・`<body>` フォールバックの事実は DB に保存しない（[jina-fallback.md](./jina-fallback.md) §2「退避の事実は保存しない」と整合）。「ボイラープレート疑い」の判別は §4.4 の目視で補う。
 - **取得エラーの理由は判らない。** 403/451・タイムアウト・ボディ超過などの理由はログにしか存在せず、D1 からは「空本文だった」ことしかわからない。§4.4 の目視と、必要なら Worker ログとの突き合わせで原因に近づく。
+- **ログ突合の糸口**: 記事保存時の warn「本文の取得に失敗したため、本文なしで処理を継続します。」の `error` 値が原因区分になる。`exceeded the size limit` = ボディ 2MB 超過、`Fetch timed out` = タイムアウト、429 / クールダウン文言 = 律速、`403` / `451` = 拒否。**ボディ超過・タイムアウトは Jina Fallback の発火条件（403/451 のみ、jina-fallback.md §2）に含まれない**ため、Jina が試みられずに空で保存される点に注意。
+
+## 6. 付録: 空本文記事の要約 NULL 化（ワンオフ、2026-09-01 実施）
+
+「空本文時の要約スキップ」（CONTEXT.md の Article Summary）の適用に伴い、それ以前に「本文が空なのに要約が生成されている」行を NULL 化するワンオフ手順。タイトルベースの要約は情報を増やさず表示品質を下げるため削除する。`summary IS NULL` は、将来の欠損本文 Backfill で「本文回復後に要約を生成する」対象の抽出条件になる（要約なし補完の課題は issues/ 配下に記録）。
+
+事前確認（件数）:
+
+```bash
+npx wrangler d1 execute rss-reader --remote -y --command "
+SELECT COUNT(*) AS 対象件数 FROM articles
+WHERE (content IS NULL OR content = '') AND summary IS NOT NULL;
+"
+```
+
+更新:
+
+```bash
+npx wrangler d1 execute rss-reader --remote -y --command "
+UPDATE articles SET summary = NULL
+WHERE (content IS NULL OR content = '') AND summary IS NOT NULL;
+"
+```
+
+実行後、事前確認クエリで `対象件数` が 0 になれば完了。UPDATE は記事要約のみを NULL 化し、本文・はてブ要約には触れない。
 - **① は `site_url` 別の集計である。** 記事 `url` のホストが Source とずれる記事は、Source 側のドメインに計上される。ホストずれそのものを見たい場合は ② の `url` 条件で拾う。
 - **Domain Filter はポート番号付き・userinfo 付き URL を拾えない。** そのような URL が疑わしいときは `LIKE` パターンを個別に足す。
 - `content` は抽出済みテキストであり、抽出前の HTML 構造由来の判別は不可能。

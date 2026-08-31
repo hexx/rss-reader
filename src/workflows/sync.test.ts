@@ -106,7 +106,7 @@ describe('syncSite', () => {
     vi.unstubAllEnvs();
   });
 
-  it('stores new articles, comments, and summaries even when content is empty', async () => {
+  it('skips the article summary and stores null when content is empty', async () => {
     const { syncSite } = await import('./sync.js');
 
     fetchRssOrFallbackMock.mockResolvedValue([article]);
@@ -127,7 +127,7 @@ describe('syncSite', () => {
       isRead: false,
       publishedAt: new Date('2024-01-01T00:00:00.000Z'),
       siteUrl,
-      summary: '要約文',
+      summary: null,
       title: article.title,
       url: article.url,
     });
@@ -141,7 +141,7 @@ describe('syncSite', () => {
       jinaApiKey: undefined,
     });
     expect(fetchHatenaBookmarksMock).toHaveBeenCalledWith(expect.anything(), article.url);
-    expect(generateArticleSummaryMock).toHaveBeenCalledWith(article.title, '', expect.any(Object));
+    expect(generateArticleSummaryMock).not.toHaveBeenCalled();
     expect(generateHatenaSummaryMock).toHaveBeenCalledWith(bookmarks, expect.any(Object));
     expect(loggerMock.info).toHaveBeenCalledWith('記事の同期処理を実行します。', {
       title: article.title,
@@ -248,7 +248,7 @@ describe('syncSite', () => {
       content: '',
       hatenaSummary: '反応の要約',
       siteUrl,
-      summary: '要約文',
+      summary: null,
       title: article.title,
       url: article.url,
     });
@@ -256,7 +256,7 @@ describe('syncSite', () => {
       jinaApiKey: undefined,
     });
     expect(fetchHatenaBookmarksMock).toHaveBeenCalledWith(expect.anything(), article.url);
-    expect(generateArticleSummaryMock).toHaveBeenCalledWith(article.title, '', expect.any(Object));
+    expect(generateArticleSummaryMock).not.toHaveBeenCalled();
     expect(generateHatenaSummaryMock).toHaveBeenCalledWith(
       [{ comment: '面白い', timestamp: new Date('2024-01-05T00:00:00.000Z'), user: 'bob' }],
       expect.any(Object),
