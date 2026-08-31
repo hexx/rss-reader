@@ -8,6 +8,14 @@ RSS フィードから記事を集め、日本語の要約を添えて配信・�
 ユーザーが購読する RSS フィードの登録単位。記事の取得元。
 _Avoid_: feed, provider, channel, 購読サイト（ログ文言として使われていたが Source と同一概念。律速の単位である取得枠とも別物）
 
+**Source URL（Source の URL）**:
+Source を一意に識別する URL。登録時に自動検出した RSS/Atom フィードの URL で、`subscriptions.site_url` として保存される。記事は取り込み時にこの値を `articles.site_url` として複製して持つ。サイトのトップページ URL とは限らない。
+_Avoid_: サイト URL（トップページの URL と誤解される）
+
+**Article URL（記事 URL）**:
+記事そのもののページの URL。フィード item のリンク先を絶対化したもので、`articles.url`。第三者配信では Source URL とホストが異なることがある。
+_Avoid_: site URL（Source URL と混同）, link（フィード要素名であり概念名ではない）
+
 **AI Provider**:
 要約を生成する OpenAI 互換エンドポイント。`AI_BASE_URL` で指し示す接続先のこと。RSS の Source とは全く別の概念。
 _Avoid_: model, endpoint（模型本体と混同しやすい）
@@ -43,6 +51,10 @@ _Avoid_: 再取得（Two-Pass Sync・Backfill と混同）, リトライ, プロ
 Fallback の 2 段目。ブラウザ UA での取り直しでも相手に拒否された本文を、Jina Reader 経由で取得すること。相手が Cloudflare 由来かどうかは条件に入れない（拒否の結果だけで判定する）。
 _Avoid_: プロキシ取得, スクレイピング回避, Cloudflare 対策（原因の推定を条件に見せかける呼び方）
 
+**Content Gap（本文欠損）**:
+保存済み記事の本文が、要約生成に耐える品質を満たしていない状態。欠損（本文が空）・疑い（本文が短い等、正常本文でない疑い）・正常の 3 値で分類し、疑いは断定ではない。通信の成否とは別の、抽出品質の概念。
+_Avoid_: 取得失敗（通信層の失敗と混同）, 空本文（3 値のうち欠損 1 値だけを指す語であり、全体概念ではない）
+
 **Issue（課題プロンプト）**:
 issue-logger スキルが `issues/issue-yyyyMMddHHmm.md` に生成する、後続の AI エージェントがそのまま実行できるプロンプト形式の課題ファイル。GitHub の Issue とは全く別の概念。フロントマターは `title` / `status` / `created` の 3 字段のみで、状態遷移の根拠は本文末尾の「## 解決記録」に記す（ADR 0005）。
 _Avoid_: ticket, task, GitHub Issue
@@ -62,6 +74,10 @@ _Avoid_: ホスト名単位, rate limiter（相手の機構と混同）, Source 
 **Operator Group（運用者群）**:
 別ドメインにまたがっても、同一の相手が同一の制限を課していると扱うホストの集まり。1 群が 1 取得枠になる（はてな群など）。
 _Avoid_: はてな系（下の Bookmark Host と混同される）, サブドメイングループ
+
+**Domain Filter（調査対象ドメイン）**:
+Content Gap の調査で記事を絞り込むための緩いドメイン指定。ホスト一致に前方一致を組み合わせ、`example.com` 指定で `www.example.com` をも含む。律速の単位である Operator Group とは範囲も役割も別。
+_Avoid_: ドメイン（単独ではあいまい）, Operator Group（律速の単位と混同）
 
 **Bookmark Host（ブックマーク掲載元）**:
 はてなブックマーク由来の Source の表示名を紛れ解消するために使う判定で、`b.hatena.ne.jp` のみを指す。律速のための運用者群よりも狭い、別概念。
