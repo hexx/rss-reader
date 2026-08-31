@@ -321,7 +321,16 @@ export async function fetchArticleContent(
       allowBrowserUserAgentFallback: true,
       egressMode: 'wait',
     });
-    return extractArticleContent(html);
+    const content = extractArticleContent(html);
+    // 200 で本文抽出が空になる経路（Content Gap の「無痕の欠損」— warn も Jina 発火も無い）を
+    // 観測可能にする（issues/issue-202609010458-content-backfill.md の経路 (b)）。
+    if (content === '') {
+      logger.info('直接取得は成功したが本文抽出が空でした。', {
+        articleUrl: redactUrl(url),
+        htmlLength: html.length,
+      });
+    }
+    return content;
   } catch (error) {
     // ブラウザ UA でも拒否された（403/451）ときだけ Jina Reader へ退避する（ADR-0012）。
     // 429・タイムアウトは相手の不調であり、退避ではなく律速・クールダウンの対象。
@@ -364,7 +373,13 @@ async function fetchArticleContentViaJina(
 
   // 応答は Jina 側で本文抽出済みの markdown。cheerio を経ず、空白を正規化してそのまま本文にする。
   const markdown = await fetchHtmlWithHeaders(egress, jinaUrl, headers, { egressMode: 'wait' });
-  return normalizeText(markdown);
+  const content = normalizeText(markdown);
+  // Jina が 200 でも空/極端に短い markdown を返す経路（経路 (d)：warn が出ない欠損）を観測可能にする。
+  logger.info('Jina Fallback の応答を受け取りました。', {
+    articleUrl: redactUrl(url),
+    length: content.length,
+  });
+  return content;
 }
 
 /** RSS / Atom フィードの Content-Type として扱う値。 */
