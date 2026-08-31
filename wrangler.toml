@@ -32,6 +32,12 @@ migrations_dir = "drizzle"
 # scheduled ハンドラ側で event.cron を見て、どちらの同期かを判定する。
 crons = ["15,45 * * * *", "0 */3 * * *"]
 
+# Workers Logs（observability）: warn「本文の取得に失敗…」や Jina Fallback 発火 info が
+# ダッシュボード（Workers & Pages → rss-reader → ログ）で検索可能になる。
+# Content Gap の原因判別（issues/issue-202609010458-content-backfill.md ステップ 0）に必要。
+[observability]
+enabled = true
+
 # AI プロバイダ（OpenAI 互換エンドポイント）の設定
 # 秘匿値である API キーは wrangler.toml には書き込まず、以下で設定する：
 #   npx wrangler secret put AI_API_KEY

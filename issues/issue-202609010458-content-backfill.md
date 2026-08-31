@@ -46,6 +46,25 @@ created: 2026-09-01T04:58:15+09:00
 
 UNKNOWN — 本件の根本原因特定が本課題のステップ 0 であるため、ログを未取得のまま起票した。検索対象のログ文言は「再現手順」に記載する。
 
+**2026-09-01 追記**: ダッシュボードで Workers Observability が **Disabled** であることを確認済み。失敗時点（2026-08-31 14:46 UTC）の履歴ログは存在しない。ステップ 0 の最初に observability を有効化し、次回以降の失敗で判別する。
+
+
+**2026-09-01 追記 2**: 購読 Source の一覧を確認した結果、**Yahoo!ニュースの Source は存在せず**、news.yahoo.co.jp の記事ははてなホットエントリー 2 フィード（`b.hatena.ne.jp/hotentry.rss` / `hotentry/it.rss`）経由で流入していることが判明（site_url = b.hatena.ne.jp、記事 url = news.yahoo.co.jp）。したがって「Yahoo 記事の本文」は直接取得の成否にかかわらず **Jina 依存**の可能性が高く、主仮説は「Yahoo が Workers エグレス IP に 403 を返す → Jina Fallback → キーなし無料枠（IP 共有 20 RPM）の 429 / クールダウンで失敗 → 空で保存」に昇格した。検証: 取込枠別の欠損が **jina.ai 枠を共有する他ホスト（yomiuri・youtube 等）と同時にクラスタするか**（(D) クロスチェック）、および observability 有効化後のログ（error 403 + Jina 発火 info）。
+
+**2026-09-01 追記 3**: (D) クロスチェックの結果、欠損は**複数ホストでクラスタせず、常に 1 ホスト × 1 件の孤立**（8/30〜9/1 の 12 枠中、yahoo 4・yomiuri 3・youtube 1・他ホスト 4）。jina.ai 枠の「時間帯クラスタ」（クールダウンで複数記事がまとめて落ちる）は棄却され、**記事単位の独立失敗**が有力に。yahoo は直近で成功 4 / 失敗 2（p ≈ 1/3）。yomiuri・youtube・techno-edge 等のほぼ 100% 失敗は、サイト固有の Jina ブロック/抽出不可という別問題。
+
+**2026-09-01 追記 4**: 空本文に至る経路を 5 分類し、ログ署名で完全に区別可能にした。対応する計装ログ 2 本を scraper.ts に追加済み（本 PR）。
+
+| 経路 | 何が起きるか | info「Jina Fallback で本文を取得します。」 | warn「本文の取得に失敗…」 | 計装ログ |
+| --- | --- | --- | --- | --- |
+| (a) 直接取得が非 403/451 で失敗 | タイムアウト・2MB 超過・枠待ち/クールダウン | なし | あり | — |
+| (b) **直接取得 200 で抽出空** | エラーなしで空が保存される | なし | **なし** | 「直接取得は成功したが本文抽出が空でした。」（htmlLength 付き） |
+| (c) Jina が非 200 | HttpStatusError → 空で保存 | あり | あり | — |
+| (d) **Jina 200 で空 markdown** | 空が保存される | あり | **なし** | 「Jina Fallback の応答を受け取りました。」（length 付き） |
+| (e) Jina 200 でエラー文（短文） | 「疑い」になる（yahoo では観測 0 → 起きていない） | あり | なし | length が短い値で判別 |
+
+判別手順: 該当記事の取込時刻近傍で info「記事の同期処理を実行します。」（url 付き・全記事に出る）を検索し、warn / Jina 発火 / 計装ログの 2×2 + 計装で上表に当てはめる。
+
 ### 再現手順（診断クエリとログ突合）
 
 1. 診断クエリは docs/specs/content-gap-audit.md が権威。主に使うもの:
@@ -85,6 +104,7 @@ UNKNOWN — 本件の根本原因特定が本課題のステップ 0 である�
 
 ### ステップ 0: 根本原因の特定（設計の前に必須）
 
+- [ ] Workers Observability を有効化する（`wrangler.toml` に `[observability]` `enabled = true` を追加して deploy。2026-09-01 時点で Disabled だったことが判明済み。config 追加は本 PR 済み、マージ後に deploy が必要）
 - [ ] Workers Logs で warn「本文の取得に失敗したため、本文なしで処理を継続します。」を検索し、`error` 値を原因区分する:
   - `exceeded the size limit` = ボディ 2MB 超過
   - `Fetch timed out` = タイムアウト
