@@ -72,6 +72,16 @@ class HttpStatusError extends Error {
   }
 }
 
+/** 直接取得が「応答の完結」に失敗したことを表す内部エラー（ADR-0013）。
+ * タイムアウト・リダイレクトループ・ボディ超過。Jina Fallback の退避対象になる
+ * （429/503 や 5xx など、応答が完結した相手側の律速要求・不調は対象外）。 */
+class DirectFetchError extends Error {
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options);
+    this.name = 'DirectFetchError';
+  }
+}
+
 
 const nonHtmlFileExtensionPattern =
   /\.(?:pdf|zip|exe|mp4|png|jpe?g|gif|webp|avif|svg|bmp|ico|webm|mov|avi|mkv|mp3|wav|ogg|docx?|xlsx?|pptx?|tar|tgz|gz|bz2|7z|rar)$/i;
@@ -167,6 +177,14 @@ function isForbiddenResponseError(error: unknown): boolean {
   return error instanceof HttpStatusError && FORBIDDEN_STATUSES.has(error.status);
 }
 
+/** Jina Fallback の退避対象かを判定する（ADR-0012・ADR-0013）。
+ * 退避対象: 403/451（明示的な拒否）と、タイムアウト・リダイレクトループ・ボディ超過
+ * （応答が完結しなかった直接取得の失敗）。退避対象外: 429/503（ThrottleError、相手の律速要求に従う）、
+ * その他の HTTP エラー（5xx 等の相手の不調）、枠待ち失敗（EgressUnavailableError、持ち越しの領域）。 */
+function shouldFallbackToJina(error: unknown): boolean {
+  return isForbiddenResponseError(error) || error instanceof DirectFetchError;
+}
+
 async function fetchHtmlWithHeaders(
   egress: EgressContext,
   url: string,
@@ -213,7 +231,7 @@ async function fetchHtmlWithHeaders(
     // タイムアウトによる中断は AbortError のまま呼び出し側に渡さず、
     // 分かりやすいメッセージに置き換える。
     if (isAbortError(error)) {
-      throw new Error(`Fetch timed out: ${redactUrl(url)}`, { cause: error });
+      throw new DirectFetchError(`Fetch timed out: ${redactUrl(url)}`, { cause: error });
     }
     throw error;
   }
@@ -332,9 +350,11 @@ export async function fetchArticleContent(
     }
     return content;
   } catch (error) {
-    // ブラウザ UA でも拒否された（403/451）ときだけ Jina Reader へ退避する（ADR-0012）。
-    // 429・タイムアウトは相手の不調であり、退避ではなく律速・クールダウンの対象。
-    if (!isForbiddenResponseError(error)) {
+    // 直接取得の失敗を Jina Reader へ退避する（ADR-0012・ADR-0013）: 403/451（明示的な拒否）と、
+    // タイムアウト・リダイレクトループ・ボディ超過（応答が完結しなかった失敗）。
+    // 429/503（ThrottleError）と 5xx は相手の律速要求・不調であり、退避せず律速・クールダウンに従う。
+    // 枠待ち失敗（EgressUnavailableError）も退避せず、持ち越しの領域に残す。
+    if (!shouldFallbackToJina(error)) {
       throw error;
     }
     return fetchArticleContentViaJina(egress, url, options.jinaApiKey);
@@ -754,7 +774,7 @@ async function followRedirects(
     currentUrl = nextUrl;
   }
 
-  throw new Error('Too many redirects during feed discovery.');
+  throw new DirectFetchError('Too many redirects during feed discovery.');
 }
 
 function omitAuthorization(headers: Record<string, string>): Record<string, string> {
@@ -781,7 +801,7 @@ export async function readBoundedText(response: Response, maxBytes: number): Pro
     total += value.byteLength;
     if (total > maxBytes) {
       await reader.cancel();
-      throw new Error('Response body exceeded the size limit.');
+      throw new DirectFetchError('Response body exceeded the size limit.');
     }
     chunks.push(value);
   }

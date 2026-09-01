@@ -48,7 +48,7 @@ _Avoid_: Reaction Summary
 _Avoid_: 再取得（Two-Pass Sync・Backfill と混同）, リトライ, プロキシ（仕組みの呼び方であって概念の名前ではない）
 
 **Jina Fallback（Jina 退避）**:
-Fallback の 2 段目。ブラウザ UA での取り直しでも相手に拒否された本文を、Jina Reader 経由で取得すること。相手が Cloudflare 由来かどうかは条件に入れない（拒否の結果だけで判定する）。
+Fallback の 2 段目。ブラウザ UA での取り直しでも取得できなかった本文を、Jina Reader 経由で取得すること。退避対象は「相手が応答を拒否した」（403/451）場合と「応答が完結しなかった」（タイムアウト・リダイレクトループ・ボディ超過）場合（ADR-0012・ADR-0013）。相手が Cloudflare 由来かどうかは条件に入れない（拒否の結果だけで判定する）。
 _Avoid_: プロキシ取得, スクレイピング回避, Cloudflare 対策（原因の推定を条件に見せかける呼び方）
 
 **Content Gap（本文欠損）**:
