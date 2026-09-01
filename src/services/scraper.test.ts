@@ -413,6 +413,80 @@ describe('scraper service', () => {
       expect(jinaCalled).toBe(false);
     });
 
+    it('リダイレクトループでも Jina Reader へ退避する（ADR-0013）', async () => {
+      let jinaCalled = false;
+      server.use(
+        http.get(articleOneUrl, () =>
+          new HttpResponse(null, { status: 302, headers: { location: articleOneUrl } }),
+        ),
+        http.get('https://r.jina.ai/*', () => {
+          jinaCalled = true;
+          return HttpResponse.text(jinaMarkdown, {
+            headers: { 'Content-Type': 'text/plain; charset=utf-8' },
+          });
+        }),
+      );
+
+      // エグレス IP に対してのみ 5 超のリダイレクト（bot 対策ループ）を返すサイトの再現。
+      await expect(fetchArticleContent(egress, articleOneUrl)).resolves.toBe(jinaMarkdownNormalized);
+      expect(jinaCalled).toBe(true);
+    });
+
+    it('ボディ超過でも Jina Reader へ退避する（ADR-0013）', async () => {
+      let jinaCalled = false;
+      // 2MB+1 を 1 チャンクで流すカスタムストリーム（cancel が即座に解決するように cancel ハンドラなし）。
+      const oversizedBody = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode('a'.repeat(2 * 1024 * 1024 + 1)));
+          controller.close();
+        },
+      });
+      server.use(
+        http.get(articleOneUrl, () =>
+          new HttpResponse(oversizedBody, { headers: { 'Content-Type': 'text/html' } }),
+        ),
+        http.get('https://r.jina.ai/*', () => {
+          jinaCalled = true;
+          return HttpResponse.text(jinaMarkdown, {
+            headers: { 'Content-Type': 'text/plain; charset=utf-8' },
+          });
+        }),
+      );
+
+      await expect(fetchArticleContent(egress, articleOneUrl)).resolves.toBe(jinaMarkdownNormalized);
+      expect(jinaCalled).toBe(true);
+    });
+
+    it('タイムアウトでも Jina Reader へ退避する（ADR-0013）', async () => {
+      // 記事 URL への直接取得だけをハングさせ、Jina へのリクエストは即座に応答させる。
+      const hangingFetch = ((_input: RequestInfo | URL, init?: RequestInit) => {
+        const target = String(_input instanceof Request ? _input.url : _input);
+        if (target.startsWith('https://r.jina.ai/')) {
+          return Promise.resolve(
+            new Response(jinaMarkdown, {
+              headers: { 'Content-Type': 'text/plain; charset=utf-8' },
+            }),
+          );
+        }
+        return new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener('abort', () => {
+            reject(new DOMException('The operation was aborted.', 'AbortError'));
+          });
+        });
+      }) as typeof fetch;
+      vi.stubGlobal('fetch', hangingFetch);
+      vi.useFakeTimers();
+
+      try {
+        const promise = fetchArticleContent(egress, articleOneUrl);
+        await vi.advanceTimersByTimeAsync(15_000 + 10);
+        await expect(promise).resolves.toBe(jinaMarkdownNormalized);
+      } finally {
+        vi.unstubAllGlobals();
+        vi.useRealTimers();
+      }
+    });
+
     it('Jina も 403 を返したら失敗として返す（呼び出し側は本文なしで保存する）', async () => {
       server.use(
         http.get(articleOneUrl, () => new HttpResponse(null, { status: 403 })),
