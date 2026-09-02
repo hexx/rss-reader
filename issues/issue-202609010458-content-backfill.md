@@ -1,6 +1,6 @@
 ---
 title: "欠損本文（Content Gap）の Backfill 導入と本文取得失敗の根本原因特定"
-status: TODO
+status: IN_PROGRESS
 created: 2026-09-01T04:58:15+09:00
 ---
 
@@ -114,31 +114,31 @@ UNKNOWN — 本件の根本原因特定が本課題のステップ 0 である�
 
 ### ステップ 0: 根本原因の特定（設計の前に必須）
 
-- [ ] Workers Observability を有効化する（`wrangler.toml` に `[observability]` `enabled = true` を追加して deploy。2026-09-01 時点で Disabled だったことが判明済み。config 追加は本 PR 済み、マージ後に deploy が必要）
-- [ ] Workers Logs で warn「本文の取得に失敗したため、本文なしで処理を継続します。」を検索し、`error` 値を原因区分する:
+- [x] Workers Observability を有効化する（PR #377 で config 追加、2026-09-01 に deploy 済み）
+- [x] Workers Logs で warn「本文の取得に失敗したため、本文なしで処理を継続します。」を検索し、`error` 値を原因区分した（追記 5・6・8）:
   - `exceeded the size limit` = ボディ 2MB 超過
   - `Fetch timed out` = タイムアウト
   - 429 / クールダウン文言 = 律速
   - `403` / `451` = 拒否（この場合、info「Jina Fallback で本文を取得します。」の有無も確認する）
-- [ ] `npx wrangler secret list` で `JINA_API_KEY` の設定有無を確認する（未設定ならキーなし無料枠の IP 単位制限が仮説を補強する）
-- [ ] 特定した原因を本ファイル末尾の「## 解決記録」に記録する
+- [x] `npx wrangler secret list` で `JINA_API_KEY` の設定有無を確認した（**設定済み**。キーなし待ち行列説は消滅、追記 9）
+- [x] 特定した原因を本ファイル末尾の「## 解決記録」に記録する（Yahoo 記事の経路のみ次回欠損ログで確定）
 
 ### ステップ 1: 設計と ADR
 
-- [ ] 用語案「**本文補完（Content Backfill）**」を ADR で確定し、CONTEXT.md に追加する（既存の Backfill（はてブ補完）との対比: 対象が本文 + 記事要約である点を明記する）
-- [ ] 設計論点を ADR で決定する:
-  - Backfill Cursor の拡張方法（hatena 用 `subscriptions.backfillCursor` とどう共存するか）
-  - 対象範囲（全期間の欠損 or 直近 N 日。恒久欠損サイトの扱い）
-  - 1 run の定量（ADR-0010 の 60 件枠との関係）
-  - **要約の事後生成**（`summary IS NULL` かつ本文回復後に `generateArticleSummary` を実行）
-  - Freshness Budget（許容取り込み遅延）は対象外であることの明記（Backfill は既存記事の回復であり、新着の鮮度ではない）
-- [ ] `docs/adr/` に ADR を作成する（ADR-0009/0010 の形式に従う）
+- [x] 用語案「**本文補完（Content Backfill）**」を ADR-0014 で確定し、CONTEXT.md に追加済み
+- [x] 設計論点を ADR-0014 で決定した:
+  - Backfill Cursor の拡張方法 → **不採用**: 試行時刻（`content_backfill_at` + 24 時間間隔）で制御する（欠損集合は変動しフィード掲載順のカーソルでは網羅できない）
+  - 対象範囲 → **全期間の欠損**。恒久欠損サイト（youtube・natalie 等）の除外リストは作らず、24 時間間隔の再試行と律速で抑制
+  - 1 run の定量 → **6 件**（最悪ケース約 6 分。wall 上限 15 分 ADR-0002 を守るため ADR-0010 の 60 件より小さい）
+  - **要約の事後生成** → **実装済み**（`summary IS NULL` かつ本文回復後に `generateArticleSummary`。AI 失敗は fail-fast で本文のみ保存）
+  - Freshness Budget は対象外であることを ADR-0014 に明記した（Backfill は既存記事の回復であり、新着の鮮度ではない）
+- [x] `docs/adr/0014-content-backfill-for-content-gap.md` を作成した
 
 ### ステップ 2: 実装
 
-- [ ] 本文の Backfill を補完巡回に追加する（上記 ADR の範囲に従う）
-- [ ] 回復した記事の `summary IS NULL` を埋める（要約の事後生成）
-- [ ] 恒久欠損サイト（動画サイト等、ADR で除外判定したもの）は無限リトライしない
+- [x] 本文の Backfill をフル同期のパス3 として追加した（`backfillContents`）
+- [x] 回復した記事の `summary IS NULL` を埋める（要約の事後生成）
+- [x] 恒久欠損サイトも 24 時間間隔で再試行する（除外リストは YAGNI、jina.ai 枠の律速で抑制。ADR-0014 に記載）
 
 ### 完了条件（検証方法）
 - `npm test` が緑になること
@@ -149,3 +149,9 @@ UNKNOWN — 本件の根本原因特定が本課題のステップ 0 である�
 ## 補足
 - 2026-09-01 実施の「空本文時の要約スキップ」により、以後の新着は空本文でも `summary = NULL` で保存される。本課題の Backfill 実装時に `summary IS NULL` を拾えば、過去のスキップ分も一括で回復できる。
 - ADR-0012（Jina Fallback）の退避事実は DB に保存されない（jina-fallback.md §2）。遡及では「どの段階で取れたか」を判別できないため、原因特定はログに頼る。
+
+## 解決記録
+
+- **2026-09-01**: ステップ 0 の一部として根本原因を実測確定（追記 5・6・8）: techno-edge = Cloudflare エグレス IP へのリダイレクトループ（経路 (a)・Jina 未発火）、福島大学 = タイムアウト + 複数ネットワークで接続リセット（サイト側不安定）、natalie = 405 + CAPTCHA（誰にも取得不可）。Yahoo 記事の経路は未確定（次回欠損ログで判別）。
+- **2026-09-01**: ADR-0013（PR #378）: Jina Fallback の発火条件を「403/451 + 応答が完結しない失敗」に拡張。techno-edge 型の回復が可能に。
+- **2026-09-02**: ADR-0014（本 PR）: 本文補完（Content Backfill）を実装。ステップ 1・2 完了。回復は最大 48 件/日、初回巡回は約 6〜7 日。残タスク: デプロイ後の欠損件数確認（docs/specs/content-gap-audit.md の (C') クエリ）と Yahoo 記事の経路確定。

@@ -19,6 +19,8 @@ export const articles = sqliteTable(
     id: text('id').primaryKey(),
     isRead: integer('is_read', { mode: 'boolean' }).notNull().default(false),
     publishedAt: integer('published_at', { mode: 'timestamp_ms' }),
+    /** 本文補完（Content Backfill、ADR-0014）の最終試行時刻。NULL = 未試行。 */
+    contentBackfillAt: integer('content_backfill_at', { mode: 'timestamp_ms' }),
     siteUrl: text('site_url').notNull().default(''),
     summary: text('summary'),
     title: text('title').notNull(),

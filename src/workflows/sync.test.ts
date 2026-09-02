@@ -841,3 +841,151 @@ describe('二段同期（パス1 のフィード取得優先・律速・補完�
     );
   });
 });
+
+describe('本文補完（Content Backfill、ADR-0014）', () => {
+  beforeEach(async () => {
+    vi.resetModules();
+    testDb = (await createTestDatabase()).db;
+
+    fetchHatenaBookmarksMock.mockReset();
+    generateArticleSummaryMock.mockReset();
+    generateHatenaSummaryMock.mockReset();
+    fetchArticleContentMock.mockReset();
+    fetchRssOrFallbackMock.mockReset();
+    loggerMock.info.mockReset();
+    loggerMock.warn.mockReset();
+  });
+
+  const insertMissingArticle = async (overrides: {
+    id: string;
+    url: string;
+    contentBackfillAt?: Date | null;
+    createdAt?: Date;
+    summary?: string | null;
+  }) => {
+    await testDb.insert(articles).values({
+      content: '',
+      createdAt: overrides.createdAt ?? new Date('2024-01-01T00:00:00.000Z'),
+      hatenaSummary: null,
+      id: overrides.id,
+      isRead: false,
+      publishedAt: new Date('2024-01-01T00:00:00.000Z'),
+      siteUrl,
+      summary: overrides.summary ?? null,
+      title: `欠損記事 ${overrides.id}`,
+      url: overrides.url,
+      ...(overrides.contentBackfillAt === undefined
+        ? {}
+        : { contentBackfillAt: overrides.contentBackfillAt }),
+    });
+  };
+
+  it('空本文の記事を古い順に再取得し、要約も生成する（ADR-0014）', async () => {
+    await testDb.insert(subscriptions).values([{ id: 'subscription-1', siteUrl }]);
+    await insertMissingArticle({
+      id: 'article-missing',
+      url: 'https://example.com/missing/1',
+      contentBackfillAt: new Date(Date.now() - 25 * 60 * 60 * 1_000),
+    });
+    fetchRssOrFallbackMock.mockResolvedValue([]);
+    fetchArticleContentMock.mockResolvedValue('回復した本文');
+    generateArticleSummaryMock.mockResolvedValue('回復後の要約');
+
+    const { syncAllSubscriptions } = await import('./sync.js');
+    await syncAllSubscriptions(false, testEnv, true);
+
+    const saved = await testDb.select().from(articles);
+    expect(saved).toHaveLength(1);
+    expect(saved[0]).toMatchObject({
+      content: '回復した本文',
+      summary: '回復後の要約',
+    });
+    expect(saved[0]?.contentBackfillAt).toBeInstanceOf(Date);
+    expect(fetchArticleContentMock).toHaveBeenCalledWith(expect.anything(), 'https://example.com/missing/1', {
+      jinaApiKey: undefined,
+    });
+    expect(generateArticleSummaryMock).toHaveBeenCalledWith('欠損記事 article-missing', '回復した本文', expect.any(Object));
+  });
+
+  it('24 時間以内に試行した記事はスキップする（ADR-0014）', async () => {
+    await testDb.insert(subscriptions).values([{ id: 'subscription-1', siteUrl }]);
+    await insertMissingArticle({
+      id: 'article-recent',
+      url: 'https://example.com/missing/2',
+      contentBackfillAt: new Date(),
+    });
+    fetchRssOrFallbackMock.mockResolvedValue([]);
+    fetchArticleContentMock.mockResolvedValue('回復した本文');
+
+    const { syncAllSubscriptions } = await import('./sync.js');
+    await syncAllSubscriptions(false, testEnv, true);
+
+    expect(fetchArticleContentMock).not.toHaveBeenCalled();
+    const saved = await testDb.select().from(articles);
+    expect(saved[0]?.content).toBe('');
+  });
+
+  it('再取得に失敗したら warn で次の巡回に譲る（ADR-0014）', async () => {
+    await testDb.insert(subscriptions).values([{ id: 'subscription-1', siteUrl }]);
+    await insertMissingArticle({
+      id: 'article-failing',
+      url: 'https://example.com/missing/3',
+      contentBackfillAt: new Date(Date.now() - 25 * 60 * 60 * 1_000),
+    });
+    fetchRssOrFallbackMock.mockResolvedValue([]);
+    fetchArticleContentMock.mockRejectedValue(new Error('backfill fetch failed'));
+
+    const { syncAllSubscriptions } = await import('./sync.js');
+    await syncAllSubscriptions(false, testEnv, true);
+
+    expect(loggerMock.warn).toHaveBeenCalledWith(
+      '本文補完の再取得に失敗したため、次の巡回で再試行します。',
+      expect.objectContaining({
+        articleUrl: 'https://example.com/missing/3',
+        error: 'backfill fetch failed',
+      }),
+    );
+    const saved = await testDb.select().from(articles);
+    expect(saved[0]?.content).toBe('');
+    // 試行の事実は記録されている（24 時間後の再試行になる）。
+    expect(saved[0]?.contentBackfillAt).toBeInstanceOf(Date);
+  });
+
+  it('取り込み専用 cron では本文補完をしない（ADR-0014）', async () => {
+    await testDb.insert(subscriptions).values([{ id: 'subscription-1', siteUrl }]);
+    await insertMissingArticle({
+      id: 'article-missing',
+      url: 'https://example.com/missing/4',
+      contentBackfillAt: new Date(Date.now() - 25 * 60 * 60 * 1_000),
+    });
+    fetchRssOrFallbackMock.mockResolvedValue([]);
+
+    const { syncAllSubscriptions } = await import('./sync.js');
+    await syncAllSubscriptions(false, testEnv, false);
+
+    expect(fetchArticleContentMock).not.toHaveBeenCalled();
+  });
+
+  it('1 run の上限（6 件）を超えて再取得しない（ADR-0014）', async () => {
+    await testDb.insert(subscriptions).values([{ id: 'subscription-1', siteUrl }]);
+    for (let index = 0; index < 7; index += 1) {
+      await insertMissingArticle({
+        id: `article-${index}`,
+        url: `https://example.com/missing/${index}`,
+        contentBackfillAt: new Date(Date.now() - 25 * 60 * 60 * 1_000),
+        createdAt: new Date(Date.UTC(2024, 0, 1, 0, index)),
+        summary: '要約',
+      });
+    }
+    fetchRssOrFallbackMock.mockResolvedValue([]);
+    fetchArticleContentMock.mockResolvedValue('回復した本文');
+
+    const { contentBackfillBudgetPerRun, syncAllSubscriptions } = await import('./sync.js');
+    await syncAllSubscriptions(false, testEnv, true);
+
+    expect(fetchArticleContentMock).toHaveBeenCalledTimes(contentBackfillBudgetPerRun);
+    const saved = await testDb.select().from(articles);
+    const recovered = saved.filter((row) => row.content === '回復した本文');
+    expect(recovered).toHaveLength(contentBackfillBudgetPerRun);
+  });
+});
