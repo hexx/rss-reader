@@ -38,6 +38,7 @@ export async function createTestDatabase(options: { initializeSchema?: boolean }
         title TEXT NOT NULL,
         content TEXT,
         published_at INTEGER,
+        content_backfill_at INTEGER,
         summary TEXT,
         hatena_summary TEXT,
         is_read INTEGER NOT NULL DEFAULT 0,

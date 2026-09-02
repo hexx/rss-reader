@@ -43,6 +43,13 @@
       "when": 1787970842357,
       "tag": "0005_egress_fetch_buckets",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1788321145975,
+      "tag": "0006_jittery_rocket_raccoon",
+      "breakpoints": true
     }
   ]
 }

@@ -1,0 +1,1 @@
+ALTER TABLE `articles` ADD `content_backfill_at` integer;

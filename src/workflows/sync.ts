@@ -1,4 +1,4 @@
-import { and, eq, isNull, sql } from 'drizzle-orm';
+import { and, asc, eq, isNull, lt, or, sql } from 'drizzle-orm';
 
 import type { RuntimeEnv } from '../env.js';
 import { getDb } from '../db/index.js';
@@ -31,6 +31,12 @@ export const backfillBudgetPerRun = 60;
 
 /** 1 run あたりに生成するはてブ要約の上限（AI 呼び出しのバースト防止、従来どおり）。 */
 export const maxHatenaSummaryBackfillsPerRun = 20;
+
+/** 1 run あたりの本文補完（Content Backfill）上限。cron の wall 上限 15 分（ADR-0002）を守るため
+ * 最悪ケース（全記事がタイムアウト + Jina タイムアウト ≈ 60 秒/件）でも約 6 分に抑える（ADR-0014）。 */
+export const contentBackfillBudgetPerRun = 6;
+/** 同じ記事の本文補完を再試行する間隔（ミリ秒、ADR-0014）。 */
+const contentBackfillRetryIntervalMs = 24 * 60 * 60 * 1_000;
 
 /** AI生成処理の失敗を同期全体へ伝播させる。 */
 async function runAi<T>(operation: () => Promise<T>): Promise<T> {
@@ -323,6 +329,18 @@ async function runSync(
   // ===== パス2: 記事処理（新着取り込み → はてブ補完） =====
   await processFeeds(database, egress, env, feeds, backfillState, counters, debug);
 
+  // ===== パス3: 本文補完（Content Backfill、ADR-0014） =====
+  // フル同期でのみ実行する（取り込み専用 cron では新着の取り込みを優先）。
+  const recovered = await backfillContents(
+    database,
+    egress,
+    env,
+    includeBookmarkBackfill ? contentBackfillBudgetPerRun : 0,
+  );
+  if (recovered > 0) {
+    logger.info('本文補完で本文を回復しました。', { recovered });
+  }
+
   logger.info('同期が完了しました。', {
     elapsedMs: Date.now() - startedAtMs,
     skipped: counters.skipped,
@@ -578,8 +596,11 @@ async function ingestNewArticle(
     }
     const articleId = crypto.randomUUID();
 
+    // 空本文で保存するときは、取り込み時の本文取得も「試行」として記録する（ADR-0014）。
+    // これにより本文補完の初回再試行は 24 時間後になり、同一 run 内の二重取得を防ぐ。
     await database.insert(articles).values({
       content,
+      contentBackfillAt: content === '' ? new Date() : null,
       hatenaSummary,
       id: articleId,
       isRead: false,
@@ -719,6 +740,80 @@ async function loadNullSummaryIds(database: AppDatabase, siteUrl: string): Promi
     .from(articles)
     .where(and(eq(articles.siteUrl, siteUrl), isNull(articles.hatenaSummary)));
   return new Set(rows.map((row) => row.id));
+}
+
+/** 本文補完（Content Backfill、ADR-0014）: 本文が空の既存記事を古い順に再取得する。
+ * 取得できた記事の summary が NULL のときは要約も生成する（空本文時要約スキップの回復）。
+ * 失敗は warn のうえ次の巡回に譲り、成功した記事は対象から外れる。
+ * 巡回はカーソルではなく試行時刻（`content_backfill_at` + 24 時間間隔）で制御する —
+ * 欠損集合はフィードから落ちた古い記事を含むため変動し、フィード掲載順のカーソルでは網羅できない。 */
+async function backfillContents(
+  database: AppDatabase,
+  egress: EgressContext,
+  env: RuntimeEnv,
+  budget: number,
+): Promise<number> {
+  if (budget <= 0) {
+    return 0;
+  }
+  const cutoffMs = Date.now() - contentBackfillRetryIntervalMs;
+  const targets = await database
+    .select({
+      id: articles.id,
+      title: articles.title,
+      url: articles.url,
+      summaryIsNull: isNull(articles.summary),
+    })
+    .from(articles)
+    .where(
+      and(
+        or(isNull(articles.content), eq(articles.content, '')),
+        or(isNull(articles.contentBackfillAt), lt(articles.contentBackfillAt, new Date(cutoffMs))),
+      ),
+    )
+    .orderBy(asc(articles.createdAt))
+    .limit(budget);
+
+  let recovered = 0;
+  for (const target of targets) {
+    // 試行の事実を先に記録する。run 中断でも再試行は 24 時間後になる（同一 run 内の二重取得防止）。
+    await database
+      .update(articles)
+      .set({ contentBackfillAt: new Date() })
+      .where(eq(articles.id, target.id));
+
+    let content: string;
+    try {
+      content = await fetchArticleContent(egress, target.url, { jinaApiKey: env.JINA_API_KEY });
+    } catch (error) {
+      if (isEgressUnavailableError(error)) {
+        // 枠が空かない・クールダウン中は同じ相手の残りも埋まらない。巡回を打ち切る。
+        logger.info('本文補完は取得枠のクールダウン中のため打ち切ります。', {
+          articleUrl: target.url,
+        });
+        return recovered;
+      }
+      logger.warn('本文補完の再取得に失敗したため、次の巡回で再試行します。', {
+        articleUrl: target.url,
+        error: toErrorMessage(error),
+      });
+      continue;
+    }
+    if (content === '') {
+      logger.info('本文補完の再取得でも本文が空でした。', { articleUrl: target.url });
+      continue;
+    }
+
+    // 本文を先に保存する（要約の AI 生成に失敗しても回復済みの本文は失われない）。
+    await database.update(articles).set({ content }).where(eq(articles.id, target.id));
+    recovered += 1;
+    if (target.summaryIsNull) {
+      // 空本文時要約スキップで要約が未生成の記事。本文回復に合わせて生成する（ADR-0008 により AI 失敗は fail-fast）。
+      const summary = await runAi(() => generateArticleSummary(target.title, content, env));
+      await database.update(articles).set({ summary }).where(eq(articles.id, target.id));
+    }
+  }
+  return recovered;
 }
 
 async function findExistingArticleId(database: AppDatabase, url: string): Promise<string | null> {
