@@ -413,6 +413,35 @@ describe('scraper service', () => {
       expect(jinaCalled).toBe(false);
     });
 
+    it('Jina leg のタイムアウトは 45 秒（ADR-0013）', async () => {
+      // 直接取得は即座に 403、Jina へのリクエストだけをハングさせる。
+      const hangingFetch = ((_input: RequestInfo | URL, init?: RequestInit) => {
+        const target = String(_input instanceof Request ? _input.url : _input);
+        if (target.startsWith('https://r.jina.ai/')) {
+          return new Promise<Response>((_resolve, reject) => {
+            init?.signal?.addEventListener('abort', () => {
+              reject(new DOMException('The operation was aborted.', 'AbortError'));
+            });
+          });
+        }
+        return new Response(null, { status: 403 });
+      }) as typeof fetch;
+      vi.stubGlobal('fetch', hangingFetch);
+      vi.useFakeTimers();
+
+      try {
+        const promise = fetchArticleContent(egress, articleOneUrl);
+        // 直接取得の 15 秒タイムアウトでは打ち切られない（Jina leg は 45 秒の専用値）。
+        const assertion = expect(promise).rejects.toThrow(/Fetch timed out: https:\/\/r\.jina\.ai/u);
+        await vi.advanceTimersByTimeAsync(15_000 + 10);
+        await vi.advanceTimersByTimeAsync(30_000);
+        await assertion;
+      } finally {
+        vi.unstubAllGlobals();
+        vi.useRealTimers();
+      }
+    });
+
     it('リダイレクトループでも Jina Reader へ退避する（ADR-0013）', async () => {
       let jinaCalled = false;
       server.use(

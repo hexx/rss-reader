@@ -146,6 +146,8 @@ interface HtmlFetchOptions {
   egressMode?: 'defer' | 'wait';
   /** 403/451 のときブラウザ UA で 1 回取り直すか（ADR-0011 の退避）。 */
   allowBrowserUserAgentFallback?: boolean;
+  /** タイムアウト（ミリ秒）。未指定なら FETCH_TIMEOUT_MS。Jina leg は描画待ちがあるため専用値を使う（ADR-0013）。 */
+  timeoutMs?: number;
 }
 
 async function fetchHtml(
@@ -202,7 +204,7 @@ async function fetchHtmlWithHeaders(
     // HTTP タイムアウトは枠を確保した**あとに**張る。枠待ちの時間を
     // 相手の不調と誤診してクールダウンを作るのを防ぐ（ADR-0009）。
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+    const timeout = setTimeout(() => controller.abort(), options.timeoutMs ?? FETCH_TIMEOUT_MS);
     try {
       const first = await requestWithinEgressSlot(
         egress,
@@ -392,7 +394,11 @@ async function fetchArticleContentViaJina(
   });
 
   // 応答は Jina 側で本文抽出済みの markdown。cheerio を経ず、空白を正規化してそのまま本文にする。
-  const markdown = await fetchHtmlWithHeaders(egress, jinaUrl, headers, { egressMode: 'wait' });
+  // Jina は対象ページの描画完了（networkidle）を待つため、タイムアウトは専用の長めの値を使う（ADR-0013）。
+  const markdown = await fetchHtmlWithHeaders(egress, jinaUrl, headers, {
+    egressMode: 'wait',
+    timeoutMs: JINA_FETCH_TIMEOUT_MS,
+  });
   const content = normalizeText(markdown);
   // Jina が 200 でも空/極端に短い markdown を返す経路（経路 (d)：warn が出ない欠損）を観測可能にする。
   logger.info('Jina Fallback の応答を受け取りました。', {
@@ -416,6 +422,10 @@ const FEED_TYPE_ATOM = 'application/atom+xml';
 const DISCOVERY_TIMEOUT_MS = 10_000;
 /** 記事本文・HTML 読み込みのタイムアウト（ミリ秒）。 */
 const FETCH_TIMEOUT_MS = 15_000;
+/** Jina leg 専用のタイムアウト（ミリ秒、ADR-0013）。
+ * Jina は対象ページの描画完了（networkidle）を待ってから本文を返すため、
+ * 広告の多いページでは 15 秒では間に合わない（2026-09-02 の実測: techno-edge・yomiuri で連続タイムアウト）。 */
+const JINA_FETCH_TIMEOUT_MS = 45_000;
 /** HTML 読み込みサイズ上限（バイト）。過剰な応答による DoS を防ぐ。 */
 const DEFAULT_MAX_HTML_BYTES = 2 * 1024 * 1024;
 /** リダイレクトの最大追随回数。これを超えると拒否する。 */

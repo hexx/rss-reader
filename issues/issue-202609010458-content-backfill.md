@@ -73,6 +73,8 @@ UNKNOWN — 本件の根本原因特定が本課題のステップ 0 である�
 
 **2026-09-01 追記 8**: 3 件目の実測（natalie.mu、2026-09-01 18:00 JST フル同期）: `error = "Failed to fetch …: 405 Method Not Allowed"`。GET に対する 405 は意味をなさない応答 = **bot 対策の変種**で、ADR-0013 の線引き（完結した応答は退避しない）では救えないケース。さらに Jina 実測の結果、**CAPTCHA（Human Verification）ページが返り誰にも取得不可**であることを確認。⇒ 分類は 3 種類に: **①Jina 発火条件拡張で回復可能**（techno-edge、ADR-0013 済）、**②サイト不安定**（fukushima-u、Backfill で回復）、**③CAPTCHA 型（natalie）= 誰にも取れない恒久欠損**。③への教訓: 発火条件を無制限に反転して Jina を呼ぶと、CAPTCHA ページの短文が本文として保存され要約汚染する（空より悪い）。⇒ 線引きを反転する場合は **Jina 応答の品質ゲート**（要約に耐えない長さなら破棄して空のまま）が必須。ステップ 1 の ADR 論点に追加。
 
+**2026-09-02 追記 9**: `JINA_API_KEY` は設定済みを確認（`npx wrangler secret list`）— キーなし待ち行列説は消え、**タイムアウト予算 15 秒が短すぎる**ことが確定。Jina は対象ページの描画完了（networkidle）を待ってから本文を返すため、広告の多いページ（techno-edge 10:15 run・yomiuri 11:15 run）では連続タイムアウト（`Fetch timed out: https://r.jina.ai/…`。ADR-0013 により Jina 発火は正常に動作）。副作用: Jina タイムアウトは jina.ai 枠にクールダウン（30 分〜）を記録するため、**他サイトの退避が巻き添えで拒否される連鎖**があり得る。**対策（本 PR）: Jina leg 専用タイムアウト 45 秒**（`JINA_FETCH_TIMEOUT_MS` + `HtmlFetchOptions.timeoutMs`）。直接取得の 15 秒は変更なし。さらに Jina 実測の結果、**CAPTCHA（Human Verification）ページが返り誰にも取得不可**であることを確認。⇒ 分類は 3 種類に: **①Jina 発火条件拡張で回復可能**（techno-edge、ADR-0013 済）、**②サイト不安定**（fukushima-u、Backfill で回復）、**③CAPTCHA 型（natalie）= 誰にも取れない恒久欠損**。③への教訓: 発火条件を無制限に反転して Jina を呼ぶと、CAPTCHA ページの短文が本文として保存され要約汚染する（空より悪い）。⇒ 線引きを反転する場合は **Jina 応答の品質ゲート**（要約に耐えない長さなら破棄して空のまま）が必須。ステップ 1 の ADR 論点に追加。
+
 ### 再現手順（診断クエリとログ突合）
 
 1. 診断クエリは docs/specs/content-gap-audit.md が権威。主に使うもの:
