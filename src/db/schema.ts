@@ -21,6 +21,10 @@ export const articles = sqliteTable(
     publishedAt: integer('published_at', { mode: 'timestamp_ms' }),
     /** 本文補完（Content Backfill、ADR-0014）の最終試行時刻。NULL = 未試行。 */
     contentBackfillAt: integer('content_backfill_at', { mode: 'timestamp_ms' }),
+    /** 本文補完の連続失敗回数（ADR-0015）。404/410 では即座に上限値をセットする。 */
+    contentBackfillFailures: integer('content_backfill_failures').notNull().default(0),
+    /** 本文補完の断念日時（Give-up、ADR-0015）。NULL = 巡回中。 */
+    contentBackfillGaveUpAt: integer('content_backfill_gave_up_at', { mode: 'timestamp_ms' }),
     siteUrl: text('site_url').notNull().default(''),
     summary: text('summary'),
     title: text('title').notNull(),

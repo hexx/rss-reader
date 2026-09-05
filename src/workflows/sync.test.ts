@@ -12,10 +12,14 @@ const testEnv: RuntimeEnv = {
   AI_REASONING_EFFORT: 'medium',
 };
 
-vi.mock('../services/scraper.js', () => ({
-  fetchArticleContent: vi.fn(),
-  fetchRssOrFallback: vi.fn(),
-}));
+vi.mock('../services/scraper.js', async () => {
+  const actual = await vi.importActual<typeof import('../services/scraper.js')>('../services/scraper.js');
+  return {
+    ...actual,
+    fetchArticleContent: vi.fn(),
+    fetchRssOrFallback: vi.fn(),
+  };
+});
 
 vi.mock('../services/hatena.js', () => ({
   fetchHatenaBookmarks: vi.fn(),
@@ -47,7 +51,7 @@ vi.mock('../services/ai.js', async () => {
 
 import { fetchHatenaBookmarks } from '../services/hatena.js';
 import { generateArticleSummary, generateHatenaSummary } from '../services/ai.js';
-import { fetchArticleContent, fetchRssOrFallback } from '../services/scraper.js';
+import { fetchArticleContent, fetchRssOrFallback, HttpStatusError } from '../services/scraper.js';
 import { logger } from '../utils/logger.js';
 
 const fetchHatenaBookmarksMock = vi.mocked(fetchHatenaBookmarks);
@@ -987,5 +991,99 @@ describe('本文補完（Content Backfill、ADR-0014）', () => {
     const saved = await testDb.select().from(articles);
     const recovered = saved.filter((row) => row.content === '回復した本文');
     expect(recovered).toHaveLength(contentBackfillBudgetPerRun);
+  });
+
+  it('404 では即断念する（ADR-0015）', async () => {
+    await testDb.insert(subscriptions).values([{ id: 'subscription-1', siteUrl }]);
+    await insertMissingArticle({
+      id: 'article-deleted',
+      url: 'https://example.com/missing/404',
+      contentBackfillAt: new Date(Date.now() - 25 * 60 * 60 * 1_000),
+    });
+    fetchRssOrFallbackMock.mockResolvedValue([]);
+    fetchArticleContentMock.mockRejectedValue(
+      new HttpStatusError('Failed to fetch https://example.com/missing/404: 404 Not Found', 404),
+    );
+
+    const { syncAllSubscriptions } = await import('./sync.js');
+    await syncAllSubscriptions(false, testEnv, true);
+
+    // warn ではなく info（断念は正常な意思決定）で記録される。
+    expect(loggerMock.info).toHaveBeenCalledWith(
+      '本文補完を断念しました（記事が存在しません）。',
+      expect.objectContaining({ articleUrl: 'https://example.com/missing/404' }),
+    );
+    const saved = await testDb.select().from(articles);
+    expect(saved[0]).toMatchObject({ content: '', contentBackfillFailures: 5 });
+    expect(saved[0]?.contentBackfillGaveUpAt).toBeInstanceOf(Date);
+  });
+
+  it('その他の失敗は 5 回で断念する（ADR-0015）', async () => {
+    await testDb.insert(subscriptions).values([{ id: 'subscription-1', siteUrl }]);
+    await insertMissingArticle({
+      id: 'article-flaky',
+      url: 'https://example.com/missing/5',
+      contentBackfillAt: new Date(Date.now() - 25 * 60 * 60 * 1_000),
+    });
+    // 失敗回数 4（連続 4 回失敗済み）。今回で 5 回目になる。
+    await testDb.update(articles).set({ contentBackfillFailures: 4 });
+    fetchRssOrFallbackMock.mockResolvedValue([]);
+    fetchArticleContentMock.mockRejectedValue(new Error('backfill fetch failed'));
+
+    const { syncAllSubscriptions } = await import('./sync.js');
+    await syncAllSubscriptions(false, testEnv, true);
+
+    expect(loggerMock.info).toHaveBeenCalledWith(
+      '本文補完を断念しました（連続 5 回失敗）。',
+      expect.objectContaining({ articleUrl: 'https://example.com/missing/5' }),
+    );
+    const saved = await testDb.select().from(articles);
+    expect(saved[0]).toMatchObject({ content: '', contentBackfillFailures: 5 });
+    expect(saved[0]?.contentBackfillGaveUpAt).toBeInstanceOf(Date);
+  });
+
+  it('断念した記事は巡回対象から外れる（ADR-0015）', async () => {
+    await testDb.insert(subscriptions).values([{ id: 'subscription-1', siteUrl }]);
+    await insertMissingArticle({
+      id: 'article-gaveup',
+      url: 'https://example.com/missing/6',
+      contentBackfillAt: new Date(Date.now() - 25 * 60 * 60 * 1_000),
+    });
+    await testDb.update(articles).set({ contentBackfillGaveUpAt: new Date() });
+    fetchRssOrFallbackMock.mockResolvedValue([]);
+    fetchArticleContentMock.mockResolvedValue('回復した本文');
+
+    const { syncAllSubscriptions } = await import('./sync.js');
+    await syncAllSubscriptions(false, testEnv, true);
+
+    expect(fetchArticleContentMock).not.toHaveBeenCalled();
+  });
+
+  it('枠待ちは失敗回数にカウントしない（ADR-0015）', async () => {
+    await testDb.insert(subscriptions).values([{ id: 'subscription-1', siteUrl }]);
+    await insertMissingArticle({
+      id: 'article-egress',
+      url: 'https://example.com/missing/7',
+      contentBackfillAt: new Date(Date.now() - 25 * 60 * 60 * 1_000),
+    });
+    fetchRssOrFallbackMock.mockResolvedValue([]);
+    // resetModules 後の sync.js が使う egress モジュールと同じクラスインスタンスが必要なため、テスト内で動的 import する。
+    const { EgressUnavailableError } = await import('../services/egress.js');
+    fetchArticleContentMock.mockRejectedValue(
+      new EgressUnavailableError('example.com', 'cooldown', Date.now() + 30 * 60 * 1_000),
+    );
+
+    const { syncAllSubscriptions } = await import('./sync.js');
+    await syncAllSubscriptions(false, testEnv, true);
+
+    expect(loggerMock.info).toHaveBeenCalledWith(
+      '本文補完は取得枠のクールダウン中のため打ち切ります。',
+      expect.objectContaining({ articleUrl: 'https://example.com/missing/7' }),
+    );
+    const saved = await testDb.select().from(articles);
+    expect(saved[0]).toMatchObject({ content: '', contentBackfillFailures: 0 });
+    expect(saved[0]?.contentBackfillGaveUpAt).toBeNull();
+    // 試行の事実は記録されている。
+    expect(saved[0]?.contentBackfillAt).toBeInstanceOf(Date);
   });
 });

@@ -20,7 +20,7 @@ import {
 } from '../services/ai.js';
 import { fetchHatenaBookmarks } from '../services/hatena.js';
 import type { HatenaBookmarkComment } from '../services/hatena.js';
-import { fetchArticleContent, fetchRssOrFallback } from '../services/scraper.js';
+import { fetchArticleContent, fetchRssOrFallback, isArticleMissingError } from '../services/scraper.js';
 import type { ScrapedLink } from '../services/scraper.js';
 import { logger } from '../utils/logger.js';
 
@@ -37,6 +37,8 @@ export const maxHatenaSummaryBackfillsPerRun = 20;
 export const contentBackfillBudgetPerRun = 6;
 /** 同じ記事の本文補完を再試行する間隔（ミリ秒、ADR-0014）。 */
 const contentBackfillRetryIntervalMs = 24 * 60 * 60 * 1_000;
+/** 本文補完の連続失敗による断念回数（ADR-0015）。404/410 では即座に断念する。 */
+const CONTENT_BACKFILL_GIVE_UP_THRESHOLD = 5;
 
 /** AI生成処理の失敗を同期全体へ伝播させる。 */
 async function runAi<T>(operation: () => Promise<T>): Promise<T> {
@@ -763,12 +765,14 @@ async function backfillContents(
       title: articles.title,
       url: articles.url,
       summaryIsNull: isNull(articles.summary),
+      failures: articles.contentBackfillFailures,
     })
     .from(articles)
     .where(
       and(
         or(isNull(articles.content), eq(articles.content, '')),
         or(isNull(articles.contentBackfillAt), lt(articles.contentBackfillAt, new Date(cutoffMs))),
+        isNull(articles.contentBackfillGaveUpAt),
       ),
     )
     .orderBy(asc(articles.createdAt))
@@ -788,11 +792,40 @@ async function backfillContents(
     } catch (error) {
       if (isEgressUnavailableError(error)) {
         // 枠が空かない・クールダウン中は同じ相手の残りも埋まらない。巡回を打ち切る。
+        // 枠の問題は記事の失敗ではないため、失敗回数にはカウントしない（ADR-0015）。
         logger.info('本文補完は取得枠のクールダウン中のため打ち切ります。', {
           articleUrl: target.url,
         });
         return recovered;
       }
+      if (isArticleMissingError(error)) {
+        // 404/410 は「記事が消えた」ことの強いシグナル。即座に断念する（ADR-0015）。
+        await database
+          .update(articles)
+          .set({
+            contentBackfillFailures: CONTENT_BACKFILL_GIVE_UP_THRESHOLD,
+            contentBackfillGaveUpAt: new Date(),
+          })
+          .where(eq(articles.id, target.id));
+        logger.info('本文補完を断念しました（記事が存在しません）。', {
+          articleUrl: target.url,
+        });
+        continue;
+      }
+      const failures = target.failures + 1;
+      if (failures >= CONTENT_BACKFILL_GIVE_UP_THRESHOLD) {
+        // 5 回連続で失敗する記事は恒久欠損の可能性が高い。断念する（ADR-0015）。
+        await database
+          .update(articles)
+          .set({ contentBackfillFailures: failures, contentBackfillGaveUpAt: new Date() })
+          .where(eq(articles.id, target.id));
+        logger.info('本文補完を断念しました（連続 5 回失敗）。', { articleUrl: target.url });
+        continue;
+      }
+      await database
+        .update(articles)
+        .set({ contentBackfillFailures: failures })
+        .where(eq(articles.id, target.id));
       logger.warn('本文補完の再取得に失敗したため、次の巡回で再試行します。', {
         articleUrl: target.url,
         error: toErrorMessage(error),
