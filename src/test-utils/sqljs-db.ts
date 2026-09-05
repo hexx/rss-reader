@@ -39,6 +39,8 @@ export async function createTestDatabase(options: { initializeSchema?: boolean }
         content TEXT,
         published_at INTEGER,
         content_backfill_at INTEGER,
+        content_backfill_failures INTEGER DEFAULT 0 NOT NULL,
+        content_backfill_gave_up_at INTEGER,
         summary TEXT,
         hatena_summary TEXT,
         is_read INTEGER NOT NULL DEFAULT 0,

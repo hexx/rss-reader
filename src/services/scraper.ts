@@ -62,7 +62,7 @@ const FORBIDDEN_STATUSES = new Set([403, 451]);
 const JINA_READER_PREFIX = 'https://r.jina.ai/';
 
 /** HTTP エラーをステータス付きで表現する内部エラー（403/451 の退避判定に使う）。 */
-class HttpStatusError extends Error {
+export class HttpStatusError extends Error {
   readonly status: number;
 
   constructor(message: string, status: number) {
@@ -177,6 +177,14 @@ async function fetchHtml(
 
 function isForbiddenResponseError(error: unknown): boolean {
   return error instanceof HttpStatusError && FORBIDDEN_STATUSES.has(error.status);
+}
+
+/** 記事が存在しないことを表す応答（404/410）かを判定する（ADR-0015）。
+ * 削除済み記事の本文補完の断念（Give-up）判定に使う。 */
+export function isArticleMissingError(error: unknown): boolean {
+  return (
+    error instanceof HttpStatusError && (error.status === 404 || error.status === 410)
+  );
 }
 
 /** Jina Fallback の退避対象かを判定する（ADR-0012・ADR-0013）。

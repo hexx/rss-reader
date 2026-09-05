@@ -62,7 +62,8 @@ WITH classified AS (
   SELECT
     site_url,
     CASE
-      WHEN content IS NULL OR content = '' THEN '欠損'
+      WHEN content IS NULL OR content = '' THEN
+        CASE WHEN content_backfill_gave_up_at IS NOT NULL THEN '断念' ELSE '欠損' END
       WHEN LENGTH(content) < 200 THEN '疑い'
       ELSE '正常'
     END AS 分類
@@ -71,14 +72,17 @@ WITH classified AS (
 SELECT
   site_url,
   SUM(分類 = '欠損') AS 欠損,
+  SUM(分類 = '断念') AS 断念,
   SUM(分類 = '疑い') AS 疑い,
   SUM(分類 = '正常') AS 正常,
   COUNT(*) AS 合計
 FROM classified
 GROUP BY site_url
-ORDER BY SUM(分類 = '欠損') + SUM(分類 = '疑い') DESC, 合計 DESC;
+ORDER BY SUM(分類 = '欠損') + SUM(分類 = '断念') + SUM(分類 = '疑い') DESC, 合計 DESC;
 "
 ```
+
+- **断念（Give-up、ADR-0015）**は「本文が空で、これ以上の再取得を見送った」記事（404/410 の即断念、その他の失敗 5 回）。欠損とは分離して計上される。`content_backfill_gave_up_at` は 0007 マイグレーション適用後に使える。復活手順は §7。
 
 ### 4.3 ② Domain Filter 絞り込み — 対象ドメインの欠損・疑い一覧
 
@@ -120,12 +124,14 @@ WITH domain(domain) AS (VALUES ('example.com'))
 SELECT
   CASE WHEN substr(host, 1, 4) = 'www.' THEN substr(host, 5) ELSE host END AS 記事ドメイン,
   SUM(content IS NULL OR content = '') AS 欠損,
+  SUM(content IS NULL OR content = '' AND gave_up) AS 断念,  -- 欠損の内数（Give-up 済み）
   SUM(content IS NOT NULL AND content != '' AND LENGTH(content) < 200) AS 疑い,
   SUM(content IS NOT NULL AND content != '' AND LENGTH(content) >= 200) AS 正常,
   COUNT(*) AS 合計
 FROM (
   SELECT
     content,
+    content_backfill_gave_up_at IS NOT NULL AS gave_up,
     substr(
       url,
       instr(url, '://') + 3,
@@ -220,3 +226,34 @@ WHERE (content IS NULL OR content = '') AND summary IS NOT NULL;
 - **Domain Filter はポート番号付き・userinfo 付き URL を拾えない。** そのような URL が疑わしいときは `LIKE` パターンを個別に足す。
 - `content` は抽出済みテキストであり、抽出前の HTML 構造由来の判別は不可能。
 - 判定は実行時の導出値で**永続化しない**。フラグ保存・API 化・常設監視に進むときは、判定基準をコードへ移し、その判断（閾値・分類・格納方法）を ADR に記録すること。
+
+## 7. 付録: Give-up（回収断念）の復活手順
+
+ADR-0015 により断念（Give-up）した記事は巡回対象から外れる。誤判定（後日復活した 404 など）の記事を巡回対象に戻す手順。
+
+断念記事の一覧:
+
+```bash
+npx wrangler d1 execute rss-reader --remote -y --command "
+SELECT
+  url,
+  title,
+  content_backfill_failures AS 失敗回数,
+  datetime(content_backfill_gave_up_at / 1000, 'unixepoch', '+09:00') AS 断念日時
+FROM articles
+WHERE content_backfill_gave_up_at IS NOT NULL AND (content IS NULL OR content = '')
+ORDER BY 断念日時 DESC;
+"
+```
+
+復活（対象記事の URL 断片を書き換える）:
+
+```bash
+npx wrangler d1 execute rss-reader --remote -y --command "
+UPDATE articles
+SET content_backfill_failures = 0, content_backfill_gave_up_at = NULL
+WHERE url LIKE '%<該当記事 URL の断片>%';
+"
+```
+
+復活後、次のフル同期（0 */3）の本文補完で再取得される（1 run 6 件の予算内）。なお CAPTCHA 型（natalie 等）は再試行しても取得できないため、復活させる意味はない。
