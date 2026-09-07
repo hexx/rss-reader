@@ -140,6 +140,27 @@ UNKNOWN — 本件の根本原因特定が本課題のステップ 0 である�
 - [x] 回復した記事の `summary IS NULL` を埋める（要約の事後生成）
 - [x] 恒久欠損サイトも 24 時間間隔で再試行する（除外リストは YAGNI、jina.ai 枠の律速で抑制。ADR-0014 に記載）
 
+### ステップ 3: 本番での効果検証（要 Cloudflare 認証）
+
+> 2026-09-08 時点で未実施。`npx wrangler login`（または `CF_API_TOKEN`）のある環境でのみ実行できる。
+> **本番の稼働状態（どのコミットがデプロイ済みか、マイグレーション 0006/0007 が適用済みか）もこのステップで初めて確認できる** — CI はデプロイしない（`.github/workflows/ci.yml` は lint/build/test のみ）ため、`npx wrangler deployments list` と `npx wrangler d1 migrations list rss-reader --remote` を先に確認すること。
+
+- [ ] 欠損件数が減少していることを確認する（docs/specs/content-gap-audit.md §4.2 ①「全体サマリ」、期間フィルタは §4.3 の記事ドメイン別集計バリアントに付与）。回復は最大 48 件/日（6 件 × 8 run）なので、**補完巡回が実稼働している週から 1 週間後**に測る
+- [ ] 要約の事後生成が効いていることを確認する:
+  ```bash
+  npx wrangler d1 execute rss-reader --remote -y --command "
+  SELECT COUNT(*) AS 本文ありかつ要約NULL FROM articles
+  WHERE content IS NOT NULL AND content != '' AND summary IS NULL;"
+  ```
+  （AI 障害時以外は 0 に寄るべき。本文NULL/空かつ `summary IS NULL` の残りは未回復の欠損）
+- [ ] Workers Logs で本文補完のログ署名を確認する: info「本文補完で本文を回復しました。」（`recovered`）/ warn「本文補完の再取得に失敗したため、次の巡回で再試行します。」/ info「本文補完を断念しました…」。`recovered` が 0 続きなら律速・断念・デプロイ未適用のいずれか
+- [ ] Yahoo 記事（`news.yahoo.co.jp`、hotentry 経由）の欠損経路をログで確定する（追記 4 の (a)〜(e) 判別表に `error` 値を当てはめる。ADR-0013 以降は Jina が発火するため、追記 2 の主仮説は検証されていない）
+
+### ステップ 4: 未決の設計論点（オーナーの判断が必要）
+
+- [ ] **Jina 応答の品質ゲート**（追記 8・9 の教訓）: 発火条件は反転していない（405/CAPTCHA 型 = 完結した応答は Jina を呼ばない）ため現時点では未実施。ただし **直接取得がタイムアウト → Jina → CAPTCHA/エラー文の短文が 200 で返る** 経路（追記 4 の (e)）では、短文が本文として保存され、その記事は補完対象から外れて**要約汚染が恒久化**しうる（空より悪い）。閾値（例: 200 文字未満は空扱い）を設けるかを ADR で決める。設けない場合、検知は content-gap-audit.md の「疑い」列に頼る
+- [ ] 1 run あたり 6 件・24 時間間隔の妥当性（ADR-0014 の「観察後に調整可能」）: ステップ 3 の実測で巡回が遅い場合は `contentBackfillBudgetPerRun` と wall 上限（ADR-0002 の 15 分）の余力を見直してよい
+
 ### 完了条件（検証方法）
 - `npm test` が緑になること
 - `npm run lint`（oxlint）がエラーなしであること
@@ -156,3 +177,6 @@ UNKNOWN — 本件の根本原因特定が本課題のステップ 0 である�
 - **2026-09-01**: ADR-0013（PR #378）: Jina Fallback の発火条件を「403/451 + 応答が完結しない失敗」に拡張。techno-edge 型の回復が可能に。
 - **2026-09-02**: ADR-0014（本 PR）: 本文補完（Content Backfill）を実装。ステップ 1・2 完了。回復は最大 48 件/日、初回巡回は約 6〜7 日。残タスク: デプロイ後の欠損件数確認（docs/specs/content-gap-audit.md の (C') クエリ）と Yahoo 記事の経路確定。
 - **2026-09-02**: ADR-0015（Give-up / 回収断念）: 回復不能と判定した記事（404/410 即断念、その他 5 回失敗）の本文補完を断念する機構を実装。断念記事は巡回対象から外れ、手動復活手順を content-gap-audit.md §7 に追加。
+- **2026-09-08（ローカル監査）**: ステップ 0〜2 の実装をコード照合で確認した。`backfillContents()`（`src/workflows/sync.ts`、フル同期のパス3）= 1 run 6 件・試行時刻 24 時間間隔・断念（ADR-0015）・クールダウン時は試行時刻を NULL に戻して打ち切る（ADR-0016）、本文回復後の `summary IS NULL` 要約生成、`articles` の `content_backfill_at` / `content_backfill_failures` / `content_backfill_gave_up_at`（マイグレーション 0006・0007）まで実装済み。ゲート結果: `npm test` 24 files / **337 tests すべて緑**、`npm run lint`（oxlint）**エラー 0**（warning のみ、CI と同じく exit 0）、`npm run build`（vite + tsc）成功。用語は CONTEXT.md「Content Backfill（本文補完）」「Give-up（回収断念）」、ADR-0014 / 0015 / 0016、仕様は jina-fallback.md・content-gap-audit.md §7 に反映済み。
+- **2026-09-08（残タスクの切り出し）**: 本件で未達は **本番検証（ステップ 3）** と **品質ゲートの論点決着（ステップ 4）** の 2 点。本番検証ができない最大の理由は、ADR-0015 のコードが本番に出た際に **マイグレーション 0007 が未適用で全 INSERT が失敗**していたこと（ingest-failure.md §7。2026-09-08 に本番 D1 へ適用済み、再発防止は issues/issue-202609080602-d1-migrations-in-deploy-flow.md が別途担当）。つまり**本文補完の実稼働は 2026-09-08 以降**と数えるのが正しく、欠損件数の減少確認は 1 週間程度の巡回後に実施する。
+- **2026-09-08（参照の訂正）**: 2026-09-02 付の解決記録にある「content-gap-audit.md の **(C') クエリ**」は現行仕様体に存在しない（採番が §4.2 ①/§4.3 ②/§4.4 ③ に変更されたため）。対応するクエリは **§4.2 ①「全体サマリ」**（Source 別）および **§4.3 の「記事ドメイン別集計バリアント」**（期間フィルタ付き・断念列を含む）。
