@@ -22,6 +22,7 @@ import { fetchHatenaBookmarks } from '../services/hatena.js';
 import type { HatenaBookmarkComment } from '../services/hatena.js';
 import { fetchArticleContent, fetchRssOrFallback, isArticleMissingError } from '../services/scraper.js';
 import type { ScrapedLink } from '../services/scraper.js';
+import { toErrorMessage } from '../utils/errors.js';
 import { logger } from '../utils/logger.js';
 
 const bookmarkChunkSize = 20;
@@ -47,11 +48,6 @@ async function runAi<T>(operation: () => Promise<T>): Promise<T> {
   } catch (error) {
     throw toAiError(error);
   }
-}
-
-/** 任意のエラーをログ用メッセージに正規化する。 */
-function toErrorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }
 
 /** epoch ms を ISO 文字列にする（ログで人が読める次回再試行時刻）。 */
@@ -631,13 +627,30 @@ async function ingestNewArticle(
       console.error(error instanceof Error ? error.stack || error : error);
       throw error;
     }
+    const message = toErrorMessage(error);
+    if (isUniqueUrlConflict(message)) {
+      // 同時実行の重なりで、他の run が同じ記事を先に保存した場合（ADR-0002 が
+      // 受容する競合）。記事は勝者の run が保存済みのため、warn ではなく info で
+      // 1 行だけ残す（docs/specs/ingest-failure.md §4）。
+      logger.info('記事は同時実行で保存済みのため、スキップします。', {
+        articleUrl: article.url,
+        siteUrl,
+        title: article.title,
+      });
+      return;
+    }
     logger.warn('記事の同期に失敗しました。', {
       articleUrl: article.url,
-      error: toErrorMessage(error),
+      error: message,
       siteUrl,
       title: article.title,
     });
   }
+}
+
+/** UNIQUE(url) 制約違反（同時実行の競合、ADR-0002）かどうか。 */
+function isUniqueUrlConflict(message: string): boolean {
+  return message.includes('UNIQUE constraint failed: articles.url');
 }
 
 /**
