@@ -67,6 +67,8 @@ interface RunCounters {
   throttled: number;
   /** 同期した新着記事数。 */
   synced: number;
+  /** クールダウンで空保存し、次フル同期の早期再試行待ちにした新着記事数（ADR-0016）。 */
+  contentCooldownDeferred: number;
 }
 
 /** run 全体で共有する補完状態。 */
@@ -313,7 +315,13 @@ async function runSync(
   includeBookmarkBackfill: boolean,
 ): Promise<number> {
   const startedAtMs = Date.now();
-  const counters: RunCounters = { fetched: 0, skipped: 0, throttled: 0, synced: 0 };
+  const counters: RunCounters = {
+    contentCooldownDeferred: 0,
+    fetched: 0,
+    skipped: 0,
+    synced: 0,
+    throttled: 0,
+  };
   const backfillState: BackfillState = {
     budgetRemaining: includeBookmarkBackfill ? backfillBudgetPerRun : 0,
     capNotified: false,
@@ -329,17 +337,20 @@ async function runSync(
 
   // ===== パス3: 本文補完（Content Backfill、ADR-0014） =====
   // フル同期でのみ実行する（取り込み専用 cron では新着の取り込みを優先）。
+  // ADR-0016: 今 run で取り込んだ NULL 行は対象外にする（createdAt < run 開始で除外し、同一 run 内の二重取得を防ぐ）。
   const recovered = await backfillContents(
     database,
     egress,
     env,
     includeBookmarkBackfill ? contentBackfillBudgetPerRun : 0,
+    startedAtMs,
   );
   if (recovered > 0) {
     logger.info('本文補完で本文を回復しました。', { recovered });
   }
 
   logger.info('同期が完了しました。', {
+    contentCooldownDeferred: counters.contentCooldownDeferred,
     elapsedMs: Date.now() - startedAtMs,
     skipped: counters.skipped,
     sources: counters.fetched,
@@ -552,7 +563,24 @@ async function ingestNewArticle(
       fetchHatenaBookmarks(egress, article.url),
     ]);
 
-    if (contentResult.status === 'rejected') {
+    // ADR-0016: クールダウン起因の本文見送りは info＋早期再試行待ちにする。
+    // 枠に触れていないので試行時刻は進めない（contentBackfillAt=NULL のまま次フル同期で拾う）。
+    const contentCooldown =
+      contentResult.status === 'rejected'
+      && isEgressUnavailableError(contentResult.reason)
+      && contentResult.reason.reason === 'cooldown'
+        ? contentResult.reason
+        : null;
+    if (contentCooldown !== null) {
+      logger.info('本文は取得枠のクールダウン中のため、空保存して次フル同期で再試行します。', {
+        articleUrl: article.url,
+        bucket: contentCooldown.bucket,
+        nextRetryAt: toIso(contentCooldown.cooldownUntilMs),
+        siteUrl,
+        title: article.title,
+      });
+      counters.contentCooldownDeferred += 1;
+    } else if (contentResult.status === 'rejected') {
       logger.warn('本文の取得に失敗したため、本文なしで処理を継続します。', {
         articleUrl: article.url,
         error: toErrorMessage(contentResult.reason),
@@ -596,9 +624,11 @@ async function ingestNewArticle(
 
     // 空本文で保存するときは、取り込み時の本文取得も「試行」として記録する（ADR-0014）。
     // これにより本文補完の初回再試行は 24 時間後になり、同一 run 内の二重取得を防ぐ。
+    // ただしクールダウン起因は枠に触れていないので試行に数えず NULL のまま残し、
+    // 次フル同期で早期再試行する（ADR-0016）。
     await database.insert(articles).values({
       content,
-      contentBackfillAt: content === '' ? new Date() : null,
+      contentBackfillAt: content === '' && contentCooldown === null ? new Date() : null,
       hatenaSummary,
       id: articleId,
       isRead: false,
@@ -767,6 +797,7 @@ async function backfillContents(
   egress: EgressContext,
   env: RuntimeEnv,
   budget: number,
+  runStartedAtMs: number = Date.now(),
 ): Promise<number> {
   if (budget <= 0) {
     return 0;
@@ -784,7 +815,11 @@ async function backfillContents(
     .where(
       and(
         or(isNull(articles.content), eq(articles.content, '')),
-        or(isNull(articles.contentBackfillAt), lt(articles.contentBackfillAt, new Date(cutoffMs))),
+        or(
+          // ADR-0016: 今 run で取り込んだ NULL 行は次フル同期に譲る（同一 run 内の二重取得防止）。
+          and(isNull(articles.contentBackfillAt), lt(articles.createdAt, new Date(runStartedAtMs))),
+          lt(articles.contentBackfillAt, new Date(cutoffMs)),
+        ),
         isNull(articles.contentBackfillGaveUpAt),
       ),
     )
@@ -806,8 +841,14 @@ async function backfillContents(
       if (isEgressUnavailableError(error)) {
         // 枠が空かない・クールダウン中は同じ相手の残りも埋まらない。巡回を打ち切る。
         // 枠の問題は記事の失敗ではないため、失敗回数にはカウントしない（ADR-0015）。
+        // 試行時刻も進めない（先行記録した now を NULL に戻す）。次フル同期で早期再試行する（ADR-0016）。
+        await database
+          .update(articles)
+          .set({ contentBackfillAt: null })
+          .where(eq(articles.id, target.id));
         logger.info('本文補完は取得枠のクールダウン中のため打ち切ります。', {
           articleUrl: target.url,
+          bucket: error.bucket,
         });
         return recovered;
       }

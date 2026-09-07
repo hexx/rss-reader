@@ -288,6 +288,45 @@ describe('syncSite', () => {
     );
   });
 
+  it('新着記事の本文がクールダウン中なら info で空保存し、試行時刻を進めない（ADR-0016）', async () => {
+    const { syncSite } = await import('./sync.js');
+    const egressModule = await import('../services/egress.js');
+
+    await testDb.insert(subscriptions).values([{ id: 'subscription-1', siteUrl }]);
+    fetchRssOrFallbackMock.mockResolvedValue([article]);
+    fetchArticleContentMock.mockRejectedValueOnce(
+      new egressModule.EgressUnavailableError('example.com', 'cooldown', Date.now() + 30 * 60 * 1000),
+    );
+    fetchHatenaBookmarksMock.mockResolvedValue(bookmarks);
+    generateArticleSummaryMock.mockResolvedValue('要約文');
+    generateHatenaSummaryMock.mockResolvedValue('はてブ要約');
+
+    await expect(syncSite(siteUrl, false, testEnv)).resolves.toBe(1);
+
+    const savedArticles = await testDb.select().from(articles);
+    expect(savedArticles).toHaveLength(1);
+    expect(savedArticles[0]).toMatchObject({ content: '', summary: null });
+    // ADR-0016: 枠に触れていないので試行に数えず、次フル同期で早期再試行する。
+    expect(savedArticles[0]?.contentBackfillAt).toBeNull();
+    expect(loggerMock.info).toHaveBeenCalledWith(
+      '本文は取得枠のクールダウン中のため、空保存して次フル同期で再試行します。',
+      expect.objectContaining({
+        articleUrl: article.url,
+        bucket: 'example.com',
+        nextRetryAt: expect.any(String),
+        siteUrl,
+      }),
+    );
+    expect(loggerMock.warn).not.toHaveBeenCalledWith(
+      '本文の取得に失敗したため、本文なしで処理を継続します。',
+      expect.anything(),
+    );
+    expect(loggerMock.info).toHaveBeenCalledWith(
+      '同期が完了しました。',
+      expect.objectContaining({ contentCooldownDeferred: 1, synced: 1 }),
+    );
+  });
+
   it('fails fast when an article summary generation fails', async () => {
     const { syncSite } = await import('./sync.js');
 
@@ -1159,7 +1198,7 @@ describe('本文補完（Content Backfill、ADR-0014）', () => {
     const saved = await testDb.select().from(articles);
     expect(saved[0]).toMatchObject({ content: '', contentBackfillFailures: 0 });
     expect(saved[0]?.contentBackfillGaveUpAt).toBeNull();
-    // 試行の事実は記録されている。
-    expect(saved[0]?.contentBackfillAt).toBeInstanceOf(Date);
+    // ADR-0016: 枠待ちは試行に数えない。試行時刻を進めず NULL に戻し、次フル同期で早期再試行する。
+    expect(saved[0]?.contentBackfillAt).toBeNull();
   });
 });

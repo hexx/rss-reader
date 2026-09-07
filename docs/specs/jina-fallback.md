@@ -61,7 +61,9 @@
 | 事象 | レベル | 必須フィールド |
 | --- | --- | --- |
 | Jina Fallback の発火（Jina 取得の開始） | info | `articleUrl`, `bucket`（`jina.ai`） |
-| Jina を含む本文取得の失敗（本文なしで保存） | warn | 既存の行に委ねる（`articleUrl`, `error`, `siteUrl`, `title`）— **二重出ししない** |
+| Jina を含む本文取得の失敗（本文なしで保存） | warn（ただし取得枠のクールダウン起因は info。ADR-0016）は既存の行に委ねる（`articleUrl`, `error`, `siteUrl`, `title`）— **二重出ししない** |
+
+- 取得枠のクールダウン中（`EgressUnavailableError` の `cooldown`）は Jina へ退避しない（ADR-0016）。429・5xx と同列に律速・クールダウンに従い、次フル同期の早期再試行に譲る。
 
 - Jina の 429 等で `jina.ai` 枠にクールダウンが入る場合の warn は既存の律速ログ（`nextRetryAt` 付き）の慣行に従う。
 
