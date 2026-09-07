@@ -19,6 +19,7 @@ import { syncAllSubscriptions } from './workflows/sync.js';
 import { createEgressContext } from './services/egress.js';
 import { discoverRssFeedUrl } from './services/scraper.js';
 import type { DiscoveredFeed } from './services/scraper.js';
+import { toErrorMessage } from './utils/errors.js';
 
 interface SourceRow {
   articleId: string | null;
@@ -587,7 +588,8 @@ function createScheduledHandler() {
     const includeBookmarkBackfill = event.cron === FULL_SYNC_CRON;
     ctx.waitUntil(
       syncAllSubscriptions(false, env, includeBookmarkBackfill).catch((error: unknown) => {
-        console.error('定期同期に失敗しました。', { error });
+        // drizzle の SQL+params ダンプではなく cause の実際のエラーを出す（ingest-failure.md §4）。
+        console.error('定期同期に失敗しました。', { error: toErrorMessage(error) });
       }),
     );
   };

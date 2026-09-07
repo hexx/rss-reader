@@ -84,6 +84,18 @@ const thirdArticle = {
   url: 'https://example.com/articles/3',
 };
 
+/** articles テーブルへの INSERT だけを指定エラーで失敗させる（Ingest Failure の再現）。
+ * 競合・失敗時ははてブ保存に到達しないため、INSERT 全般の失敗として扱ってよい。 */
+function stubArticlesInsertFailure(error: unknown): void {
+  vi.spyOn(testDb, 'insert').mockImplementation(
+    (() => ({
+      values: () => ({
+        run: () => Promise.reject(error),
+      }),
+    })) as unknown as typeof testDb.insert,
+  );
+}
+
 const bookmarks = [
   {
     comment: '参考になる',
@@ -303,6 +315,70 @@ describe('syncSite', () => {
     const savedArticles = await testDb.select().from(articles);
     expect(savedArticles).toHaveLength(0);
     expect(generateArticleSummaryMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('INSERT が UNIQUE(url) 違反で失敗したら info でスキップし、warn を出さない', async () => {
+    const { syncSite } = await import('./sync.js');
+
+    fetchRssOrFallbackMock.mockResolvedValue([article]);
+    fetchArticleContentMock.mockResolvedValue('本文');
+    fetchHatenaBookmarksMock.mockResolvedValue(bookmarks);
+    generateArticleSummaryMock.mockResolvedValue('要約文');
+    generateHatenaSummaryMock.mockResolvedValue('はてブ要約');
+
+    // 同時実行の競合（ADR-0002）: 他 run が先に保存した場合の UNIQUE 違反
+    stubArticlesInsertFailure(
+      new Error('Failed query: insert into "articles" ...\nparams: <ダンプ>', {
+        cause: new Error('UNIQUE constraint failed: articles.url'),
+      }),
+    );
+
+    await expect(syncSite(siteUrl, false, testEnv)).resolves.toBe(0);
+
+    expect(loggerMock.info).toHaveBeenCalledWith(
+      '記事は同時実行で保存済みのため、スキップします。',
+      expect.objectContaining({ articleUrl: article.url, siteUrl, title: article.title }),
+    );
+    expect(loggerMock.warn).not.toHaveBeenCalledWith('記事の同期に失敗しました。', expect.anything());
+    const savedArticles = await testDb.select().from(articles);
+    expect(savedArticles).toHaveLength(0);
+    vi.mocked(testDb.insert).mockRestore();
+  });
+
+  it('INSERT がその他の DB 失敗のとき、cause のエラー文だけを warn に出す', async () => {
+    const { syncSite } = await import('./sync.js');
+
+    fetchRssOrFallbackMock.mockResolvedValue([article]);
+    fetchArticleContentMock.mockResolvedValue('本文');
+    fetchHatenaBookmarksMock.mockResolvedValue(bookmarks);
+    generateArticleSummaryMock.mockResolvedValue('要約文');
+    generateHatenaSummaryMock.mockResolvedValue('はてブ要約');
+
+    // 保存容量上限などの D1 エラー（drizzle が包んだ形を再現）
+    stubArticlesInsertFailure(
+      new Error('Failed query: insert into "articles" ...\nparams: <ダンプ>', {
+        cause: new Error('D1_ERROR: Exceeded maximum DB size.'),
+      }),
+    );
+
+    await expect(syncSite(siteUrl, false, testEnv)).resolves.toBe(0);
+
+    expect(loggerMock.warn).toHaveBeenCalledWith(
+      '記事の同期に失敗しました。',
+      expect.objectContaining({
+        articleUrl: article.url,
+        error: 'D1_ERROR: Exceeded maximum DB size.',
+        siteUrl,
+        title: article.title,
+      }),
+    );
+    // SQL+params ダンプ（記事全文）がログに混入しないこと
+    const logged = loggerMock.warn.mock.calls
+      .map(([, detail]) => (detail as { error?: string }).error ?? '')
+      .join('\n');
+    expect(logged).not.toContain('Failed query');
+    expect(logged).not.toContain('params:');
+    vi.mocked(testDb.insert).mockRestore();
   });
 
   it('does not re-insert articles that already exist', async () => {
