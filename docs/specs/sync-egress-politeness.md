@@ -93,8 +93,8 @@ ALTER TABLE subscriptions ADD backfill_cursor INTEGER NOT NULL DEFAULT 0;
 | 枠が空かず、後回し（defer）にする | info | `bucket`, `siteUrl`（**「開始します」で途切れる行を作らない**） |
 | パス1末尾の再試行でも未取得だった Source の持ち越し（Carry-over） | info | `carried`, `sources`（`reason` ＋ `siteUrl` の配列） |
 | 一時同期障害（429 / 503 / タイムアウト / HTML 応答） | warn | `siteUrl` or `articleUrl`, `error`, `bucket`, **`nextRetryAt`** |
-| クールダウンを理由に見送った記事処理（補完打ち切り・コメントなし保存） | info | `bucket`, `nextRetryAt`（**warn を乱発しない**） |
-| run 完了サマリ | info | `elapsedMs`, `skipped`, `sources`, `synced`, `throttled` |
+| クールダウンを理由に見送った記事処理（補完打ち切り・コメントなし保存・本文クールダウン見送り） | info | `bucket`, `nextRetryAt`（**warn を乱発しない**）。本文見送りは `articleUrl`, `siteUrl`, `title` も付ける（ADR-0016） |
+| run 完了サマリ | info | `elapsedMs`, `skipped`, `sources`, `synced`, `throttled`, `contentCooldownDeferred`（ADR-0016 の早期再試行待ち件数） |
 
 ## 8. 受入条件（テスト観測点）
 
