@@ -1,5 +1,5 @@
-import { renderHook } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
+import { renderHook } from '@testing-library/react';
 
 import { useLatestRef } from './useLatestRef.js';
 
@@ -38,7 +38,8 @@ describe('useLatestRef', () => {
     // Ref オブジェクトそのものは同じインスタンスだが、current は新しいオブジェクトを指す
     const refInstance = result.current;
     rerender({ name: 'updated' });
-    expect(result.current).toBe(refInstance); // 同じ ref インスタンス
+    // 同じ ref インスタンス
+    expect(result.current).toBe(refInstance);
     expect(result.current.current).toEqual({ name: 'updated' });
   });
 });

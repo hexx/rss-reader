@@ -2,8 +2,8 @@ import { HttpResponse, http } from 'msw';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { server } from '../../test/setup.js';
 import { ARTICLE_PAGE_SIZE } from '../articlePagination.js';
+import { server } from '../../test/setup.js';
 import type { Article, ArticleSortDirection } from '../types.js';
 import { useArticles } from './useArticles.js';
 
