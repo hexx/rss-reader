@@ -94,7 +94,11 @@ ALTER TABLE subscriptions ADD backfill_cursor INTEGER NOT NULL DEFAULT 0;
 | パス1末尾の再試行でも未取得だった Source の持ち越し（Carry-over） | info | `carried`, `sources`（`reason` ＋ `siteUrl` の配列） |
 | 一時同期障害（429 / 503 / タイムアウト / HTML 応答） | warn | `siteUrl` or `articleUrl`, `error`, `bucket`, **`nextRetryAt`** |
 | クールダウンを理由に見送った記事処理（補完打ち切り・コメントなし保存・本文クールダウン見送り） | info | `bucket`, `nextRetryAt`（**warn を乱発しない**）。本文見送りは `articleUrl`, `siteUrl`, `title` も付ける（ADR-0016） |
-| run 完了サマリ | info | `elapsedMs`, `skipped`, `sources`, `synced`, `throttled`, `contentCooldownDeferred`（ADR-0016 の早期再試行待ち件数） |
+| 同期中断（Sync Abort）: Article Summary の AI 生成失敗・D1 書き込み失敗 | **error** | `trigger`（cron/api）, `mode`（full/ingest-only）, `reason`（ai-generation/write/unknown）, `stage`（feed-fetch/ingest/bookmark-backfill/content-backfill）, `error`（cause 実文）, `articleUrl`, `siteUrl`, 進行カウンタ（ADR-0017）。中断時は run 完了サマリを出さない |
+| はてブ要約の生成失敗（未生成で保存し次回フル同期の補完で回収） | warn | `articleUrl` or `articleId`, `siteUrl`, `error` — **run 内で 1 本だけ**、件数は完了サマリ `hatenaSummaryFailed`（ADR-0017） |
+| run 完了サマリ | info | `elapsedMs`, `skipped`, `sources`, `synced`, `throttled`, `contentCooldownDeferred`（ADR-0016 の早期再試行待ち件数）, `hatenaSummaryFailed`（ADR-0017） |
+
+> 注（ADR-0017）: 取得枠の予約・障害記録は D1 への**書き込み**なので、その失敗は上の「一時同期障害」行（Source 個別 warn）には降格させず、同期中断 error で run を止める。D1 が書けない状態はパス1先頭で判別され、外部取得も AI 生成も走らない。
 
 ## 8. 受入条件（テスト観測点）
 

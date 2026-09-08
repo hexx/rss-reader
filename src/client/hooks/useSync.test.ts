@@ -36,10 +36,10 @@ describe('useSync', () => {
         result.current.sync();
       });
 
-      // 同期開始のローディング状態
+      // 同期開始のローディング状態（サーバー側の完了は保証しない文言・ADR-0017）
       expect(result.current.isSyncing).toBe(true);
       expect(result.current.status?.kind).toBe('loading');
-      expect(result.current.status?.message).toBe('同期を開始しました。');
+      expect(result.current.status?.message).toBe('同期をサーバーに送信しています。');
 
       // API レスポンス + delay (4s) の完了を待つ
       await waitFor(
@@ -51,6 +51,9 @@ describe('useSync', () => {
       );
 
       expect(result.current.status?.kind).toBe('success');
+      // 「完了」を匂わせる文言に戻していないこと（run は同期中断で失敗し得る）
+      expect(result.current.status?.message).toBe('同期をサーバーに送信しました。少ししてから一覧が更新されます。');
+      expect(result.current.status?.message ?? '').not.toMatch(/完了/);
     },
     LONG_TIMEOUT,
   );

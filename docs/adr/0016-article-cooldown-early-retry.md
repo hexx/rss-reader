@@ -33,3 +33,7 @@
 - パス3 でクールダウン打ち切りが起きた run は、試行時刻を進めないため次フル同期で同じ記事を再試行する（最大3hポーリング）。枠が回復すれば1回で抜ける。
 - ログは `sync-egress-politeness.md` §7・`jina-fallback.md` §6 に反映し、run サマリで効果測定できる。
 - マイグレーションなし。変更は `src/workflows/sync.ts` の3分岐（ingest 保存時・ingest ログ・パス3 打ち切り時）＋サマリ計数。
+
+## 実装上の補足（2026-09-08・ADR-0017 の作業で発覚）
+
+「`created_at < run 開始時刻` で今 run の行を除外する」は、**`created_at` の既定式が julianday を integer に切り捨てる**ため厳密には成り立たない。run 開始直後（同一 ms 内）に INSERT した行の `created_at` が run 開始時刻より数 ms **古い**値になり、除外されずに同じ run の本文補完が再取得し得る（`sync.test.ts` の本 ADR テストで断続的に顕在化）。**抽出条件を `created_at < run 開始時刻 - 1 秒`（`sameRunCreatedGraceMs`）** にして、run 開始 1 秒前までの行を「今 run の行」とみなして見送る実務的な解決とした。見送られた行は次フル同期（`0 */3`）で拾われるため、この余白が Freshness に与える影響は無い（Backfill は Freshness Budget の対象外、ADR-0014）。

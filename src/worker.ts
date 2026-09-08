@@ -15,7 +15,7 @@ import type {
   SubscriptionMutationResponse,
   SyncAcceptedResponse,
 } from './shared/types.js';
-import { syncAllSubscriptions } from './workflows/sync.js';
+import { syncAllSubscriptions, wasSyncAbortLogged } from './workflows/sync.js';
 import { createEgressContext } from './services/egress.js';
 import { discoverRssFeedUrl } from './services/scraper.js';
 import type { DiscoveredFeed } from './services/scraper.js';
@@ -542,8 +542,13 @@ app.post('/api/sync', (c) => {
   // `?force=true` はクールダウンだけを無視して取得する（枠内の最小間隔は守る）。
   // UI からは使わず、運用上の手動リカバリ専用の引数（docs/specs/sync-egress-politeness.md）。
   const force = c.req.query('force') === 'true';
-  const syncTask = syncAllSubscriptions(false, c.env, true, { force }).catch((error: unknown) => {
-    console.error('同期APIの実行に失敗しました。', { error });
+  const syncTask = syncAllSubscriptions(false, c.env, true, { force, trigger: 'api' }).catch((error: unknown) => {
+    // 同期中断は sync 側の `同期を中断しました。` が既に 1 行出しているため重複させない（ADR-0017）。
+    if (wasSyncAbortLogged(error)) {
+      return;
+    }
+    // cron 側と同じく cause の実文を出す（ADR-0017・ingest-failure.md §4）。
+    console.error('同期APIの実行に失敗しました。', { error: toErrorMessage(error) });
   });
   if (c.executionCtx) {
     c.executionCtx.waitUntil(syncTask);
@@ -587,7 +592,12 @@ function createScheduledHandler() {
     // 詳細: docs/adr/0002-split-sync-cadences.md
     const includeBookmarkBackfill = event.cron === FULL_SYNC_CRON;
     ctx.waitUntil(
-      syncAllSubscriptions(false, env, includeBookmarkBackfill).catch((error: unknown) => {
+      syncAllSubscriptions(false, env, includeBookmarkBackfill, { trigger: 'cron' }).catch((error: unknown) => {
+        // 同期中断は sync 側の `同期を中断しました。` が既に 1 行出しているため重複させない（ADR-0017）。
+        // ここは設定不備（AiConfigurationError）など、sync 側に出せない障害の受け皿。
+        if (wasSyncAbortLogged(error)) {
+          return;
+        }
         // drizzle の SQL+params ダンプではなく cause の実際のエラーを出す（ingest-failure.md §4）。
         console.error('定期同期に失敗しました。', { error: toErrorMessage(error) });
       }),

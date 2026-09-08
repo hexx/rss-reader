@@ -2,6 +2,7 @@ import { and, asc, eq, isNull, lt, or, sql } from 'drizzle-orm';
 
 import type { RuntimeEnv } from '../env.js';
 import { getDb } from '../db/index.js';
+import { isSyncWriteError, runWrite } from '../db/writeError.js';
 import { articles, hatenaBookmarks, subscriptions } from '../db/schema.js';
 import {
   bucketKeyOf,
@@ -38,6 +39,15 @@ export const maxHatenaSummaryBackfillsPerRun = 20;
 export const contentBackfillBudgetPerRun = 6;
 /** 同じ記事の本文補完を再試行する間隔（ミリ秒、ADR-0014）。 */
 const contentBackfillRetryIntervalMs = 24 * 60 * 60 * 1_000;
+/**
+ * 「今 run で取り込んだ行を除外する」時刻比較の安全余白（ミリ秒）。
+ * `articles.created_at` の既定式は julianday を integer に切り捨てるため、run 開始より
+ * 後に INSERT した行の `created_at` が run 開始時刻より最大数 ms **古い**値になり得る。
+ * 余白なしだと ADR-0016 の除外が壊れて取りたての行を同じ run で再取得する
+ * （2026-09-08 にテストで顕在化）。1 秒前までを「今 run の行」とみなして見送る。
+ */
+const sameRunCreatedGraceMs = 1_000;
+
 /** 本文補完の連続失敗による断念回数（ADR-0015）。404/410 では即座に断念する。 */
 const CONTENT_BACKFILL_GIVE_UP_THRESHOLD = 5;
 
@@ -71,8 +81,17 @@ interface RunCounters {
   contentCooldownDeferred: number;
 }
 
-/** run 全体で共有する補完状態。 */
-interface BackfillState {
+/** 同期中断（Sync Abort）の理由分類（ADR-0017。障害の恒久/一時は判別しない）。 */
+type SyncAbortReason = 'ai-generation' | 'write' | 'unknown';
+
+/** 中断ログに出す同期の開始経路。 */
+export type SyncTrigger = 'api' | 'cron';
+
+/** run 中の進行位置（中断ログで「どこで死んだか」を 1 行で復元するための記録）。 */
+type SyncStage = 'content-backfill' | 'feed-fetch' | 'bookmark-backfill' | 'ingest';
+
+/** run 全体で共有する状態（補完予算・AI 縮退の集計・進行位置）。 */
+interface RunState {
   /** run 全体の残り補完予算（ADR-0010）。0 のときは補完を行わない。 */
   budgetRemaining: number;
   /** この実行で generateHatenaSummary を試行した回数（AI バースト防止）。 */
@@ -81,6 +100,16 @@ interface BackfillState {
   capNotified: boolean;
   /** クールダウンによる打ち切りを 1 回だけログに出すフラグ（warn 乱発を防ぐ）。 */
   coolingNotified: boolean;
+  /** はてブ要約の生成に失敗した回数（warn 継続・次回フル同期で回収: ADR-0017）。 */
+  hatenaSummaryFailed: number;
+  /** はてブ要約の失敗 warn を run 内で 1 本に抑えるフラグ。 */
+  hatenaSummaryNotified: boolean;
+  /** 中断ログ用の進行位置。 */
+  progress: {
+    articleUrl?: string;
+    siteUrl?: string;
+    stage: SyncStage;
+  };
 }
 
 /** 購読 Source の行（パス1の入力）。 */
@@ -109,6 +138,58 @@ export interface SyncOptions {
   egress?: EgressContext;
   /** クールダウンを無視して取得する（`POST /api/sync?force=true`）。枠内の間隔は守る。 */
   force?: boolean;
+  /** 中断ログに出す開始経路（既定は api。cron は明示する）。 */
+  trigger?: SyncTrigger;
+}
+
+/** AI 失敗と書き込み失敗を区別した中断理由（ADR-0017）。 */
+function syncAbortReason(error: unknown): SyncAbortReason {
+  if (isAiError(error)) {
+    return 'ai-generation';
+  }
+  if (isSyncWriteError(error)) {
+    return 'write';
+  }
+  return 'unknown';
+}
+
+/** 中断ログを記録済みのエラー（同じ障害で error を 2 本出さないため）。 */
+const syncAbortLoggedErrors = new WeakSet<object>();
+
+/** `runSync` が中断ログを出したエラーを覚える。エラー本体は書き換えない（凍結エラーで throw しないため）。 */
+function markSyncAbortLogged(error: unknown): void {
+  if (typeof error === 'object' && error !== null) {
+    syncAbortLoggedErrors.add(error);
+  }
+}
+
+/**
+ * 同期中断が既に `同期を中断しました。` として記録済みかどうか。
+ * cron / API の最終 catch はこれを見て、**検知の起点を `level: error` 1 本に絞る**（ADR-0017）。
+ */
+export function wasSyncAbortLogged(error: unknown): boolean {
+  return typeof error === 'object' && error !== null && syncAbortLoggedErrors.has(error);
+}
+
+/**
+ * はてブ要約の生成失敗を数え、run 内で 1 本だけ warn する（ADR-0017）。
+ * Hatena Summary は `hatena_summary IS NULL` を補完巡回が拾うため、
+ * 生成失敗は恒久欠損ではなく一時的遅延 — ここでは run を止めない。
+ */
+function recordHatenaSummaryFailure(
+  state: RunState,
+  error: unknown,
+  context: { articleId?: string; articleUrl?: string; siteUrl: string },
+): void {
+  state.hatenaSummaryFailed += 1;
+  if (state.hatenaSummaryNotified) {
+    return;
+  }
+  state.hatenaSummaryNotified = true;
+  logger.warn('はてブ要約の生成に失敗したため、未生成で保存します（次回フル同期の補完で回収）。', {
+    ...context,
+    error: toErrorMessage(error),
+  });
 }
 
 /**
@@ -129,25 +210,27 @@ async function persistBookmarks(
   }
   for (let index = 0; index < bookmarks.length; index += bookmarkChunkSize) {
     const chunk = bookmarks.slice(index, index + bookmarkChunkSize);
-    await database
-      .insert(hatenaBookmarks)
-      .values(
-        chunk.map((bookmark) => ({
-          articleId,
-          comment: bookmark.comment,
-          createdAt: bookmark.timestamp,
-          id: crypto.randomUUID(),
-          user: bookmark.user,
-        })),
-      )
-      .onConflictDoUpdate({
-        target: [hatenaBookmarks.articleId, hatenaBookmarks.user],
-        set: {
-          comment: sql`excluded.comment`,
-          createdAt: sql`excluded.created_at`,
-        },
-      })
-      .run();
+    await runWrite(() =>
+      database
+        .insert(hatenaBookmarks)
+        .values(
+          chunk.map((bookmark) => ({
+            articleId,
+            comment: bookmark.comment,
+            createdAt: bookmark.timestamp,
+            id: crypto.randomUUID(),
+            user: bookmark.user,
+          })),
+        )
+        .onConflictDoUpdate({
+          target: [hatenaBookmarks.articleId, hatenaBookmarks.user],
+          set: {
+            comment: sql`excluded.comment`,
+            createdAt: sql`excluded.created_at`,
+          },
+        })
+        .run(),
+    );
   }
 }
 
@@ -165,17 +248,22 @@ async function syncBookmarksForExistingArticle(
   articleId: string,
   articleUrl: string,
   work: FeedWork,
-  backfillState: BackfillState,
+  state: RunState,
 ): Promise<'cooling' | 'ok'> {
+  state.progress = { articleUrl, siteUrl: work.feed.siteUrl, stage: 'bookmark-backfill' };
   let bookmarks: HatenaBookmarkComment[];
   try {
     bookmarks = await fetchHatenaBookmarks(egress, articleUrl);
   } catch (error) {
+    // 枠の書き込み失敗は一時同期障害ではない（ADR-0017）。
+    if (isSyncWriteError(error)) {
+      throw error;
+    }
     // クールダウン中なら warn を増やさない。run 内で 1 本だけ info に出し、
     // 呼び出し側はその Source の巡回を打ち切る（同じ枠は当時空かないため）。
     if (isEgressUnavailableError(error) && error.reason === 'cooldown') {
-      if (!backfillState.coolingNotified) {
-        backfillState.coolingNotified = true;
+      if (!state.coolingNotified) {
+        state.coolingNotified = true;
         logger.info('はてブ補完は取得枠のクールダウン中のため、この Source を打ち切ります。', {
           bucket: error.bucket,
           nextRetryAt: toIso(error.cooldownUntilMs),
@@ -206,20 +294,33 @@ async function syncBookmarksForExistingArticle(
   // 記事ごとの SELECT を避けるため、Source ごとに一度だけ事前ロードした
   // hatena_summary が NULL の記事 ID セットで判定する。
   if (work.nullSummaryArticleIds.has(articleId) && bookmarks.length > 0) {
-    if (backfillState.summaryCount >= maxHatenaSummaryBackfillsPerRun) {
-      if (!backfillState.capNotified) {
-        backfillState.capNotified = true;
+    if (state.summaryCount >= maxHatenaSummaryBackfillsPerRun) {
+      if (!state.capNotified) {
+        state.capNotified = true;
         logger.info('はてブ要約のバックフィル上限に達したため、残りは次のフル同期に持ち越します。');
       }
       return 'ok';
     }
-    backfillState.summaryCount += 1;
-    const hatenaSummary = await runAi(() => generateHatenaSummary(bookmarks, env));
-    await database
-      .update(articles)
-      .set({ hatenaSummary })
-      .where(eq(articles.id, articleId))
-      .run();
+    state.summaryCount += 1;
+    let hatenaSummary: string;
+    try {
+      hatenaSummary = await runAi(() => generateHatenaSummary(bookmarks, env));
+    } catch (error) {
+      if (!isAiError(error)) {
+        throw error;
+      }
+      // はてブ要約の失敗は run を止めない（ADR-0017）。NULL のまま残るので次回以降の
+      // 補完巡回（loadNullSummaryIds）が拾う。
+      recordHatenaSummaryFailure(state, error, { articleId, articleUrl, siteUrl: work.feed.siteUrl });
+      return 'ok';
+    }
+    await runWrite(() =>
+      database
+        .update(articles)
+        .set({ hatenaSummary })
+        .where(eq(articles.id, articleId))
+        .run(),
+    );
     work.nullSummaryArticleIds.delete(articleId);
     logger.info('取りこぼしていたはてブ要約をバックフィルで生成しました。', { articleId });
   }
@@ -231,6 +332,8 @@ async function syncBookmarksForExistingArticle(
  * 既存記事は重複登録せず、新着記事を1回あたりの上限なく全件処理する。記事単位の逐次 INSERT で
  * 冪等なため、Worker の実行時間上限（Cron: wall 15分、手動: waitUntil 30秒）に達しても
  * 次回実行で再開される。詳細: docs/specs/sync-egress-politeness.md。
+ *
+ * AI（記事要約）の生成失敗、および D1 への書き込み失敗は同期中断（Sync Abort）になる（ADR-0017）。
  *
  * @param siteUrl 同期対象の購読 Source URL。
  * @param debug 失敗時に例外を再送出してデバッグしやすくするかどうか。
@@ -263,7 +366,7 @@ export async function syncSite(
     .limit(1);
 
   const subscription: SubscriptionRow = rows[0] ?? { backfillCursor: 0, id: '', siteUrl };
-  return runSync(database, egress, env, [subscription], debug, includeBookmarkBackfill);
+  return runSync(database, egress, env, [subscription], debug, includeBookmarkBackfill, options.trigger ?? 'api');
 }
 
 /**
@@ -272,6 +375,9 @@ export async function syncSite(
  * - **パス1**: 全 Source のフィード取得だけを先に行う。取得枠が空かない Source は待機せず
  *   後回しにし、末尾で 1 度だけ再試行する（はてブ補完の待機列に埋もれて新着が餓死するのを防ぐ）。
  * - **パス2**: 取得済みフィードの新着記事を取り込み、残予算で はてブ補完 をカーソル巡回で行う。
+ *
+ * AI（記事要約）の生成失敗、および D1 への書き込み失敗は同期中断（Sync Abort）になる（ADR-0017）。
+ * はてブ要約の生成失敗だけは、未生成ぶんが補完巡回で回収されるため中断しない。
  *
  * @param debug 失敗時に例外を再送出してデバッグしやすくするかどうか。
  * @param env DB・AI の各環境バインディング。
@@ -302,10 +408,24 @@ export async function syncAllSubscriptions(
     return;
   }
 
-  await runSync(database, egress, env, subscribedSites, debug, includeBookmarkBackfill);
+  await runSync(
+    database,
+    egress,
+    env,
+    subscribedSites,
+    debug,
+    includeBookmarkBackfill,
+    options.trigger ?? 'api',
+  );
 }
 
-/** パス1 → パス2 の進行そのもの。`syncSite` と `syncAllSubscriptions` が共有する。 */
+/**
+ * パス1 → パス3 の進行そのもの。`syncSite` と `syncAllSubscriptions` が共有する。
+ *
+ * ここに伝わったエラーはすべて**同期中断（Sync Abort）**として 1 行構造的に記録する（ADR-0017）。
+ * 中断を引き起こすのは Article Summary の AI 生成失敗と D1 書き込み失敗（`UNIQUE(url)` 競合は除く）。
+ * cron / API 側の最終 catch は設定不備などの受け皿で、情報を重複させない。
+ */
 async function runSync(
   database: AppDatabase,
   egress: EgressContext,
@@ -313,6 +433,7 @@ async function runSync(
   subscriptionRows: readonly SubscriptionRow[],
   debug: boolean,
   includeBookmarkBackfill: boolean,
+  trigger: SyncTrigger,
 ): Promise<number> {
   const startedAtMs = Date.now();
   const counters: RunCounters = {
@@ -322,18 +443,68 @@ async function runSync(
     synced: 0,
     throttled: 0,
   };
-  const backfillState: BackfillState = {
+  const state: RunState = {
     budgetRemaining: includeBookmarkBackfill ? backfillBudgetPerRun : 0,
     capNotified: false,
     coolingNotified: false,
+    hatenaSummaryFailed: 0,
+    hatenaSummaryNotified: false,
+    progress: { stage: 'feed-fetch' },
     summaryCount: 0,
   };
 
+  try {
+    return await performSync(
+      database,
+      egress,
+      env,
+      subscriptionRows,
+      debug,
+      includeBookmarkBackfill,
+      state,
+      counters,
+      startedAtMs,
+    );
+  } catch (error) {
+    // ここに至ったエラーは同期中断（Sync Abort）。原因を問わず 1 行で構造的に出す（ADR-0017）。
+    // cron / API の最終 catch はこれを引き継ぐだけなので、情報を落とさない。
+    logger.error('同期を中断しました。', {
+      articleUrl: state.progress.articleUrl,
+      elapsedMs: Date.now() - startedAtMs,
+      error: toErrorMessage(error),
+      hatenaSummaryFailed: state.hatenaSummaryFailed,
+      mode: includeBookmarkBackfill ? 'full' : 'ingest-only',
+      reason: syncAbortReason(error),
+      siteUrl: state.progress.siteUrl,
+      skipped: counters.skipped,
+      sources: counters.fetched,
+      stage: state.progress.stage,
+      synced: counters.synced,
+      throttled: counters.throttled,
+      trigger,
+    });
+    markSyncAbortLogged(error);
+    throw error;
+  }
+}
+
+/** パス1〜3 の実際の進行。中断ログの責任は呼び出し側の runSync にある。 */
+async function performSync(
+  database: AppDatabase,
+  egress: EgressContext,
+  env: RuntimeEnv,
+  subscriptionRows: readonly SubscriptionRow[],
+  debug: boolean,
+  includeBookmarkBackfill: boolean,
+  state: RunState,
+  counters: RunCounters,
+  startedAtMs: number,
+): Promise<number> {
   // ===== パス1: 全 Source のフィード取得（最優先） =====
-  const feeds = await collectFeeds(egress, subscriptionRows, counters, debug);
+  const feeds = await collectFeeds(egress, subscriptionRows, counters, debug, state);
 
   // ===== パス2: 記事処理（新着取り込み → はてブ補完） =====
-  await processFeeds(database, egress, env, feeds, backfillState, counters, debug);
+  await processFeeds(database, egress, env, feeds, state, counters, debug);
 
   // ===== パス3: 本文補完（Content Backfill、ADR-0014） =====
   // フル同期でのみ実行する（取り込み専用 cron では新着の取り込みを優先）。
@@ -342,6 +513,7 @@ async function runSync(
     database,
     egress,
     env,
+    state,
     includeBookmarkBackfill ? contentBackfillBudgetPerRun : 0,
     startedAtMs,
   );
@@ -352,6 +524,7 @@ async function runSync(
   logger.info('同期が完了しました。', {
     contentCooldownDeferred: counters.contentCooldownDeferred,
     elapsedMs: Date.now() - startedAtMs,
+    hatenaSummaryFailed: state.hatenaSummaryFailed,
     skipped: counters.skipped,
     sources: counters.fetched,
     synced: counters.synced,
@@ -369,6 +542,7 @@ async function collectFeeds(
   subscriptionRows: readonly SubscriptionRow[],
   counters: RunCounters,
   debug: boolean,
+  state: RunState,
 ): Promise<FetchedFeed[]> {
   const feeds: FetchedFeed[] = [];
   const deferred: SubscriptionRow[] = [];
@@ -378,7 +552,7 @@ async function collectFeeds(
   const carryReasons = new Map<string, CarryReason>();
 
   for (const subscription of subscriptionRows) {
-    const outcome = await tryFetchFeed(egress, subscription, feeds, counters, debug);
+    const outcome = await tryFetchFeed(egress, subscription, feeds, counters, debug, state);
     if (outcome === 'ok') {
       continue;
     }
@@ -390,7 +564,7 @@ async function collectFeeds(
 
   // パス1末尾: 他の Source を回している間に枠が空いた可能性があるので 1 周だけ再試行する。
   for (const subscription of deferred) {
-    const outcome = await tryFetchFeed(egress, subscription, feeds, counters, debug, { quiet: true });
+    const outcome = await tryFetchFeed(egress, subscription, feeds, counters, debug, state, { quiet: true });
     if (outcome !== 'ok') {
       carryReasons.set(subscription.siteUrl, outcome);
     }
@@ -432,10 +606,12 @@ async function tryFetchFeed(
   feeds: FetchedFeed[],
   counters: RunCounters,
   debug: boolean,
+  state: RunState,
   context: { quiet?: boolean } = {},
 ): Promise<FeedFetchOutcome> {
   const { siteUrl } = subscription;
   const bucket = bucketKeyOf(siteUrl);
+  state.progress = { siteUrl, stage: 'feed-fetch' };
 
   if (!egress.ignoreCooldown) {
     const coolingUntil = await coolingUntilMs(egress, siteUrl);
@@ -458,6 +634,11 @@ async function tryFetchFeed(
     logger.info('Source のフィードを取得しました。', { articles: items.length, siteUrl });
     return 'ok';
   } catch (error) {
+    // 枠の予約・障害記録は D1 への書き込み。D1 が書けない状態は
+    // 一時同期障害ではなく同期中断（ADR-0017）。
+    if (isSyncWriteError(error)) {
+      throw error;
+    }
     if (isEgressUnavailableError(error)) {
       if (error.reason === 'cooldown') {
         logger.info('Source はクールダウン中のため取得をスキップします。', {
@@ -512,7 +693,7 @@ async function processFeeds(
   egress: EgressContext,
   env: RuntimeEnv,
   feeds: readonly FetchedFeed[],
-  backfillState: BackfillState,
+  state: RunState,
   counters: RunCounters,
   debug: boolean,
 ): Promise<void> {
@@ -532,12 +713,12 @@ async function processFeeds(
         work.existingIds.set(item.url, existingId);
         continue;
       }
-      await ingestNewArticle(database, egress, env, work, item, counters, debug);
+      await ingestNewArticle(database, egress, env, work, item, counters, debug, state);
     }
   }
 
-  if (backfillState.budgetRemaining > 0) {
-    await backfillBookmarks(database, egress, env, works, backfillState);
+  if (state.budgetRemaining > 0) {
+    await backfillBookmarks(database, egress, env, works, state);
   }
 }
 
@@ -550,9 +731,11 @@ async function ingestNewArticle(
   article: ScrapedLink,
   counters: RunCounters,
   debug: boolean,
+  state: RunState,
 ): Promise<void> {
   const { siteUrl } = work.feed;
   try {
+    state.progress = { articleUrl: article.url, siteUrl, stage: 'ingest' };
     logger.info('記事の同期処理を実行します。', { title: article.title, url: article.url });
 
     // 本文取得とはてブ取得は独立したネットワーク呼び出しなので並列化する。
@@ -618,7 +801,16 @@ async function ingestNewArticle(
       content === '' ? null : await runAi(() => generateArticleSummary(article.title, content, env));
     let hatenaSummary: string | null = null;
     if (bookmarks.length > 0) {
-      hatenaSummary = await runAi(() => generateHatenaSummary(bookmarks, env));
+      try {
+        hatenaSummary = await runAi(() => generateHatenaSummary(bookmarks, env));
+      } catch (error) {
+        if (!isAiError(error)) {
+          throw error;
+        }
+        // はてブ要約の失敗は記事を保存して回収に譲る（ADR-0017）。
+        // Article Summary と違い、hatena_summary IS NULL は補完巡回が拾う。
+        recordHatenaSummaryFailure(state, error, { articleUrl: article.url, siteUrl });
+      }
     }
     const articleId = crypto.randomUUID();
 
@@ -626,18 +818,20 @@ async function ingestNewArticle(
     // これにより本文補完の初回再試行は 24 時間後になり、同一 run 内の二重取得を防ぐ。
     // ただしクールダウン起因は枠に触れていないので試行に数えず NULL のまま残し、
     // 次フル同期で早期再試行する（ADR-0016）。
-    await database.insert(articles).values({
-      content,
-      contentBackfillAt: content === '' && contentCooldown === null ? new Date() : null,
-      hatenaSummary,
-      id: articleId,
-      isRead: false,
-      publishedAt: article.pubDate,
-      siteUrl,
-      summary,
-      title: article.title,
-      url: article.url,
-    }).run();
+    await runWrite(() =>
+      database.insert(articles).values({
+        content,
+        contentBackfillAt: content === '' && contentCooldown === null ? new Date() : null,
+        hatenaSummary,
+        id: articleId,
+        isRead: false,
+        publishedAt: article.pubDate,
+        siteUrl,
+        summary,
+        title: article.title,
+        url: article.url,
+      }).run(),
+    );
 
     await persistBookmarks(database, articleId, bookmarks);
     // 注: ここでは `work.existingIds` に登録しない。今この run で取り込んだ記事は
@@ -650,24 +844,28 @@ async function ingestNewArticle(
 
     counters.synced += 1;
   } catch (error) {
+    // ADR-0017: AI（記事要約）の失敗と D1 書き込み失敗は同期中断。例外の順序が仕様そのもの。
     if (isAiError(error)) {
-      throw error;
-    }
-    if (debug) {
-      console.error(error instanceof Error ? error.stack || error : error);
       throw error;
     }
     const message = toErrorMessage(error);
     if (isUniqueUrlConflict(message)) {
       // 同時実行の重なりで、他の run が同じ記事を先に保存した場合（ADR-0002 が
       // 受容する競合）。記事は勝者の run が保存済みのため、warn ではなく info で
-      // 1 行だけ残す（docs/specs/ingest-failure.md §4）。
+      // 1 行だけ残す（docs/specs/ingest-failure.md §4）。書き込み失敗の唯一の例外。
       logger.info('記事は同時実行で保存済みのため、スキップします。', {
         articleUrl: article.url,
         siteUrl,
         title: article.title,
       });
       return;
+    }
+    if (isSyncWriteError(error)) {
+      throw error;
+    }
+    if (debug) {
+      console.error(error instanceof Error ? error.stack || error : error);
+      throw error;
     }
     logger.warn('記事の同期に失敗しました。', {
       articleUrl: article.url,
@@ -692,7 +890,7 @@ async function backfillBookmarks(
   egress: EgressContext,
   env: RuntimeEnv,
   works: readonly FeedWork[],
-  backfillState: BackfillState,
+  state: RunState,
 ): Promise<void> {
   interface Queue {
     consumed: number;
@@ -722,7 +920,7 @@ async function backfillBookmarks(
 
   const hasRemaining = (): boolean => queues.some((queue) => queue.remaining.length > 0);
 
-  while (backfillState.budgetRemaining > 0 && hasRemaining()) {
+  while (state.budgetRemaining > 0 && hasRemaining()) {
     for (const queue of queues) {
       if (queue.remaining.length === 0) {
         continue;
@@ -736,7 +934,7 @@ async function backfillBookmarks(
         continue;
       }
 
-      backfillState.budgetRemaining -= 1;
+      state.budgetRemaining -= 1;
       await ensureNullSummaryLoaded(queue.work);
       const outcome = await syncBookmarksForExistingArticle(
         database,
@@ -745,7 +943,7 @@ async function backfillBookmarks(
         articleId,
         item.url,
         queue.work,
-        backfillState,
+        state,
       );
       if (outcome === 'cooling') {
         // 枠がクールダウンしている限りこの Source の残りは埋まらない。
@@ -761,11 +959,13 @@ async function backfillBookmarks(
     }
     const itemsLength = queue.work.feed.items.length;
     const next = ((queue.work.feed.backfillCursor + queue.consumed) % itemsLength + itemsLength) % itemsLength;
-    await database
-      .update(subscriptions)
-      .set({ backfillCursor: next })
-      .where(eq(subscriptions.id, queue.work.feed.id))
-      .run();
+    await runWrite(() =>
+      database
+        .update(subscriptions)
+        .set({ backfillCursor: next })
+        .where(eq(subscriptions.id, queue.work.feed.id))
+        .run(),
+    );
   }
 }
 
@@ -796,16 +996,23 @@ async function backfillContents(
   database: AppDatabase,
   egress: EgressContext,
   env: RuntimeEnv,
+  state: RunState,
   budget: number,
-  runStartedAtMs: number = Date.now(),
+  runStartedAtMs: number,
 ): Promise<number> {
   if (budget <= 0) {
     return 0;
   }
   const cutoffMs = Date.now() - contentBackfillRetryIntervalMs;
+  // 今 run で取り込んだ行は対象外（ADR-0016 の同一 run 二重取得防止）。
+  // `created_at < run 開始時刻` だけの時間比較では、`created_at` が julianday 既定式の
+  // 切り捨てで run 開始と同じ ms に丸められ、取りたての行を区別できない
+  // （2026-09-08 のテストで顕在化：created_at が run 開始より 1ms 古い行が補完対象になった）。
+  // そのため run 内で生成した ID を SQL 側でも除外する（時間条件は従来のまま絞り込み用に保持）。
   const targets = await database
     .select({
       id: articles.id,
+      siteUrl: articles.siteUrl,
       title: articles.title,
       url: articles.url,
       summaryIsNull: isNull(articles.summary),
@@ -817,7 +1024,7 @@ async function backfillContents(
         or(isNull(articles.content), eq(articles.content, '')),
         or(
           // ADR-0016: 今 run で取り込んだ NULL 行は次フル同期に譲る（同一 run 内の二重取得防止）。
-          and(isNull(articles.contentBackfillAt), lt(articles.createdAt, new Date(runStartedAtMs))),
+          and(isNull(articles.contentBackfillAt), lt(articles.createdAt, new Date(runStartedAtMs - sameRunCreatedGraceMs))),
           lt(articles.contentBackfillAt, new Date(cutoffMs)),
         ),
         isNull(articles.contentBackfillGaveUpAt),
@@ -828,11 +1035,15 @@ async function backfillContents(
 
   let recovered = 0;
   for (const target of targets) {
+    state.progress = { articleUrl: target.url, siteUrl: target.siteUrl, stage: 'content-backfill' };
     // 試行の事実を先に記録する。run 中断でも再試行は 24 時間後になる（同一 run 内の二重取得防止）。
-    await database
-      .update(articles)
-      .set({ contentBackfillAt: new Date() })
-      .where(eq(articles.id, target.id));
+    await runWrite(() =>
+      database
+        .update(articles)
+        .set({ contentBackfillAt: new Date() })
+        .where(eq(articles.id, target.id))
+        .run(),
+    );
 
     let content: string;
     try {
@@ -842,10 +1053,13 @@ async function backfillContents(
         // 枠が空かない・クールダウン中は同じ相手の残りも埋まらない。巡回を打ち切る。
         // 枠の問題は記事の失敗ではないため、失敗回数にはカウントしない（ADR-0015）。
         // 試行時刻も進めない（先行記録した now を NULL に戻す）。次フル同期で早期再試行する（ADR-0016）。
-        await database
-          .update(articles)
-          .set({ contentBackfillAt: null })
-          .where(eq(articles.id, target.id));
+        await runWrite(() =>
+          database
+            .update(articles)
+            .set({ contentBackfillAt: null })
+            .where(eq(articles.id, target.id))
+            .run(),
+        );
         logger.info('本文補完は取得枠のクールダウン中のため打ち切ります。', {
           articleUrl: target.url,
           bucket: error.bucket,
@@ -854,13 +1068,16 @@ async function backfillContents(
       }
       if (isArticleMissingError(error)) {
         // 404/410 は「記事が消えた」ことの強いシグナル。即座に断念する（ADR-0015）。
-        await database
-          .update(articles)
-          .set({
-            contentBackfillFailures: CONTENT_BACKFILL_GIVE_UP_THRESHOLD,
-            contentBackfillGaveUpAt: new Date(),
-          })
-          .where(eq(articles.id, target.id));
+        await runWrite(() =>
+          database
+            .update(articles)
+            .set({
+              contentBackfillFailures: CONTENT_BACKFILL_GIVE_UP_THRESHOLD,
+              contentBackfillGaveUpAt: new Date(),
+            })
+            .where(eq(articles.id, target.id))
+            .run(),
+        );
         logger.info('本文補完を断念しました（記事が存在しません）。', {
           articleUrl: target.url,
         });
@@ -869,17 +1086,23 @@ async function backfillContents(
       const failures = target.failures + 1;
       if (failures >= CONTENT_BACKFILL_GIVE_UP_THRESHOLD) {
         // 5 回連続で失敗する記事は恒久欠損の可能性が高い。断念する（ADR-0015）。
-        await database
-          .update(articles)
-          .set({ contentBackfillFailures: failures, contentBackfillGaveUpAt: new Date() })
-          .where(eq(articles.id, target.id));
+        await runWrite(() =>
+          database
+            .update(articles)
+            .set({ contentBackfillFailures: failures, contentBackfillGaveUpAt: new Date() })
+            .where(eq(articles.id, target.id))
+            .run(),
+        );
         logger.info('本文補完を断念しました（連続 5 回失敗）。', { articleUrl: target.url });
         continue;
       }
-      await database
-        .update(articles)
-        .set({ contentBackfillFailures: failures })
-        .where(eq(articles.id, target.id));
+      await runWrite(() =>
+        database
+          .update(articles)
+          .set({ contentBackfillFailures: failures })
+          .where(eq(articles.id, target.id))
+          .run(),
+      );
       logger.warn('本文補完の再取得に失敗したため、次の巡回で再試行します。', {
         articleUrl: target.url,
         error: toErrorMessage(error),
@@ -892,12 +1115,17 @@ async function backfillContents(
     }
 
     // 本文を先に保存する（要約の AI 生成に失敗しても回復済みの本文は失われない）。
-    await database.update(articles).set({ content }).where(eq(articles.id, target.id));
+    await runWrite(() =>
+      database.update(articles).set({ content }).where(eq(articles.id, target.id)).run(),
+    );
     recovered += 1;
     if (target.summaryIsNull) {
-      // 空本文時要約スキップで要約が未生成の記事。本文回復に合わせて生成する（ADR-0008 により AI 失敗は fail-fast）。
+      // 空本文時要約スキップで要約が未生成の記事。本文回復に合わせて生成する
+      // （ADR-0017: Article Summary の失敗は巡回中でも同期中断）。
       const summary = await runAi(() => generateArticleSummary(target.title, content, env));
-      await database.update(articles).set({ summary }).where(eq(articles.id, target.id));
+      await runWrite(() =>
+        database.update(articles).set({ summary }).where(eq(articles.id, target.id)).run(),
+      );
     }
   }
   return recovered;

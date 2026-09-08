@@ -2,6 +2,7 @@ import { sql } from 'drizzle-orm';
 
 import { getDb } from '../db/index.js';
 import { fetchBucket } from '../db/schema.js';
+import { runWrite } from '../db/writeError.js';
 
 /**
  * 外部取得（フィード・記事本文・はてブ jsonlite）を律速する共通層（ADR-0009）。
@@ -469,14 +470,22 @@ export async function coolingUntilMs(egress: EgressContext, rawUrl: string): Pro
   return state.cooldownUntilMs > nowFn() ? state.cooldownUntilMs : null;
 }
 
-/** D1 を権威とする枠ストア（本番用）。 */
+/**
+ * D1 を権威とする枠ストア（本番用）。
+ *
+ * 枠の予約・障害記録はすべて D1 への**書き込み**なので `runWrite` で包む。
+ * D1 の書き込みが死んでいる状態（保存容量上限・マイグレーション未適用など）は、
+ * 外部取得よりもこの 1 本目で判別され、同期中断（Sync Abort）で終わる（ADR-0017）。
+ */
 export function createD1BucketStore(database: AppDatabase): BucketStore {
   const ensureRow = async (bucket: string): Promise<void> => {
-    await database
-      .insert(fetchBucket)
-      .values({ bucket, consecutiveThrottles: 0, cooldownUntil: 0, nextAllowedAt: 0 })
-      .onConflictDoNothing()
-      .run();
+    await runWrite(() =>
+      database
+        .insert(fetchBucket)
+        .values({ bucket, consecutiveThrottles: 0, cooldownUntil: 0, nextAllowedAt: 0 })
+        .onConflictDoNothing()
+        .run(),
+    );
   };
 
   return {
@@ -484,17 +493,19 @@ export function createD1BucketStore(database: AppDatabase): BucketStore {
       const now = nowFn();
       await ensureRow(bucket);
 
-      const rows = await database
-        .update(fetchBucket)
-        .set({ nextAllowedAt: nextAllowedAtMs })
-        .where(
-          respectCooldown
-            ? sql`${fetchBucket.bucket} = ${bucket}
+      const rows = await runWrite(() =>
+        database
+          .update(fetchBucket)
+          .set({ nextAllowedAt: nextAllowedAtMs })
+          .where(
+            respectCooldown
+              ? sql`${fetchBucket.bucket} = ${bucket}
                 AND ${fetchBucket.cooldownUntil} <= ${now}
                 AND ${fetchBucket.nextAllowedAt} <= ${now}`
-            : sql`${fetchBucket.bucket} = ${bucket} AND ${fetchBucket.nextAllowedAt} <= ${now}`,
-        )
-        .returning({ bucket: fetchBucket.bucket });
+              : sql`${fetchBucket.bucket} = ${bucket} AND ${fetchBucket.nextAllowedAt} <= ${now}`,
+          )
+          .returning({ bucket: fetchBucket.bucket }),
+      );
 
       return rows.length > 0 ? nextAllowedAtMs : null;
     },
@@ -524,31 +535,37 @@ export function createD1BucketStore(database: AppDatabase): BucketStore {
       // next_allowed_at（礼儀の間隔）は触らない。force はクールダウンだけを無視する
       // という合意（docs/specs/sync-egress-politeness.md）は、2 つの時刻を
       // 分けて持つことで成立する。
-      await database
-        .update(fetchBucket)
-        .set({
-          // 連続障害回数とクールダウンは、読み直した値ではなく DB 側の現在値を
-          // 基準に更新する。並行実行が同時に 429 を記録しても、バックオフが
-          // 一段戻ったり短い値で上書きされたりしない（ADR-0009）。
-          consecutiveThrottles: sql`min(${fetchBucket.consecutiveThrottles} + 1, ${EGRESS_POLICY.cooldownStepsMs.length})`,
-          cooldownUntil: sql`max(${fetchBucket.cooldownUntil}, ${until})`,
-        })
-        .where(sql`${fetchBucket.bucket} = ${bucket}`)
-        .run();
+      await runWrite(() =>
+        database
+          .update(fetchBucket)
+          .set({
+            // 連続障害回数とクールダウンは、読み直した値ではなく DB 側の現在値を
+            // 基準に更新する。並行実行が同時に 429 を記録しても、バックオフが
+            // 一段戻ったり短い値で上書きされたりしない（ADR-0009）。
+            consecutiveThrottles: sql`min(${fetchBucket.consecutiveThrottles} + 1, ${EGRESS_POLICY.cooldownStepsMs.length})`,
+            cooldownUntil: sql`max(${fetchBucket.cooldownUntil}, ${until})`,
+          })
+          .where(sql`${fetchBucket.bucket} = ${bucket}`)
+          .run(),
+      );
     },
     async markOk(bucket) {
-      await database
-        .update(fetchBucket)
-        .set({ consecutiveThrottles: 0, cooldownUntil: 0 })
-        .where(sql`${fetchBucket.bucket} = ${bucket}`)
-        .run();
+      await runWrite(() =>
+        database
+          .update(fetchBucket)
+          .set({ consecutiveThrottles: 0, cooldownUntil: 0 })
+          .where(sql`${fetchBucket.bucket} = ${bucket}`)
+          .run(),
+      );
     },
     async spaceOut(bucket, nextAllowedAtMs) {
-      await database
-        .update(fetchBucket)
-        .set({ nextAllowedAt: sql`max(${fetchBucket.nextAllowedAt}, ${nextAllowedAtMs})` })
-        .where(sql`${fetchBucket.bucket} = ${bucket}`)
-        .run();
+      await runWrite(() =>
+        database
+          .update(fetchBucket)
+          .set({ nextAllowedAt: sql`max(${fetchBucket.nextAllowedAt}, ${nextAllowedAtMs})` })
+          .where(sql`${fetchBucket.bucket} = ${bucket}`)
+          .run(),
+      );
     },
   };
 }

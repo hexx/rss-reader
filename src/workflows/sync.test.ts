@@ -35,6 +35,7 @@ vi.mock('../db/index.js', () => ({
 
 vi.mock('../utils/logger.js', () => ({
   logger: {
+    error: vi.fn(),
     info: vi.fn(),
     warn: vi.fn(),
   },
@@ -114,6 +115,7 @@ describe('syncSite', () => {
     generateHatenaSummaryMock.mockReset();
     fetchArticleContentMock.mockReset();
     fetchRssOrFallbackMock.mockReset();
+    loggerMock.error.mockReset();
     loggerMock.info.mockReset();
     loggerMock.warn.mockReset();
   });
@@ -306,6 +308,9 @@ describe('syncSite', () => {
     const savedArticles = await testDb.select().from(articles);
     expect(savedArticles).toHaveLength(1);
     expect(savedArticles[0]).toMatchObject({ content: '', summary: null });
+    // ADR-0016 の「同一 run 内の二重取得防止」: created_at が julianday 既定式の切り捨てで
+    // run 開始時刻より数 ms 古くなっても、取りたての行を本文補完で再取得しない。
+    expect(fetchArticleContentMock).toHaveBeenCalledTimes(1);
     // ADR-0016: 枠に触れていないので試行に数えず、次フル同期で早期再試行する。
     expect(savedArticles[0]?.contentBackfillAt).toBeNull();
     expect(loggerMock.info).toHaveBeenCalledWith(
@@ -384,8 +389,75 @@ describe('syncSite', () => {
     vi.mocked(testDb.insert).mockRestore();
   });
 
-  it('INSERT がその他の DB 失敗のとき、cause のエラー文だけを warn に出す', async () => {
+  it('取得枠の予約（D1 書き込み）が失敗した Source は、個別 warn に降格させず中断する（ADR-0017）', async () => {
+    const { syncAllSubscriptions } = await import('./sync.js');
+    const { SyncWriteError } = await import('../db/writeError.js');
+
+    await testDb.insert(subscriptions).values([
+      { id: 'subscription-write-1', siteUrl },
+      { id: 'subscription-write-2', siteUrl: nonHatenaSiteUrl },
+    ]);
+    // 本番ではこの失敗は egress 内の runWrite から出る（egress.test.ts で担保）。
+    // ここでは mock 経由で同じ SyncWriteError を返し、降格しないことを検証する。
+    fetchRssOrFallbackMock.mockRejectedValue(
+      new SyncWriteError('同期中の D1 書き込みに失敗しました。', new Error('D1_ERROR: Exceeded maximum DB size.')),
+    );
+
+    await expect(syncAllSubscriptions(false, testEnv, false, { trigger: 'cron' })).rejects.toBeInstanceOf(SyncWriteError);
+
+    // 「Source 同期に失敗しました。」の warn にも「持ち越します」の info にもしない
+    expect(loggerMock.warn).not.toHaveBeenCalledWith('Source 同期に失敗しました。', expect.anything());
+    expect(loggerMock.info).not.toHaveBeenCalledWith('未取得の Source を次回の同期に持ち越します。', expect.anything());
+    expect(loggerMock.error).toHaveBeenCalledWith(
+      '同期を中断しました。',
+      expect.objectContaining({
+        error: 'D1_ERROR: Exceeded maximum DB size.',
+        reason: 'write',
+        siteUrl,
+        stage: 'feed-fetch',
+      }),
+    );
+    // 2 件目の Source すら試さない（=本文取得も AI も走らない）
+    expect(fetchRssOrFallbackMock).toHaveBeenCalledTimes(1);
+    expect(fetchArticleContentMock).not.toHaveBeenCalled();
+    expect(generateArticleSummaryMock).not.toHaveBeenCalled();
+  });
+
+  it('AI 常時エラーで cron 相当の同期を 2 回実行すると、毎回 同期を中断しました。 が 1 行ずつ出る（ADR-0017 の検証手順）', async () => {
+    const { syncAllSubscriptions } = await import('./sync.js');
+
+    await testDb.insert(subscriptions).values([{ id: 'subscription-repeat', siteUrl }]);
+    fetchRssOrFallbackMock.mockResolvedValue([article]);
+    fetchArticleContentMock.mockResolvedValue('本文');
+    fetchHatenaBookmarksMock.mockResolvedValue([]);
+    generateArticleSummaryMock.mockRejectedValue(new Error('429 insufficient_quota'));
+
+    await expect(syncAllSubscriptions(false, testEnv, false, { trigger: 'cron' })).rejects.toThrow(
+      '429 insufficient_quota',
+    );
+    await expect(syncAllSubscriptions(false, testEnv, false, { trigger: 'cron' })).rejects.toThrow(
+      '429 insufficient_quota',
+    );
+
+    // 継続型障害でも 1 行/回。原因実文（insufficient_quota）が毎回残る。
+    const aborts = loggerMock.error.mock.calls.filter(([message]) => message === '同期を中断しました。');
+    expect(aborts).toHaveLength(2);
+    for (const [, detail] of aborts) {
+      expect(detail).toMatchObject({
+        error: '429 insufficient_quota',
+        reason: 'ai-generation',
+        stage: 'ingest',
+        trigger: 'cron',
+      });
+    }
+    // 要約生成は 1 件目のみで打ち切られる（run 全体が止まる。料金の無駄は 1 本/run）
+    expect(generateArticleSummaryMock).toHaveBeenCalledTimes(2);
+    await expect(testDb.select().from(articles)).resolves.toHaveLength(0);
+  });
+
+  it('INSERT がその他の DB 失敗のとき、同期を中断し cause のエラー文だけを中断ログに出す（ADR-0017）', async () => {
     const { syncSite } = await import('./sync.js');
+    const { SyncWriteError } = await import('../db/writeError.js');
 
     fetchRssOrFallbackMock.mockResolvedValue([article]);
     fetchArticleContentMock.mockResolvedValue('本文');
@@ -400,24 +472,86 @@ describe('syncSite', () => {
       }),
     );
 
-    await expect(syncSite(siteUrl, false, testEnv)).resolves.toBe(0);
+    // 保存できない障害は run を止める（緑完了しない）。ADR-0017。
+    await expect(syncSite(siteUrl, false, testEnv)).rejects.toBeInstanceOf(SyncWriteError);
 
-    expect(loggerMock.warn).toHaveBeenCalledWith(
-      '記事の同期に失敗しました。',
+    expect(loggerMock.error).toHaveBeenCalledWith(
+      '同期を中断しました。',
       expect.objectContaining({
         articleUrl: article.url,
         error: 'D1_ERROR: Exceeded maximum DB size.',
+        mode: 'full',
+        reason: 'write',
         siteUrl,
-        title: article.title,
+        stage: 'ingest',
+        trigger: 'api',
       }),
     );
+    // 旧来の「記事単位で warn して継続」は出さない
+    expect(loggerMock.warn).not.toHaveBeenCalledWith('記事の同期に失敗しました。', expect.anything());
+    // 完了ログは出ない（中断と完了は排他）
+    expect(loggerMock.info).not.toHaveBeenCalledWith('同期が完了しました。', expect.anything());
+    await expect(testDb.select().from(articles)).resolves.toHaveLength(0);
+
     // SQL+params ダンプ（記事全文）がログに混入しないこと
-    const logged = loggerMock.warn.mock.calls
+    const logged = loggerMock.error.mock.calls
       .map(([, detail]) => (detail as { error?: string }).error ?? '')
       .join('\n');
     expect(logged).not.toContain('Failed query');
     expect(logged).not.toContain('params:');
     vi.mocked(testDb.insert).mockRestore();
+  });
+
+  it('はてブ要約の生成失敗は run を止めず、記事を NULL で保存して 1 本だけ warn する（ADR-0017）', async () => {
+    const { syncSite } = await import('./sync.js');
+
+    fetchRssOrFallbackMock.mockResolvedValue([article, secondArticle]);
+    fetchArticleContentMock.mockResolvedValue('本文');
+    fetchHatenaBookmarksMock.mockResolvedValue(bookmarks);
+    generateArticleSummaryMock.mockResolvedValue('要約文');
+    generateHatenaSummaryMock.mockRejectedValue(new Error('429 insufficient_quota'));
+
+    await expect(syncSite(siteUrl, false, testEnv)).resolves.toBe(2);
+
+    const saved = await testDb.select().from(articles);
+    expect(saved).toHaveLength(2);
+    // 失敗しても記事は保存され、hatenaSummary は NULL（＝補完巡回の回収対象）で残る
+    expect(saved.every((row) => row.hatenaSummary === null && row.summary !== null)).toBe(true);
+
+    // warn は run 内で 1 本だけ（失敗は 2 件あるが数えるだけ）
+    expect(loggerMock.warn).toHaveBeenCalledTimes(1);
+    expect(loggerMock.warn).toHaveBeenCalledWith(
+      'はてブ要約の生成に失敗したため、未生成で保存します（次回フル同期の補完で回収）。',
+      expect.objectContaining({ articleUrl: article.url, error: '429 insufficient_quota', siteUrl }),
+    );
+    expect(loggerMock.info).toHaveBeenCalledWith(
+      '同期が完了しました。',
+      expect.objectContaining({ hatenaSummaryFailed: 2, synced: 2 }),
+    );
+  });
+
+  it('cron 起動の取り込み専用同期では中断ログに trigger=cron / mode=ingest-only が出る', async () => {
+    const { syncAllSubscriptions } = await import('./sync.js');
+
+    await testDb.insert(subscriptions).values([{ id: 'subscription-cron-trigger', siteUrl }]);
+    fetchRssOrFallbackMock.mockResolvedValue([article]);
+    fetchArticleContentMock.mockResolvedValue('本文');
+    fetchHatenaBookmarksMock.mockResolvedValue([]);
+    generateArticleSummaryMock.mockRejectedValue(new Error('AI unavailable'));
+
+    await expect(syncAllSubscriptions(false, testEnv, false, { trigger: 'cron' })).rejects.toThrow(
+      'AI unavailable',
+    );
+
+    expect(loggerMock.error).toHaveBeenCalledWith(
+      '同期を中断しました。',
+      expect.objectContaining({
+        mode: 'ingest-only',
+        reason: 'ai-generation',
+        stage: 'ingest',
+        trigger: 'cron',
+      }),
+    );
   });
 
   it('does not re-insert articles that already exist', async () => {
@@ -547,6 +681,7 @@ describe('syncAllSubscriptions', () => {
     generateHatenaSummaryMock.mockReset();
     fetchArticleContentMock.mockReset();
     fetchRssOrFallbackMock.mockReset();
+    loggerMock.error.mockReset();
     loggerMock.info.mockReset();
     loggerMock.warn.mockReset();
   });
@@ -660,6 +795,7 @@ describe('二段同期（パス1 のフィード取得優先・律速・補完�
     generateHatenaSummaryMock.mockReset();
     fetchArticleContentMock.mockReset();
     fetchRssOrFallbackMock.mockReset();
+    loggerMock.error.mockReset();
     loggerMock.info.mockReset();
     loggerMock.warn.mockReset();
   });
@@ -971,6 +1107,7 @@ describe('本文補完（Content Backfill、ADR-0014）', () => {
     generateHatenaSummaryMock.mockReset();
     fetchArticleContentMock.mockReset();
     fetchRssOrFallbackMock.mockReset();
+    loggerMock.error.mockReset();
     loggerMock.info.mockReset();
     loggerMock.warn.mockReset();
   });

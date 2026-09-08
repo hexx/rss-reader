@@ -43,7 +43,7 @@ export function useSync({ onAfterSync }: { onAfterSync: () => void }): UseSyncRe
     inFlightRef.current = true;
     if (mountedRef.current) {
       setIsSyncing(true);
-      setStatus({ kind: 'loading', message: '同期を開始しました。' });
+      setStatus({ kind: 'loading', message: '同期をサーバーに送信しています。' });
     }
 
     try {
@@ -52,7 +52,8 @@ export function useSync({ onAfterSync }: { onAfterSync: () => void }): UseSyncRe
         throw new Error('同期の開始に失敗しました。');
       }
       if (mountedRef.current) {
-        setStatus({ kind: 'success', message: '同期を開始しました。完了後に再読み込みします。' });
+        // 送信しただけで同期の完了は保証しない（ADR-0017: サーバー側は同期中断で失敗し得る）。
+        setStatus({ kind: 'success', message: '同期をサーバーに送信しました。少ししてから一覧が更新されます。' });
       }
       await new Promise((resolve) => window.setTimeout(resolve, SYNC_REFRESH_DELAY_MS));
       // アンマウント後に onAfterSync（記事一覧の再読込）を呼ばない
