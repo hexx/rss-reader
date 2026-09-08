@@ -98,7 +98,7 @@ ALTER TABLE subscriptions ADD backfill_cursor INTEGER NOT NULL DEFAULT 0;
 | はてブ要約の生成失敗（未生成で保存し次回フル同期の補完で回収） | warn | `articleUrl` or `articleId`, `siteUrl`, `error` — **run 内で 1 本だけ**、件数は完了サマリ `hatenaSummaryFailed`（ADR-0017） |
 | run 完了サマリ | info | `elapsedMs`, `skipped`, `sources`, `synced`, `throttled`, `contentCooldownDeferred`（ADR-0016 の早期再試行待ち件数）, `hatenaSummaryFailed`（ADR-0017） |
 
-> 注（ADR-0017）: 取得枠の予約・障害記録は D1 への**書き込み**なので、その失敗は上の「一時同期障害」行（Source 個別 warn）には降级させず、同期中断 error で run を止める。D1 が書けない状態はパス1先頭で判別され、外部取得も AI 生成も走らない。
+> 注（ADR-0017）: 取得枠の予約・障害記録は D1 への**書き込み**なので、その失敗は上の「一時同期障害」行（Source 個別 warn）には降格させず、同期中断 error で run を止める。D1 が書けない状態はパス1先頭で判別され、外部取得も AI 生成も走らない。
 
 ## 8. 受入条件（テスト観測点）
 

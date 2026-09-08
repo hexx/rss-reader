@@ -147,7 +147,7 @@ if (isAiError(error)) {
 - **2026-09-08（grilling・仕様確定）**: R1〜R6 の 6 ラウンドで決定し、**ADR-0017**（`docs/adr/0017-keep-fail-fast-and-abort-on-write-failure.md`）に記録。中心の発見は「**fail-fast の荷重は『要約を回収する手段が無い』ことに乗っていた**」という一点で、これにより縮退運転は恒久欠損の製造機になると判明（Hatena Summary だけ回収経路が存在するため、そこだけ縮退を認める）。ADR-0008 は中核を維持し、Hatena Summary の射程のみ変更。
 - **2026-09-08（実装）**: ADR-0017 を実装した。
   - `src/db/writeError.ts` 新設（`SyncWriteError` / `isSyncWriteError` / `runWrite`）。分類語彙は増やさず、書き込み失敗だけを例外で区別する。
-  - `src/workflows/sync.ts`: `BackfillState` → `RunState`（進行位置 `progress` と `hatenaSummaryFailed` 集計を持つ）。`runSync` を `performSync` に分離し、`同期を中断しました。`（error）を 1 行出力。同期中の全 D1 書き込みを `runWrite` で包み、`tryFetchFeed` では枠の書き込み失敗を `failed`（Source 個別 warn）に降级させず再送出。`ingestNewArticle` の catch は **AI → UNIQUE 競合 → 書き込み失敗 → その他 warn** の順で判定する。
+  - `src/workflows/sync.ts`: `BackfillState` → `RunState`（進行位置 `progress` と `hatenaSummaryFailed` 集計を持つ）。`runSync` を `performSync` に分離し、`同期を中断しました。`（error）を 1 行出力。同期中の全 D1 書き込みを `runWrite` で包み、`tryFetchFeed` では枠の書き込み失敗を `failed`（Source 個別 warn）に降格させず再送出。`ingestNewArticle` の catch は **AI → UNIQUE 競合 → 書き込み失敗 → その他 warn** の順で判定する。
   - `src/services/egress.ts`: D1 枠ストアの全書き込み（`ensureRow` / `reserve` / `applyThrottle` / `markOk` / `spaceOut`）を `runWrite` で包んだ。**D1 が書けない状態はパス1先頭（`INSERT INTO fetch_buckets`）で検知され、外部取得も AI 呼び出しも 0 本**で止まる。
   - `src/worker.ts`: cron / `POST /api/sync` に `trigger` を渡し、API 側の catch を `toErrorMessage` 経由に統一（PR #396 で取りこぼした経路）。
   - `src/client/hooks/useSync.ts`: 「同期を開始しました。完了後に再読み込みします。」→「同期をサーバーに送信しました。少ししてから一覧が更新されます。」（run が数秒後に中断しても成功に見えないため）。

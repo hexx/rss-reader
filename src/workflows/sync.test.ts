@@ -389,7 +389,7 @@ describe('syncSite', () => {
     vi.mocked(testDb.insert).mockRestore();
   });
 
-  it('取得枠の予約（D1 書き込み）が失敗した Source は、個別 warn に降级させず中断する（ADR-0017）', async () => {
+  it('取得枠の予約（D1 書き込み）が失敗した Source は、個別 warn に降格させず中断する（ADR-0017）', async () => {
     const { syncAllSubscriptions } = await import('./sync.js');
     const { SyncWriteError } = await import('../db/writeError.js');
 
@@ -398,7 +398,7 @@ describe('syncSite', () => {
       { id: 'subscription-write-2', siteUrl: nonHatenaSiteUrl },
     ]);
     // 本番ではこの失敗は egress 内の runWrite から出る（egress.test.ts で担保）。
-    // ここでは mock 経由で同じ SyncWriteError を返し、降级しないことを検証する。
+    // ここでは mock 経由で同じ SyncWriteError を返し、降格しないことを検証する。
     fetchRssOrFallbackMock.mockRejectedValue(
       new SyncWriteError('同期中の D1 書き込みに失敗しました。', new Error('D1_ERROR: Exceeded maximum DB size.')),
     );
