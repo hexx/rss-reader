@@ -7,7 +7,7 @@ import { useEffect, useRef } from 'react';
  * 「最新のものを使う」目的で固定したいときに使う。
  * （React の `useEffectEvent` 相当を自前で実装する。）
  */
-export function useLatestRef<T>(value: T) {
+export function useLatestRef<TValue>(value: TValue) {
   const ref = useRef(value);
   useEffect(() => {
     ref.current = value;

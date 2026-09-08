@@ -1,11 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useEffectEvent, useRef, useState } from 'react';
 import type { Dispatch, SetStateAction } from 'react';
 
-import type { Article, ArticleSortDirection } from '../types.js';
 import { ARTICLE_PAGE_SIZE, buildArticlesUrl, mergeLoadedArticles } from '../articlePagination.js';
+import type { Article, ArticleSortDirection } from '../types.js';
 import { normalizeError } from '../utils/status.js';
 import type { Status } from '../utils/status.js';
-import { useLatestRef } from './useLatestRef.js';
 
 interface UseArticlesParams {
   selectedSourceUrl: string | undefined;
@@ -24,6 +23,21 @@ interface UseArticlesResult {
   clearStatus: () => void;
 }
 
+/** 初回ページ（offset = 0）のローディング文言。 */
+function firstPageLoadingStatus(unreadOnly: boolean): Status {
+  return {
+    kind: 'loading',
+    message: unreadOnly ? '未読記事を読み込み中...' : '記事を読み込み中...',
+  };
+}
+
+/** offset に応じたローディング文言（レンダー時導出用）。 */
+function loadingStatus(offset: number, unreadOnly: boolean): Status {
+  return offset === 0
+    ? firstPageLoadingStatus(unreadOnly)
+    : { kind: 'loading', message: 'さらに記事を読み込み中...' };
+}
+
 export function useArticles({
   selectedSourceUrl,
   showUnreadOnly,
@@ -33,16 +47,29 @@ export function useArticles({
   const [offset, setOffset] = useState(0);
   const [reloadToken, setReloadToken] = useState(0);
   const [hasMore, setHasMore] = useState(true);
-  const [isLoading, setIsLoading] = useState(false);
+  // 初回読み込みはマウント時に開始されるため、初期状態からローディングとする。
+  const [isLoading, setIsLoading] = useState(true);
+  // 完了（success / error / null）のみ保持する。ローディング文言はレンダー時に offset と
+  // showUnreadOnly から導出する（effect 内での同期 setState を避け、cascading render を防ぐ）。
   const [status, setStatus] = useState<Status | null>(null);
 
-  // 最新の入力パラメータを ref 経由で参照することで、loadArticles のクロージャ問題を回避する。
-  const paramsRef = useLatestRef({ selectedSourceUrl, showUnreadOnly, sortOrder });
   const requestIdRef = useRef(0);
   // リクエスト進行中フラグ（loadMore の二重発火でページが飛ばないようにする）
   const isLoadingRef = useRef(false);
 
+  // effect から最新のパラメータを参照するための Effect Event。deps には含めない
+  // （パラメータ変更は必ず refresh() 経由で reloadToken が bump されて反映される設計）。
+  const getLatestParams = useEffectEvent(() => ({
+    selectedSourceUrl,
+    showUnreadOnly,
+    sortOrder,
+  }));
+
   const refresh = useCallback(() => {
+    // ローディング遷移はイベントハンドラで行う（effect 内での同期 setState は cascading render の原因になる）。
+    // 文言はレンダー時に導出されるため、ここでは状態の切り替えのみ行う。
+    setIsLoading(true);
+    isLoadingRef.current = true;
     setOffset(0);
     setHasMore(true);
     setReloadToken((token) => token + 1);
@@ -52,30 +79,25 @@ export function useArticles({
     if (isLoadingRef.current) {
       return;
     }
-    // effect 実行前に連続で呼ばれても二重発火しないよう、ここで同期的にアームする
-    // （effect 内でもアームするが、offset 変更のコミット前の窓を塞ぐのが目的）。
+    // 連続で呼ばれても二重発火しないよう、offset 変更のコミット前の窓を塞ぐ目的で同期的にアームする。
     isLoadingRef.current = true;
+    setIsLoading(true);
     setOffset((current) => current + ARTICLE_PAGE_SIZE);
   }, []);
 
   const clearStatus = useCallback(() => setStatus(null), []);
 
+  // ローディング中は文言を導出し、それ以外は state の完了結果を表示する。
+  const displayedStatus: Status | null = isLoading ? loadingStatus(offset, showUnreadOnly) : status;
+
   useEffect(() => {
-    const requestId = requestIdRef.current + 1;
+    // reloadToken は refresh の強制再取得トリガー。リクエスト ID に世代（reloadToken）を織り込むことで、
+    // refresh 前の古い世代のレスポンスが新しい世代の結果を上書きしないようにする
+    // （連番だけでも古いレスポンスは破棄されるが、世代を足すことで requestId の単調性を保つ）。
+    const requestId = requestIdRef.current + reloadToken + 1;
     requestIdRef.current = requestId;
     const isFirstPage = offset === 0;
-    const { selectedSourceUrl: sourceUrl, showUnreadOnly: unreadOnly, sortOrder: sort } = paramsRef.current;
-
-    setIsLoading(true);
-    isLoadingRef.current = true;
-    setStatus({
-      kind: 'loading',
-      message: isFirstPage
-        ? (unreadOnly
-          ? '未読記事を読み込み中...'
-          : '記事を読み込み中...')
-        : 'さらに記事を読み込み中...',
-    });
+    const { selectedSourceUrl: sourceUrl, showUnreadOnly: unreadOnly, sortOrder: sort } = getLatestParams();
 
     const controller = new AbortController();
 
@@ -139,7 +161,7 @@ export function useArticles({
     return () => {
       controller.abort();
     };
-  }, [offset, reloadToken, paramsRef]);
+  }, [offset, reloadToken]);
 
   return {
     articles,
@@ -149,6 +171,6 @@ export function useArticles({
     loadMore,
     refresh,
     setArticles,
-    status,
+    status: displayedStatus,
   };
 }
