@@ -141,5 +141,5 @@ const totalUnreadCount = useMemo(
 - 購読追加/削除（`useSubscriptions`）は楽観更新を持たず `refreshAll → sources.reload()` 頼みだが、Q2=B によりこれらのパスの点滅も同時に解消される。`useSubscriptions` 自体の楽観更新は本 Issue のスコープ外。
 
 ## 解決記録
-- 2026-07-29: 実装完了。`useSources` の `isLoading` を `query.isPending` に変更し、楽観更新ヘルパー（`decrementUnreadCount` / `restoreSources`、0 クランプ付き）を追加。`App.handleMarkAsRead` に in-flight ガード（`Set<articleId>` ref）と楽観減算・ロールバックを実装し、旧方針のコメントを ADR 0007 参照に更新。テスト 5 件追加（背景 refetch 中の stale data 保持、PATCH 未解決での即時減算、失敗時ロールバック、二重発火ガード、0 クランプ）。全 221 テスト緑、`tsc --noEmit` クリーン、oxlint 退出码 0。
+- 2026-07-29: 実装完了。`useSources` の `isLoading` を `query.isPending` に変更し、楽観更新ヘルパー（`decrementUnreadCount` / `restoreSources`、0 クランプ付き）を追加。`App.handleMarkAsRead` に in-flight ガード（`Set<articleId>` ref）と楽観減算・ロールバックを実装し、旧方針のコメントを ADR 0007 参照に更新。テスト 5 件追加（背景 refetch 中の stale data 保持、PATCH 未解決での即時減算、失敗時ロールバック、二重発火ガード、0 クランプ）。全 221 テスト緑、`tsc --noEmit` クリーン、oxlint はエラー 0 件。
 - 2026-07-29: 仕様との差異: Q3 は「react-query 既定の `refetchOnWindowFocus` を活かす」としていたが、`src/client/queryClient.ts` で `refetchOnWindowFocus: false` が明示設定済みだったため、全クエリへの影響を避けて変更せず。reconcile は PATCH 成功後のサイレント refetch と同期ボタンで担保される。
