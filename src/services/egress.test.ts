@@ -3,6 +3,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { server } from '../test/setup.js';
 import { createTestDatabase } from '../test-utils/sqljs-db.js';
+import { SyncWriteError } from '../db/writeError.js';
+import { toErrorMessage } from '../utils/errors.js';
 import {
   createTestEgressContext,
   installVirtualEgressTime,
@@ -333,6 +335,26 @@ describe('createD1BucketStore (枠状態は D1 が権威)', () => {
 
     await store.spaceOut('hatena', Date.now() + 1_000);
     await expect(store.read('hatena')).resolves.toMatchObject({ nextAllowedAtMs: far });
+  });
+
+  it('D1 が書けない状態では枠予約が SyncWriteError になる（ADR-0017: 同期中断の対象）', async () => {
+    // 読み取りは成功し書き込みだけ失敗する状態（保存容量上限・マイグレーション未適用など）を再現する。
+    const writeFailure = new Error('D1_ERROR: Exceeded maximum DB size.');
+    const brokenDb = {
+      insert: () => ({
+        values: () => ({ onConflictDoNothing: () => ({ run: () => Promise.reject(writeFailure) }) }),
+      }),
+      update: () => ({
+        set: () => ({ where: () => ({ returning: () => Promise.reject(writeFailure) }) }),
+      }),
+      select: () => ({ from: () => ({ where: () => ({ limit: () => Promise.resolve([]) }) }) }),
+    } as unknown as Parameters<typeof createD1BucketStore>[0];
+    const store = createD1BucketStore(brokenDb);
+
+    const error = await store.reserve('hatena', Date.now()).catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(SyncWriteError);
+    // 生エラーは cause に保たれ、toErrorMessage で実文を取り出せる（SQL ダンプは流れない）
+    expect(toErrorMessage(error)).toBe('D1_ERROR: Exceeded maximum DB size.');
   });
 });
 

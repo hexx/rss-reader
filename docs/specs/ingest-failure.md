@@ -58,6 +58,7 @@
    `UNIQUE constraint failed: articles.url` の場合、想定内の同時実行競合（ADR-0002）として
    **warn ではなく info** で 1 行記録する（`記事は同時実行で保存済みのためスキップします。`）。
 3. **AI エラーの扱いは現状維持**: `isAiError` による fail-fast（ADR-0008）は変更しない。
+   → **2026-09-08 改訂**: ADR-0017 により、Article Summary の失敗は fail-fast のまま、**Hatena Summary の失敗は warn 継続**（NULL は補完巡回が回収する）。
 4. **cron ハンドラの最終 catch**（`console.error('定期同期に失敗しました。')`）も同じヘルパー経由にする。
 
 ## 5. grilling セッションでの決定（2026-09-07）
@@ -68,7 +69,7 @@
 | INSERT の冪等化 | **保留**。cause 確定後に再評価（Q3） |
 | ログ設計 | §4 のとおり実施（Q4） |
 | 同時実行の削減 | しない（ロック導入・cron 設計変更は見送り。ADR-0002 維持）（Q5） |
-| 失敗記事の追跡 | しない。Ingest Failure の一時的失敗は次の同期で自己回復（Q6） |
+| 失敗記事の追跡 | しない。Ingest Failure の一時的失敗は次の同期で自己回復（Q6）→ **ADR-0017 で一部改訂**: 自己回復（次 run で再取り込み）は残るが、「run を止めない」は廃止され、保存失敗は同期中断になった |
 | 確定手順 | §4 のログ修正を先行実装・デプロイし、cause で原因確定（Q9） |
 | 用語 | 「Ingest Failure（記事取り込み失敗）」を CONTEXT.md に追加（Q10） |
 
@@ -104,4 +105,4 @@ error: "table articles has no column named content_backfill_failures: SQLITE_ERR
 - **INSERT 冪等化の再評価**: 本件の大量失敗は H-D が原因であり、H-C（UNIQUE 競合）の証拠は出ていない。現状の info 格下げで十分と考えられるが、競合 info が頻出するようなら再評価する。
 - **サブスク状態確認**: 本件との因果が消えたため優先度を下げる（Workers Paid の実効状態は、次回の上限関連事象まで確認しない）。
 - **再発防止**: デプロイフローに D1 マイグレーション適用（または適用済み検証）を組み込む → 未着手（issue 化候補）。
-- **AI fail-fast の再検討**: クレジット切れのような継続型 AI 障害でも同期全体が 30 分ごとに停止し続ける（ADR-0008 の現行設計）。実害が出たため issue 化候補。
+- **AI fail-fast の再検討**: 解決済み（2026-09-08）。ADR-0017 で fail-fast 維持（縮退運転は却下）を決定し、代わりに記事保存の失敗を同期中断の対象に追加した。検知は `同期を中断しました。`（error 1 行）で行う。実装: `issues/issue-202609080602-ai-fail-fast-continuous-failure.md`。

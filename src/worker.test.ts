@@ -6,6 +6,7 @@ import { server } from './test/setup.js';
 
 vi.mock('./workflows/sync.js', () => ({
   syncAllSubscriptions: vi.fn(),
+  wasSyncAbortLogged: vi.fn(() => false),
 }));
 
 let testDb: Awaited<ReturnType<typeof createTestDatabase>>['db'];
@@ -19,9 +20,10 @@ vi.mock('./db/index.js', () => ({
 }));
 
 import { articles, hatenaBookmarks, subscriptions } from './db/schema.js';
-import { syncAllSubscriptions } from './workflows/sync.js';
+import { syncAllSubscriptions, wasSyncAbortLogged } from './workflows/sync.js';
 
 const syncAllSubscriptionsMock = vi.mocked(syncAllSubscriptions);
+const wasSyncAbortLoggedMock = vi.mocked(wasSyncAbortLogged);
 
 let app: typeof import('./worker.js').app;
 
@@ -36,6 +38,8 @@ beforeEach(async () => {
   getDbMock.mockReset();
   getDbMock.mockImplementation(() => testDb);
   syncAllSubscriptionsMock.mockReset();
+  wasSyncAbortLoggedMock.mockReset();
+  wasSyncAbortLoggedMock.mockReturnValue(false);
   app = await loadWorkerApp();
 });
 
@@ -514,7 +518,7 @@ describe('worker app', () => {
       executionContext as never,
     );
     expect(syncResponse.status).toBe(202);
-    expect(syncAllSubscriptionsMock).toHaveBeenCalledWith(false, env, true, { force: false });
+    expect(syncAllSubscriptionsMock).toHaveBeenCalledWith(false, env, true, { force: false, trigger: 'api' });
     expect(executionContext.waitUntil).toHaveBeenCalledTimes(1);
   });
 
@@ -548,7 +552,7 @@ describe('worker app', () => {
       executionContext as never,
     );
 
-    expect(syncAllSubscriptionsMock).toHaveBeenCalledWith(false, env, false);
+    expect(syncAllSubscriptionsMock).toHaveBeenCalledWith(false, env, false, { trigger: 'cron' });
     expect(executionContext.waitUntil).toHaveBeenCalledTimes(1);
   });
 
@@ -571,8 +575,67 @@ describe('worker app', () => {
       executionContext as never,
     );
 
-    expect(syncAllSubscriptionsMock).toHaveBeenCalledWith(false, env, true);
+    expect(syncAllSubscriptionsMock).toHaveBeenCalledWith(false, env, true, { trigger: 'cron' });
     expect(executionContext.waitUntil).toHaveBeenCalledTimes(1);
+  });
+
+  it('同期中断を記録済みのエラーでは cron 側のもう 1 本を出さない（ADR-0017: 検知の起点を error 1 本に絞る）', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const env = { AI_API_KEY: 'k', AI_BASE_URL: 'https://x.example/v1' };
+    const executionContext = { waitUntil: vi.fn() };
+    wasSyncAbortLoggedMock.mockReturnValue(true);
+    syncAllSubscriptionsMock.mockRejectedValue(new Error('AI unavailable'));
+    const workerModule = await import('./worker.js');
+
+    await workerModule.default.scheduled({ cron: '15,45 * * * *' } as never, env as never, executionContext as never);
+    await (executionContext.waitUntil.mock.calls[0]![0] as Promise<unknown>);
+
+    expect(errorSpy).not.toHaveBeenCalled();
+    errorSpy.mockRestore();
+  });
+
+  it('cron は設定不備などを cause の実文だけで出す（SQL+params ダンプを流さない）', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const env = { AI_API_KEY: 'k', AI_BASE_URL: 'https://x.example/v1' };
+    const executionContext = { waitUntil: vi.fn() };
+    wasSyncAbortLoggedMock.mockReturnValue(false);
+    syncAllSubscriptionsMock.mockRejectedValue(
+      new Error('Failed query: insert into "articles" ...\nparams: <ダンプ>', {
+        cause: new Error('D1_ERROR: no such column: articles.content_backfill_gave_up_at'),
+      }),
+    );
+    const workerModule = await import('./worker.js');
+
+    await workerModule.default.scheduled({ cron: '15,45 * * * *' } as never, env as never, executionContext as never);
+    await (executionContext.waitUntil.mock.calls[0]![0] as Promise<unknown>);
+
+    expect(errorSpy).toHaveBeenCalledWith('定期同期に失敗しました。', {
+      error: 'D1_ERROR: no such column: articles.content_backfill_gave_up_at',
+    });
+    errorSpy.mockRestore();
+  });
+
+  it('POST /api/sync も cron と同じ toErrorMessage 経由でログに出す（ADR-0017）', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const env = { AI_API_KEY: 'k', AI_BASE_URL: 'https://x.example/v1' };
+    const executionContext = { waitUntil: vi.fn() };
+    wasSyncAbortLoggedMock.mockReturnValue(false);
+    syncAllSubscriptionsMock.mockRejectedValue(
+      new Error('Failed query: ...\nparams: <記事全文>', { cause: new Error('D1_ERROR: Exceeded maximum DB size.') }),
+    );
+
+    const response = await app.fetch(
+      new Request('http://localhost/api/sync', { method: 'POST' }),
+      env as never,
+      executionContext as never,
+    );
+    expect(response.status).toBe(202);
+    await (executionContext.waitUntil.mock.calls[0]![0] as Promise<unknown>);
+
+    expect(errorSpy).toHaveBeenCalledWith('同期APIの実行に失敗しました。', {
+      error: 'D1_ERROR: Exceeded maximum DB size.',
+    });
+    errorSpy.mockRestore();
   });
 
   it('updates article read state through the /read sub-path', async () => {
