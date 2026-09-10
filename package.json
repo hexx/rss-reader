@@ -64,7 +64,7 @@
     "@vitejs/plugin-react": "^6.0.2",
     "concurrently": "^10.0.0",
     "drizzle-kit": "^0.31.10",
-    "jsdom": "^29.1.1",
+    "jsdom": "^30.0.0",
     "msw": "^2.14.5",
     "oxlint": "^1.68.0",
     "tsx": "^4.21.0",
