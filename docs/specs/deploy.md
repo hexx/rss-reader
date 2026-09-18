@@ -62,7 +62,9 @@ API トークンの権限（user トークンのみ対応。アカウント所�
 
 `strict_required_status_checks_policy: false` にするのは、Renovate の automerge が「base の更新待ち」で止まらないようにするため。
 
-UI: Settings → Rules → `main` → 「Require status checks to pass」で 3 つを選択。
+あわせて **PR を必須**とする（`required_approving_review_count: 0`）。これは main への直接 push を塞ぎ、「main に届くものは必ず CI を通る」を保証するため。承認者数を 0 にしているのはソロ運用で自分自身の承認ができないため（1 以上にすると誰もマージできなくなる）。`allowed_merge_methods` は指定せず、リポジトリで有効な方式に委ねる。
+
+UI: Settings → Rules → `main` → 「Require status checks to pass」で 3 つを選択し、「Require a pull request before merging」を有効にする（Required approvals は 0）。
 
 API（ruleset id は `gh api repos/hexx/rss-reader/rulesets` で確認）:
 
@@ -73,6 +75,16 @@ gh api repos/hexx/rss-reader/rulesets/17347074 --method PUT --input - <<'JSON'
   "rules": [
     { "type": "deletion" },
     { "type": "non_fast_forward" },
+    {
+      "type": "pull_request",
+      "parameters": {
+        "required_approving_review_count": 0,
+        "dismiss_stale_reviews_on_push": false,
+        "require_code_owner_review": false,
+        "require_last_push_approval": false,
+        "required_review_thread_resolution": false
+      }
+    },
     {
       "type": "required_status_checks",
       "parameters": {
@@ -90,7 +102,7 @@ gh api repos/hexx/rss-reader/rulesets/17347074 --method PUT --input - <<'JSON'
 JSON
 ```
 
-> **2026-09-18 の修正**: 既存の ruleset「main」は `conditions.ref_name.include` が空で、**main にどのルールも適用されていなかった**（`gh api repos/hexx/rss-reader/rules/branches/main` が `[]` を返す状態）。上記のとおり `~DEFAULT_BRANCH` を設定したため、必須チェックに加えて `deletion` / `non_fast_forward`（main の削除・force push 禁止）もこの時点から有効になっている。有効性は `gh api repos/hexx/rss-reader/rules/branches/main` で確認できる。
+> **2026-09-18 の修正**: 既存の ruleset「main」は `conditions.ref_name.include` が空で、**main にどのルールも適用されていなかった**（`gh api repos/hexx/rss-reader/rules/branches/main` が `[]` を返す状態）。上記のとおり `~DEFAULT_BRANCH` を設定したため、必須チェック・PR 必須に加えて `deletion` / `non_fast_forward`（main の削除・force push 禁止）もこの時点から有効になっている。有効性は `gh api repos/hexx/rss-reader/rules/branches/main` で確認できる。
 
 ## 6. 初回セットアップの順序
 

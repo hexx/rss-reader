@@ -8,6 +8,7 @@
 - **不変条件: 本番で動いている成果物は main 先頭のコミットからビルドしたものである**。成果物に影響する差分が main に入れば必ず反映が走る。この不変条件を守るため、障害時の巻き戻しは `git revert` → main へのマージを正とする（`wrangler rollback` は止血が必要なときの例外で、使ったら必ず revert で追いつかせる）。
 - **プレビュー配備（非本番ブランチのビルド）は作らない**。既定の preview trigger は `wrangler versions upload` で version URL を作るが、このアプリは Cloudflare Access が唯一の認証でアプリ内認証を持たず（ADR-0006）、binding は本番 D1 を共有する。プレビュー URL は Access 保護外に出るため、「認証なしで本番 DB を書き換え、AI 課金を起こせる URL」を増やすことになる。
 - **lint / build / test は GitHub Actions CI（`.github/workflows/ci.yml`）に残し、main の ruleset に必須ステータスチェック（`Lint` / `Build` / `Unit Tests`）を追加する**。Workers Builds のビルドコマンドは成果物の生成（`npm run build`）とデプロイ手順の実行に限る。
+- **main の更新は PR 経由に限る**（ruleset の `pull_request` ルール、`required_approving_review_count: 0`）。必須チェックと合わせ、「main に届くものは必ず CI を通る」を機械的に保証する。承認者数を 0 にするのはソロ運用で自分自身の承認ができないため（1 以上にすると誰もマージできなくなる）。
 - **ビルド設定の権威は Cloudflare ダッシュボード**（リポジトリからは見えない）。設定値は `docs/specs/deploy.md` §3 に写して乖離に気づけるようにする。デプロイ手順の実体はリポジトリ側の `npm run deploy` に置き、ダッシュボードの deploy command はそれを呼ぶだけにする。
 - **成果物に影響しない差分（`docs/**` `issues/**` `*.md` `.github/**`）ではビルドしない**（watch paths）。`public/**` `drizzle/**` `wrangler.toml` は除外しない。
 - `account_id` / `database_id` の実値をリポジトリにコミットする（いずれも秘匿値ではない）。
