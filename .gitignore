@@ -13,6 +13,7 @@ dist-client
 *.db-journal
 lancedb
 logs
+.wrangler
 playwright-report/
 test-results/
 .DS_Store

@@ -6,7 +6,7 @@ main = "src/worker.ts"
 # 16 進の Account ID に置き換えること。未設定だと wrangler のデフォルト
 # 認証アカウントが使われ、エラー 7403 (The given account is not valid...)
 # になることがある。
-account_id = "ACCOUNT_ID_PLACEHOLDER"
+account_id = "f9992c5557a4b6f6a85c6f4220d19f07"
 # 2024-09-23 以降にすると nodejs_compat が v2 として扱われ、node: プレフィックスなしで
 # Node.js ビルトイン（http/url/events/timers 等）を利用できる。rss-parser / xml2js が
 # プレフィックスなしでビルトインを require するため、これ未満だとビルドが失敗する。
@@ -18,7 +18,7 @@ assets = { directory = "./dist-client", binding = "ASSETS" }
 [[d1_databases]]
 binding = "DB"
 database_name = "rss-reader"
-database_id = "DATABASE_ID_PLACEHOLDER"
+database_id = "cecee094-8a8c-49ae-b6e2-0bed9e69f799"
 # Drizzle が生成するマイグレーションは `drizzle/` 配下に置かれる
 # (デフォルトの `migrations/` ではない) ため、wrangler に場所を教える
 migrations_dir = "drizzle"

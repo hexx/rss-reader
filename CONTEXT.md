@@ -138,3 +138,11 @@ _Avoid_: 鮮度, Freshness Budget（対象の違う_budget と混同）
 **Issue Status（課題ステータス）**:
 Issue の生命周期を表す 4 値。`TODO`=未着手で有効な要求、`IN_PROGRESS`=作業中、`DONE`=要求が満たされた（別 Issue 経由での達成を含む）、`WONTFIX`=対応しないと確定（価値喪失または前提の陳腐化による。要求は未達）。達成済みだが別 Issue で実現したものは DONE とし、SUPERSEDED のような 5 値目は設けない。
 _Avoid_: SUPERSEDED, DUPLICATE（語彙を増やさず 4 値で表現する）
+
+**Production Deploy（本番反映）**:
+main 先頭のコミットからビルドした成果物で本番の Worker を置き換え、あわせて未適用の D1 マイグレーションを適用する唯一の手順。本番で動いている成果物は常に main 先頭のコミットに対応する。
+_Avoid_: デプロイ（手元からの実行や `wrangler rollback` による巻き戻しと混同しやすい）, release, リリース
+
+**Environment（実行環境）**:
+このプロジェクトが持つ実行環境は本番とローカルの 2 つだけ。本番以外の配備は行わず、本番と同じ D1 を指す一時的なバージョン（Preview Build）は環境とは呼ばない。
+_Avoid_: ステージング環境, プレビュー環境, dev/prod 環境
