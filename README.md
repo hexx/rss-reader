@@ -34,9 +34,20 @@ cp .env.example .env
 ## 実行
 
 - ローカル確認: `wrangler dev`
-- 本番反映: `wrangler deploy`
+- 本番反映: main へマージする（Cloudflare Workers Builds が自動で反映する。手元からは実行しない）
 - テスト: `npm run test`
 - ビルド: `npm run build`
+
+## デプロイ（本番反映）
+
+本番反映は **Cloudflare Workers Builds**（production branch = `main`）だけが行います。
+main にマージすると、ビルド（`npm run build`）→ デプロイ（`npm run deploy`）の順に走り、
+`npm run deploy` の中で D1 マイグレーションの適用（未適用分のみ）と `wrangler deploy` が行われます。
+
+- 障害時は `git revert` して main にマージします（revert も自動で反映されます）
+- 止血のためにダッシュボードで旧バージョンへ戻した場合は、必ず revert で追いつかせてください
+- 手元から反映する必要があるときだけ `npm run build && ALLOW_LOCAL_DEPLOY=1 npm run deploy`
+- 設定値と手順の詳細は [docs/specs/deploy.md](./docs/specs/deploy.md)、判断の根拠は ADR-0019 / 0020
 
 ## 同期の律速（外部取得のマナー）
 
@@ -53,12 +64,17 @@ D1 の `fetch_buckets` にクールダウン（30分 → 60分 → 90分、`Retr
 ## スキーマ変更の反映
 
 D1 のテーブルは drizzle のマイグレーションで管理します（`drizzle/` 配下）。
-スキーマを変えたら `npm run db:generate` で生成し、デプロイ前に反映してください。
+スキーマを変えたら `npm run db:generate` で生成し、そのまま main にマージしてください。
+本番への適用はデプロイ手順（`npm run deploy`）に組み込まれているため、人手での適用は不要です。
 
 ```bash
-npx wrangler d1 migrations apply rss-reader --local   # 開発確認
-npx wrangler d1 migrations apply rss-reader --remote  # 本番
+npx wrangler d1 migrations apply rss-reader --local   # 開発環境の確認
+npx wrangler d1 migrations list rss-reader --remote   # 本番の適用状況（読み取りのみ）
 ```
+
+**マイグレーションは追加のみ（後方互換）**という規約があります（ADR-0020）。適用はコードの反映より
+先に走るため、旧コードが新スキーマで動く時間帯が必ず生じるためです。`DROP` やリネームが必要な場合は、
+「追加してコードから使う」→「次のデプロイで旧列を消す」の二段構えにし、二段目は Issue 化してください。
 
 ## AI プロバイダの設定
 
@@ -114,7 +130,7 @@ GPT-5.6 Lunaでは `minimal` はサポートされません。
   AI_REASONING_EFFORT = "medium"
   ```
 
-設定後 `npx wrangler deploy` で反映されます。
+設定後、次の本番反映（main へのマージ）で反映されます。
 
 ### プロバイダ選択ガイド
 
