@@ -65,7 +65,7 @@
     "concurrently": "^10.0.0",
     "drizzle-kit": "^0.31.10",
     "jsdom": "^30.0.0",
-    "msw": "^2.14.5",
+    "msw": "^3.0.0",
     "oxlint": "^1.68.0",
     "tsx": "^4.21.0",
     "typescript": "^7.0.0",
